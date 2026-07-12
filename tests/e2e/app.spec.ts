@@ -81,3 +81,18 @@ test('imports an EFT fit and shows it on the Fits page', async () => {
 
   await app.close();
 });
+
+test('imports a skill plan and shows it on the Plans page', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Skill Plans' }).click();
+  await window.getByTestId('plan-name-input').fill('E2E Test Plan');
+  await window.getByTestId('plan-text-input').fill('Gunnery V\nSmall Hybrid Turret IV');
+  await window.getByTestId('import-plan').click();
+
+  await expect(window.getByTestId('plans-table')).toContainText('E2E Test Plan');
+
+  await app.close();
+});

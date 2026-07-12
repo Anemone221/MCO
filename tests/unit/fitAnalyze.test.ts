@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   analyzeFit,
+  buildSkillPrereqMap,
   expandClosure,
   spForLevel,
   type AnalysisCharacter,
+  type PrereqRow,
   type SkillRequirement,
 } from '@main/fits/analyze';
 
@@ -43,6 +45,34 @@ describe('expandClosure', () => {
         [30, 1],
       ]),
     );
+  });
+});
+
+describe('buildSkillPrereqMap', () => {
+  it('walks a multi-level transitive prerequisite chain', () => {
+    const db = new Map<number, PrereqRow[]>([
+      [10, [{ typeId: 10, skillTypeId: 20, level: 2 }]],
+      [20, [{ typeId: 20, skillTypeId: 30, level: 1 }]],
+    ]);
+    const fetchReqs = (typeIds: number[]): PrereqRow[] =>
+      typeIds.flatMap((id) => db.get(id) ?? []);
+
+    const { skillPrereqs, allSkillIds } = buildSkillPrereqMap([10], fetchReqs);
+    expect(skillPrereqs.get(10)).toEqual([{ skillTypeId: 20, level: 2 }]);
+    expect(skillPrereqs.get(20)).toEqual([{ skillTypeId: 30, level: 1 }]);
+    expect(allSkillIds.sort()).toEqual([10, 20, 30]);
+  });
+
+  it('dedupes a prerequisite reached via two separate seeds', () => {
+    const db = new Map<number, PrereqRow[]>([
+      [10, [{ typeId: 10, skillTypeId: 30, level: 1 }]],
+      [20, [{ typeId: 20, skillTypeId: 30, level: 1 }]],
+    ]);
+    const fetchReqs = (typeIds: number[]): PrereqRow[] =>
+      typeIds.flatMap((id) => db.get(id) ?? []);
+
+    const { allSkillIds } = buildSkillPrereqMap([10, 20], fetchReqs);
+    expect(allSkillIds.sort()).toEqual([10, 20, 30]);
   });
 });
 

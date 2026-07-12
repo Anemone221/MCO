@@ -34,6 +34,48 @@ function maxMerge(map: Map<number, number>, skillTypeId: number, level: number):
   if (existing === undefined || level > existing) map.set(skillTypeId, level);
 }
 
+export interface PrereqRow {
+  typeId: number;
+  skillTypeId: number;
+  level: number;
+}
+
+export interface SkillPrereqClosure {
+  /** Type/skill id -> that id's own direct skill requirements. */
+  skillPrereqs: Map<number, SkillRequirement[]>;
+  /** Every id discovered while walking the closure (seeds + transitive prereqs). */
+  allSkillIds: number[];
+}
+
+/**
+ * Walk the transitive prerequisite tree of a seed list of type ids (a fit's
+ * counted items, or a skill plan's own listed skills). `fetchReqs` mirrors
+ * the sde repository's getSkillReqsForTypes: given a batch of type ids,
+ * return their direct skill requirements.
+ */
+export function buildSkillPrereqMap(
+  seedTypeIds: number[],
+  fetchReqs: (typeIds: number[]) => PrereqRow[],
+): SkillPrereqClosure {
+  const skillPrereqs = new Map<number, SkillRequirement[]>();
+  const seen = new Set<number>(seedTypeIds);
+  let frontier = [...seen];
+  while (frontier.length > 0) {
+    const next: number[] = [];
+    for (const row of fetchReqs(frontier)) {
+      const list = skillPrereqs.get(row.typeId) ?? [];
+      list.push({ skillTypeId: row.skillTypeId, level: row.level });
+      skillPrereqs.set(row.typeId, list);
+      if (!seen.has(row.skillTypeId)) {
+        seen.add(row.skillTypeId);
+        next.push(row.skillTypeId);
+      }
+    }
+    frontier = next;
+  }
+  return { skillPrereqs, allSkillIds: [...seen] };
+}
+
 /**
  * Expand a required-skill set through skill prerequisites. Each skill's prereqs
  * are demanded at their own fixed level (the level needed to train that skill).

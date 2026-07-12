@@ -11,6 +11,7 @@ import {
 } from '../db/repositories/accounts';
 import { getSdeStatus } from '../db/repositories/sde';
 import { listFits, removeFit } from '../db/repositories/fits';
+import { listPlans, removePlan } from '../db/repositories/plans';
 import {
   buildRoster,
   syncAllCharacters,
@@ -19,6 +20,7 @@ import {
 import { buildCharacterDetail } from '../services/characterDetail';
 import { runSdeImport } from '../services/sdeService';
 import { analyzeFitById, importFit } from '../services/fitService';
+import { analyzePlanById, importPlan } from '../services/planService';
 import { buildLocationBoard } from '../services/locationService';
 
 /** Wire every renderer-facing IPC channel to its main-process handler. */
@@ -62,6 +64,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IpcChannel.fitsImport, (_event, eftText: string) => importFit(eftText));
   ipcMain.handle(IpcChannel.fitsRemove, (_event, fitId: number) => removeFit(fitId));
   ipcMain.handle(IpcChannel.fitsAnalyze, (_event, fitId: number) => analyzeFitById(fitId));
+
+  ipcMain.handle(IpcChannel.plansList, () => listPlans());
+  ipcMain.handle(IpcChannel.plansImport, (_event, name: string, planText: string) =>
+    importPlan(name, planText),
+  );
+  ipcMain.handle(IpcChannel.plansRemove, (_event, planId: number) => removePlan(planId));
+  ipcMain.handle(IpcChannel.plansAnalyze, (_event, planId: number) => analyzePlanById(planId));
 
   ipcMain.handle(IpcChannel.locationBoard, () => buildLocationBoard());
 

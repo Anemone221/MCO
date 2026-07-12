@@ -142,3 +142,34 @@ export interface FitAnalysis {
   needsSkillData: boolean;
   characters: FitCharacterResult[];
 }
+
+export interface SkillPlan {
+  id: number;
+  name: string;
+  planText: string;
+  importedAt: string;
+}
+
+export interface PlanSkillResolved {
+  skillName: string;
+  skillTypeId: number | null;
+  level: number;
+}
+
+export interface PlanCharacterResult {
+  characterId: number;
+  characterName: string;
+  /** True when the character already meets every skill+level listed in the plan. */
+  complete: boolean;
+  spGap: number;
+  missingSkills: MissingSkill[];
+}
+
+export interface PlanAnalysis {
+  plan: SkillPlan;
+  skills: PlanSkillResolved[];
+  unresolved: string[];
+  /** Set when skill-requirement data has not been imported yet. */
+  needsSkillData: boolean;
+  characters: PlanCharacterResult[];
+}

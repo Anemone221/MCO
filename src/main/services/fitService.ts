@@ -1,6 +1,11 @@
 import type { Fit, FitAnalysis, FitItemResolved } from '@shared/types';
 import { parseEft } from '../fits/eft';
-import { analyzeFit, type AnalysisCharacter, type SkillRequirement } from '../fits/analyze';
+import {
+  analyzeFit,
+  buildSkillPrereqMap,
+  type AnalysisCharacter,
+  type SkillRequirement,
+} from '../fits/analyze';
 import { createFit, getFit } from '../db/repositories/fits';
 import {
   getCategoryForTypes,
@@ -81,25 +86,11 @@ export function analyzeFitById(fitId: number): FitAnalysis {
     ...new Set(countedTypeIds),
   ]).map((r) => ({ skillTypeId: r.skillTypeId, level: r.level }));
 
-  // Walk the transitive prerequisite tree of every required skill.
-  const skillPrereqs = new Map<number, SkillRequirement[]>();
-  const seen = new Set<number>(directReqs.map((r) => r.skillTypeId));
-  let frontier = [...seen];
-  while (frontier.length > 0) {
-    const next: number[] = [];
-    for (const row of getSkillReqsForTypes(frontier)) {
-      const list = skillPrereqs.get(row.typeId) ?? [];
-      list.push({ skillTypeId: row.skillTypeId, level: row.level });
-      skillPrereqs.set(row.typeId, list);
-      if (!seen.has(row.skillTypeId)) {
-        seen.add(row.skillTypeId);
-        next.push(row.skillTypeId);
-      }
-    }
-    frontier = next;
-  }
+  const { skillPrereqs, allSkillIds } = buildSkillPrereqMap(
+    directReqs.map((r) => r.skillTypeId),
+    getSkillReqsForTypes,
+  );
 
-  const allSkillIds = [...seen];
   const characters: AnalysisCharacter[] = listCharacters().map((c) => ({
     characterId: c.id,
     characterName: c.name,

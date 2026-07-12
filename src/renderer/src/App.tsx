@@ -6,6 +6,8 @@ import Accounts from './pages/Accounts';
 import Location from './pages/Location';
 import Fits from './pages/Fits';
 import FitDetail from './pages/FitDetail';
+import Plans from './pages/Plans';
+import PlanDetail from './pages/PlanDetail';
 import SdeBanner from './components/SdeBanner';
 import { mco } from './lib/ipc';
 
@@ -34,6 +36,9 @@ export default function App() {
           <NavLink to="/fits" className={({ isActive }) => (isActive ? 'active' : '')}>
             Fits
           </NavLink>
+          <NavLink to="/plans" className={({ isActive }) => (isActive ? 'active' : '')}>
+            Skill Plans
+          </NavLink>
         </nav>
       </header>
 
@@ -53,6 +58,8 @@ export default function App() {
         <Route path="/location" element={<Location />} />
         <Route path="/fits" element={<Fits />} />
         <Route path="/fits/:id" element={<FitDetail />} />
+        <Route path="/plans" element={<Plans />} />
+        <Route path="/plans/:id" element={<PlanDetail />} />
       </Routes>
     </div>
   );

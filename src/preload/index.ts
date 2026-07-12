@@ -40,6 +40,12 @@ const api: McoApi = {
     remove: (fitId) => ipcRenderer.invoke(IpcChannel.fitsRemove, fitId),
     analyze: (fitId) => ipcRenderer.invoke(IpcChannel.fitsAnalyze, fitId),
   },
+  plans: {
+    list: () => ipcRenderer.invoke(IpcChannel.plansList),
+    import: (name, planText) => ipcRenderer.invoke(IpcChannel.plansImport, name, planText),
+    remove: (planId) => ipcRenderer.invoke(IpcChannel.plansRemove, planId),
+    analyze: (planId) => ipcRenderer.invoke(IpcChannel.plansAnalyze, planId),
+  },
   location: {
     board: () => ipcRenderer.invoke(IpcChannel.locationBoard),
   },

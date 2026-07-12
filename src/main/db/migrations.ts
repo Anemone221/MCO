@@ -153,6 +153,18 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_sde_systems_region ON sde_systems(region_id);
     `,
   },
+  {
+    version: 5,
+    name: 'skill_plans',
+    sql: `
+      CREATE TABLE skill_plans (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT NOT NULL,
+        plan_text   TEXT NOT NULL,
+        imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

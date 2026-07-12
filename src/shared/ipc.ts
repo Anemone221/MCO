@@ -5,9 +5,11 @@ import type {
   Fit,
   FitAnalysis,
   LocationEntry,
+  PlanAnalysis,
   RosterEntry,
   SdeProgress,
   SdeStatus,
+  SkillPlan,
   SyncResult,
 } from './types';
 
@@ -31,6 +33,10 @@ export const IpcChannel = {
   fitsImport: 'fits:import',
   fitsRemove: 'fits:remove',
   fitsAnalyze: 'fits:analyze',
+  plansList: 'plans:list',
+  plansImport: 'plans:import',
+  plansRemove: 'plans:remove',
+  plansAnalyze: 'plans:analyze',
   locationBoard: 'location:board',
   systemClientConfigured: 'system:clientConfigured',
 } as const;
@@ -69,6 +75,12 @@ export interface McoApi {
     import: (eftText: string) => Promise<Fit>;
     remove: (fitId: number) => Promise<void>;
     analyze: (fitId: number) => Promise<FitAnalysis>;
+  };
+  plans: {
+    list: () => Promise<SkillPlan[]>;
+    import: (name: string, planText: string) => Promise<SkillPlan>;
+    remove: (planId: number) => Promise<void>;
+    analyze: (planId: number) => Promise<PlanAnalysis>;
   };
   location: {
     board: () => Promise<LocationEntry[]>;
