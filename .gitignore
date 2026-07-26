@@ -6,6 +6,8 @@ release
 .cache
 .DS_Store
 *.log
+# Diagnostics exports from Settings → Export logs (regenerable, never committed)
+mco-logs-*.txt
 .env
 .env.local
 playwright-report
