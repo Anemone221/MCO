@@ -13,6 +13,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
+    "start:background": "electron-vite preview -- --background",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -31,6 +32,7 @@
     "yauzl": "^3.3.0"
   },
   "devDependencies": {
+    "@amcharts/amcharts5": "^5.20.0",
     "@eslint/js": "^9.16.0",
     "@playwright/test": "^1.60.0",
     "@types/better-sqlite3": "^7.6.13",

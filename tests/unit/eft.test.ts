@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseEft } from '@main/fits/eft';
+import { countsForSkills, parseEft } from '@main/fits/eft';
 
 const FIT = `[Rifter, Test Rifter]
 Damage Control II
@@ -46,5 +46,29 @@ describe('parseEft', () => {
   it('rejects text that is not an EFT fit', () => {
     expect(() => parseEft('just some text')).toThrow();
     expect(() => parseEft('')).toThrow();
+  });
+});
+
+describe('countsForSkills', () => {
+  const MODULE = 7;
+  const CHARGE = 8;
+  const MATERIAL = 4;
+  const DRONE = 18;
+
+  it('always counts fitted modules and loaded charges', () => {
+    expect(countsForSkills('module', MODULE)).toBe(true);
+    expect(countsForSkills('charge', CHARGE)).toBe(true);
+    expect(countsForSkills('module', undefined)).toBe(true);
+  });
+
+  it('counts xN drones, spare charges (mining crystals, ammo) and spare modules', () => {
+    expect(countsForSkills('quantity', DRONE)).toBe(true);
+    expect(countsForSkills('quantity', CHARGE)).toBe(true);
+    expect(countsForSkills('quantity', MODULE)).toBe(true);
+  });
+
+  it('does not count inert cargo', () => {
+    expect(countsForSkills('quantity', MATERIAL)).toBe(false);
+    expect(countsForSkills('quantity', undefined)).toBe(false);
   });
 });

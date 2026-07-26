@@ -52,9 +52,13 @@ export default function SdeBanner() {
     }
   }
 
-  // Fully imported, including skill and map data — quiet confirmation, no action.
+  // Fully imported, including skill, map and training-attribute data — quiet
+  // confirmation, no action.
   const fullyImported =
-    status?.installed === true && status.hasSkillData && status.hasMapData;
+    status?.installed === true &&
+    status.hasSkillData &&
+    status.hasMapData &&
+    status.hasSkillAttributes;
   if (fullyImported && !importing && progress?.stage !== 'error') {
     return (
       <div className="sde-banner sde-banner--ok" data-testid="sde-banner">
@@ -64,8 +68,8 @@ export default function SdeBanner() {
   }
 
   const idleMessage =
-    status?.installed && (!status.hasSkillData || !status.hasMapData)
-      ? 'Static data is incomplete — re-import to enable fit testing and location names.'
+    status?.installed && (!status.hasSkillData || !status.hasMapData || !status.hasSkillAttributes)
+      ? 'Static data is incomplete — re-import to enable fit testing, training-time estimates and location names.'
       : 'Static data is not imported yet — skill, item and system names will show as IDs.';
 
   const buttonLabel = status?.installed ? 'Re-import static data' : 'Import static data';

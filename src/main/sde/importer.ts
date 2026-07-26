@@ -5,6 +5,7 @@ import {
   replaceCategories,
   replaceGroups,
   replaceRegions,
+  replaceSkillAttributes,
   replaceSkillRanks,
   replaceSystems,
   replaceTypeSkillReqs,
@@ -101,11 +102,18 @@ export async function importSde(
     },
     'typeDogma.yaml': async (stream) => {
       onProgress?.({ phase: 'dogma', typesProcessed: 0 });
-      const { skillReqs, ranks } = await parseTypeDogmaStream(stream, (p) => {
+      const { skillReqs, ranks, skillAttributes } = await parseTypeDogmaStream(stream, (p) => {
         onProgress?.({ phase: 'dogma', typesProcessed: p.typesProcessed });
       });
       replaceTypeSkillReqs(skillReqs);
       replaceSkillRanks(ranks.map((r) => ({ skillTypeId: r.typeId, rank: r.rank })));
+      replaceSkillAttributes(
+        skillAttributes.map((a) => ({
+          skillTypeId: a.typeId,
+          primaryAttributeId: a.primaryAttributeId,
+          secondaryAttributeId: a.secondaryAttributeId,
+        })),
+      );
     },
     'mapRegions.yaml': async (stream) => {
       onProgress?.({ phase: 'maps' });

@@ -13,15 +13,21 @@ asarUnpack:
 
 files:
   - out/**/*
+  - resources/**/*
   - package.json
 
+# App icons live in the buildResources dir (build/): icon.ico for Windows,
+# icon.png (1024x1024) for macOS/Linux — electron-builder generates the .icns
+# and Linux icon set from it. Regenerate from Clonebay.png; see docs/development.md.
 win:
+  icon: build/icon.ico
   target:
     - nsis
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
 
 mac:
   target:

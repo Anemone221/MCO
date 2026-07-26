@@ -5,6 +5,7 @@ import {
   createPkcePair,
   createState,
   decodeJwtPayload,
+  scopesFromPayload,
 } from '@main/auth/pkce';
 
 function base64url(input: Buffer): string {
@@ -44,6 +45,20 @@ describe('decodeJwtPayload', () => {
 
   it('throws on a malformed token', () => {
     expect(() => decodeJwtPayload('not-a-jwt')).toThrow();
+  });
+});
+
+describe('scopesFromPayload', () => {
+  it('returns an array scp claim as-is', () => {
+    expect(scopesFromPayload({ scp: ['a.v1', 'b.v1'] })).toEqual(['a.v1', 'b.v1']);
+  });
+
+  it('wraps a single-string scp claim (EVE SSO single-scope form)', () => {
+    expect(scopesFromPayload({ scp: 'a.v1' })).toEqual(['a.v1']);
+  });
+
+  it('returns empty for a missing scp claim', () => {
+    expect(scopesFromPayload({})).toEqual([]);
   });
 });
 

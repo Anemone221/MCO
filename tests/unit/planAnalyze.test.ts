@@ -55,4 +55,19 @@ describe('analyzePlan', () => {
     expect(result!.complete).toBe(false);
     expect(result!.spGap).toBe(spForLevel(1, 3) + spForLevel(1, 2));
   });
+
+  it('passes the injector and time gaps through to plan results', () => {
+    const [result] = analyzePlan({
+      ...base,
+      skillAttributes: new Map([[100, { primary: 'intelligence', secondary: 'memory' }]]),
+      characters: [
+        {
+          ...character(2, 'Partial', { 100: { sp: 250, trainedLevel: 1 } }),
+          attributes: { charisma: 17, intelligence: 17, memory: 17, perception: 17, willpower: 17 },
+        },
+      ],
+    });
+    expect(result!.lsiGap).toBe(1);
+    expect(result!.timeGapMinutes).toBeCloseTo(7750 / 25.5, 5);
+  });
 });

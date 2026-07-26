@@ -1,0 +1,175 @@
+# Database
+
+MCO stores everything in a single SQLite file, `mco.sqlite`, in Electron's `userData`
+directory, accessed synchronously via **better-sqlite3** from the main process only.
+
+## Connection (`src/main/db/index.ts`)
+
+Opened once at startup (before any IPC handler can fire) with:
+
+```
+journal_mode = WAL      -- readers don't block the hourly sync writes
+foreign_keys = ON       -- ON DELETE CASCADE actually fires
+synchronous  = NORMAL
+```
+
+`better-sqlite3` ships a native `.node` binary, so it is externalized from the Vite
+bundle (`electron.vite.config.ts`) and unpacked from the asar archive when packaging
+(`electron-builder.yml` → `asarUnpack`).
+
+## Migrations (`src/main/db/migrations.ts`)
+
+Plain sequential SQL migrations, tracked in `schema_migrations`. Each migration runs in
+its own transaction. Rules:
+
+- **Never edit an applied migration** — append a new one with the next version number.
+- `LATEST_SCHEMA_VERSION` is derived from the array; nothing else to bump.
+- Repositories assume the latest schema; there is no down-migration.
+
+| v | Name | Adds |
+| - | --- | --- |
+| 1 | init | `accounts`, `characters`, `tokens`, `character_skills`, `skill_queue`, `esi_cache`, `sde_version` |
+| 2 | sde_tables | `sde_categories`, `sde_groups`, `sde_types` |
+| 3 | fit_testing | `sde_type_skill_reqs`, `sde_skill_ranks`, `fits` |
+| 4 | location_tracking | `sde_regions`, `sde_systems`, `character_location` |
+| 5 | skill_plans | `skill_plans` |
+| 6 | notifications | `notifications` |
+| 7 | clone_tracking | `character_implants`, `character_clones`, `character_clone_implants`, `character_clones_meta` |
+| 8 | token_health | `tokens.invalid_at` |
+| 9 | character_groups | `character_groups`, `character_group_members` |
+| 10 | tags | `tags`, `character_tags` |
+| 11 | jump_fatigue | `character_fatigue` |
+| 12 | group_priorities | `character_groups.priority_fit_id/.priority_plan_id/.home_station_id/.home_station_name` |
+| 13 | wallet | `character_wallet` |
+| 14 | clone_jump_cooldown | `character_clones_meta.last_clone_jump_date` |
+| 15 | account_omega | `accounts.is_omega` |
+| 16 | medical_clone | `character_clones_meta.home_location_id/.home_location_type` |
+| 17 | structures | `structures` |
+| 18 | group_pod_systems | `group_pod_systems` |
+| 19 | group_pod_ignores | `group_pod_ignores` |
+| 20 | character_attributes | `character_attributes` |
+| 21 | sde_skill_attributes | `sde_skill_attributes` |
+| 22 | character_online | `character_online` |
+| 23 | character_wallet_journal | `character_wallet_journal` |
+
+## Schema reference
+
+### Identity & auth
+
+- **`accounts`** — user-created account buckets (`label`, `color`, `is_omega`). ESI
+  cannot reveal real account membership (or Omega status), so this is manual
+  bookkeeping; `is_omega` feeds the "Omega account training nobody" warning.
+- **`characters`** — `id` is the EVE character id (primary key, not autoincrement).
+  `account_id` → `accounts` (`ON DELETE SET NULL` — deleting an account never deletes
+  characters). `refreshed_at` = last successful sync.
+- **`tokens`** — one row per character (`ON DELETE CASCADE`).
+  `refresh_token_encrypted` (BLOB, safeStorage-encrypted), `scopes` (space-separated
+  grant recorded at login), cached `access_token` + `access_expires_at`, and
+  `invalid_at` (set when SSO rejects the refresh token → "login expired" UI state).
+
+### Character state (from ESI)
+
+- **`character_skills`** — (character, skill_type_id) → sp, trained_level, active_level.
+  Fully replaced on each sync.
+- **`skill_queue`** — (character, position) → skill, finish_level, start/finish dates.
+  Fully replaced on each sync. Position 0 with a future finish date = currently training.
+- **`character_location`** — one row per character: last-known solar system,
+  station/structure (docked when either is set), current ship type + name, `updated_at`.
+- **`character_implants`** — implants in the *active* clone.
+- **`character_clones`** / **`character_clone_implants`** — jump clones (id, custom
+  name, location id/type) and their implants. Composite FK cascades clone deletion to
+  its implants.
+- **`character_clones_meta`** — `updated_at` per character; its presence is the
+  "clone data has synced at least once" signal (drives `EsiDataStatus`). Also holds
+  `last_clone_jump_date` (ESI's `last_clone_jump_date`), from which the next
+  clone-jump availability is computed (`src/main/clones/jumpCooldown.ts`: 24h minus
+  1h per Infomorph Synchronizing level), and the medical clone's
+  `home_location_id`/`home_location_type` (ESI's `home_location`).
+- **`character_fatigue`** — jump fatigue expiry + last jump date.
+- **`character_wallet`** — wallet balance (ISK) + `updated_at`.
+- **`character_attributes`** — the five neural attributes plus remap state
+  (`bonus_remaps`, `last_remap_date`, `accrued_remap_cooldown_date` — nullable,
+  ESI omits them for a never-remapped character).
+- **`character_online`** — whether a character is currently logged into
+  Tranquility (`online`, `last_login`, `last_logout`), scope-gated
+  (`esi-location.read_online.v1`); feeds the Dashboard's "characters online" tile.
+- **`character_wallet_journal`** — *not* a full journal mirror: only rows whose
+  `ref_type` is a tracked PvE-income category (`bounty_prizes`,
+  `ess_escrow_transfer`, `agent_mission_reward`, `agent_mission_time_bonus_reward`)
+  are stored, keyed by `(character_id, journal_id)` so repeated syncs dedupe for
+  free (journal ids are immutable). Feeds the Dashboard's "ratted ISK this
+  month" tile (`sumIncomeBetween` in
+  `db/repositories/characterWalletJournal.ts`); indexed on `occurred_at` for
+  the calendar-month range scan.
+- **`structures`** — player-owned (Upwell) structures referenced by character
+  locations and clones, keyed by `structure_id`: `name`, `solar_system_id`,
+  `type_id`, `owner_id` (corporation). **Shared, not per-character** — once any
+  token resolves a citadel, every page shows its name. A row with a NULL `name`
+  is a known id nobody has resolved yet. `resolved_at`/`failed_at` (ISO
+  timestamps, written by JS not `datetime('now')`) drive the refresh policy in
+  `src/main/structures/refreshPolicy.ts`: resolved rows refresh weekly, failed
+  lookups (403 — no docking access) retry daily, keeping any stale name.
+
+Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
+`replaceQueue`, `replaceJumpClones`, …) — simple and idempotent.
+
+### User organization
+
+- **`character_groups`** + **`character_group_members`** — optional, many-to-many
+  organizational units ("WH defense"). A group may carry a `priority_fit_id` →
+  `fits` and/or `priority_plan_id` → `skill_plans` (both `ON DELETE SET NULL`) — the
+  objective its members train toward, shown as progress bars on the group page.
+  `home_station_id`/`home_station_name` hold the group's home station (a structure
+  picked via search on the group page); member cards flag medical clones parked
+  elsewhere. The name is denormalized so display survives losing ACL access later.
+- **`group_pod_systems`** — per-group whitelist of solar systems
+  (`solar_system_id` + denormalized `system_name`, picked via SDE search) where
+  members' pods carrying implants are allowed to sit. The group page lists every
+  implanted pod (active body or jump clone) outside these systems. Empty = check off.
+- **`group_pod_ignores`** — pods exempted from that check ("Ignore" on the group
+  page). `jump_clone_id` is the ESI id of the ignored jump clone, or `0` for the
+  character's active pod. Per group: the same clone can be ignored for one group and
+  still flagged for another. Rows survive the clone (managed on the Ignored tab) but
+  cascade away with their group or character.
+- **`tags`** + **`character_tags`** — character *capabilities* ("Is able to Cyno").
+  Tag names are unique case-insensitively (`idx_tags_name` on `name COLLATE NOCASE`).
+  See the Organization model section of [CLAUDE.md](../CLAUDE.md#organization-model) for
+  why groups and tags are deliberately separate concepts.
+
+### Content the user imports
+
+- **`fits`** — EFT text blobs plus parsed ship name and (when the SDE resolves it)
+  `ship_type_id`. Fits are re-parsed on every analysis; the DB stores the source text.
+- **`skill_plans`** — plan name + raw plan text; also re-parsed on demand.
+
+### Caches & infrastructure
+
+- **`esi_cache`** — url → etag, expires_at, body. The heart of ESI politeness: fresh
+  entries short-circuit HTTP entirely; expired ones revalidate with `If-None-Match`.
+- **`notifications`** — in-app notification feed. `dedupe_key` (UNIQUE) is what makes
+  "notify once per distinct occurrence" work, e.g. `queue-drain:<charId>:<finishDate>`.
+- **`sde_version`** — single row (id=1): imported SDE build number + timestamp.
+
+### SDE tables (filled by the import pipeline, see [sde.md](sde.md))
+
+- **`sde_categories`** / **`sde_groups`** / **`sde_types`** — the item-type tree.
+  `sde_types.name` is indexed for the case-insensitive name→id resolution used by
+  EFT/plan imports.
+- **`sde_type_skill_reqs`** — type → required skill + level (from typeDogma). Powers
+  both fit analysis and plan prerequisite closure. Non-empty ⇒ `hasSkillData`.
+- **`sde_skill_ranks`** — skill → rank (skillTimeConstant), the SP-per-level multiplier.
+- **`sde_skill_attributes`** — skill → primary/secondary training attribute ids (dogma
+  180/181; the values are attribute ids 164–168). Powers the training-time cost metric.
+  Non-empty ⇒ `hasSkillAttributes`; empty on upgraded installs until an SDE re-import.
+- **`sde_regions`** / **`sde_systems`** — map data (system name, region, security).
+  Non-empty `sde_systems` ⇒ `hasMapData`.
+
+## Repository layer
+
+`src/main/db/repositories/` — one module per aggregate, the only code allowed to write
+SQL. Conventions:
+
+- snake_case in SQL, camelCase in TypeScript; each repo maps rows at the boundary.
+- Batch lookups take `number[]` and return `Map`s (`getTypeNames`, `getSystems`,
+  `getSkillRanks`) so services can resolve names in one query per table.
+- Multi-row writes are wrapped in `db.transaction(...)`.

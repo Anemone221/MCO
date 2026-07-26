@@ -1,4 +1,10 @@
 import type { FitCharacterResult, MissingSkill } from '@shared/types';
+import {
+  injectorsForGap,
+  trainingTimeMinutes,
+  type NeuralAttributes,
+  type SkillTrainingAttributes,
+} from './cost';
 
 export interface SkillRequirement {
   skillTypeId: number;
@@ -9,6 +15,8 @@ export interface AnalysisCharacter {
   characterId: number;
   characterName: string;
   skills: Map<number, { sp: number; trainedLevel: number }>;
+  /** Neural attributes for the time metric; null/absent -> timeGapMinutes null. */
+  attributes?: NeuralAttributes | null;
 }
 
 export interface FitAnalysisInput {
@@ -20,6 +28,8 @@ export interface FitAnalysisInput {
   ranks: Map<number, number>;
   /** Skill type id -> display name. */
   skillNames: Map<number, string>;
+  /** Skill type id -> training attributes; absent entries null the time metric. */
+  skillAttributes?: Map<number, SkillTrainingAttributes>;
   characters: AnalysisCharacter[];
 }
 
@@ -27,6 +37,12 @@ export interface FitAnalysisInput {
 export function spForLevel(rank: number, level: number): number {
   if (level <= 0) return 0;
   return Math.round(250 * rank * Math.sqrt(32) ** (level - 1));
+}
+
+/** 0..1 share of an objective's from-zero SP a character already holds. */
+export function objectiveProgress(spGap: number, totalSp: number): number {
+  if (totalSp === 0) return 1;
+  return Math.min(1, Math.max(0, 1 - spGap / totalSp));
 }
 
 function maxMerge(map: Map<number, number>, skillTypeId: number, level: number): void {
@@ -135,11 +151,20 @@ export function analyzeFit(input: FitAnalysisInput): FitCharacterResult[] {
     }
     missingSkills.sort((a, b) => b.spDelta - a.spDelta);
 
+    let totalSp = 0;
+    for (const owned of char.skills.values()) totalSp += owned.sp;
+
     return {
       characterId: char.characterId,
       characterName: char.characterName,
       canFly,
       spGap,
+      lsiGap: injectorsForGap(totalSp, spGap),
+      timeGapMinutes: trainingTimeMinutes(
+        missingSkills,
+        input.skillAttributes ?? new Map(),
+        char.attributes ?? null,
+      ),
       missingSkills,
     };
   });

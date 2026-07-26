@@ -26,6 +26,27 @@ export interface ParsedFit {
   items: EftItem[];
 }
 
+/** SDE category ids of `xN` items whose skills count toward flying the fit. */
+const MODULE_CATEGORY_ID = 7;
+const CHARGE_CATEGORY_ID = 8;
+const DRONE_CATEGORY_ID = 18;
+const COUNTED_QUANTITY_CATEGORIES = new Set([
+  MODULE_CATEGORY_ID,
+  CHARGE_CATEGORY_ID,
+  DRONE_CATEGORY_ID,
+]);
+
+/**
+ * Whether an item's skill requirements count toward flying the fit. Fitted
+ * items (module/charge lines) always count. `xN` items count when they are
+ * drones or usable spares — charges (e.g. swappable mining crystals) and
+ * modules carried in cargo. Inert cargo (ore, paste, deployables) does not.
+ */
+export function countsForSkills(kind: EftItemKind, categoryId: number | undefined): boolean {
+  if (kind !== 'quantity') return true;
+  return categoryId !== undefined && COUNTED_QUANTITY_CATEGORIES.has(categoryId);
+}
+
 const HEADER = /^\[(.+?),\s*(.+)\]$/;
 const EMPTY_SLOT = /^\[.*\]$/;
 const OFFLINE_SUFFIX = /\s*\/(OFFLINE|ON)\s*$/i;

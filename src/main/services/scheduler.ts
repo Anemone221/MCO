@@ -1,6 +1,7 @@
 import type { BrowserWindow } from 'electron';
 import { IpcChannel } from '@shared/ipc';
 import { syncDueCharacters } from './characterSync';
+import { checkQueueDrainWarnings } from './notificationService';
 
 /** Hourly background sync; each sweep only touches characters whose cache has expired. */
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
@@ -9,8 +10,31 @@ const STARTUP_DELAY_MS = 15_000;
 
 let intervalTimer: NodeJS.Timeout | null = null;
 let startupTimer: NodeJS.Timeout | null = null;
+let currentGetWindow: (() => BrowserWindow | null) | null = null;
+
+/** When the last sweep finished, and when the interval timer was armed (for ETA math). */
+let lastSweepAt: string | null = null;
+let intervalArmedAtMs: number | null = null;
+
+export interface SchedulerStatus {
+  running: boolean;
+  lastSweepAt: string | null;
+  /** Estimated next interval tick; the startup sweep may fire sooner. */
+  nextSweepAt: string | null;
+}
+
+export function getSchedulerStatus(): SchedulerStatus {
+  let nextSweepAt: string | null = null;
+  if (intervalArmedAtMs !== null) {
+    const elapsed = Date.now() - intervalArmedAtMs;
+    const ticks = Math.floor(elapsed / SWEEP_INTERVAL_MS) + 1;
+    nextSweepAt = new Date(intervalArmedAtMs + ticks * SWEEP_INTERVAL_MS).toISOString();
+  }
+  return { running: intervalTimer !== null, lastSweepAt, nextSweepAt };
+}
 
 async function runSweep(getWindow: () => BrowserWindow | null): Promise<void> {
+  lastSweepAt = new Date().toISOString();
   try {
     const results = await syncDueCharacters();
     if (results.length > 0) {
@@ -23,13 +47,21 @@ async function runSweep(getWindow: () => BrowserWindow | null): Promise<void> {
   } catch (err) {
     console.error('[scheduler] sync sweep failed:', err);
   }
+
+  try {
+    checkQueueDrainWarnings(getWindow);
+  } catch (err) {
+    console.error('[scheduler] queue-drain check failed:', err);
+  }
 }
 
 /** Start the hourly background sync. Safe to call once; further calls are ignored. */
 export function startScheduler(getWindow: () => BrowserWindow | null): void {
   if (intervalTimer) return;
+  currentGetWindow = getWindow;
   startupTimer = setTimeout(() => void runSweep(getWindow), STARTUP_DELAY_MS);
   intervalTimer = setInterval(() => void runSweep(getWindow), SWEEP_INTERVAL_MS);
+  intervalArmedAtMs = Date.now();
 }
 
 export function stopScheduler(): void {
@@ -41,4 +73,11 @@ export function stopScheduler(): void {
     clearInterval(intervalTimer);
     intervalTimer = null;
   }
+  intervalArmedAtMs = null;
+  currentGetWindow = null;
+}
+
+/** Run one sync sweep immediately (tray "Run sync now"). No-op if the scheduler is not running. */
+export async function runSweepNow(): Promise<void> {
+  if (currentGetWindow) await runSweep(currentGetWindow);
 }

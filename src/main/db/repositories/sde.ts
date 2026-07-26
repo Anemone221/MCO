@@ -1,4 +1,4 @@
-import type { SdeStatus } from '@shared/types';
+import type { SdeStatus, SystemSearchResult } from '@shared/types';
 import { getDb } from '../index';
 
 export interface SdeNamedRow {
@@ -77,6 +77,49 @@ export function replaceSkillRanks(rows: SkillRankRow[]): void {
     db.exec('DELETE FROM sde_skill_ranks');
     for (const r of rows) ins.run(r.skillTypeId, r.rank);
   })();
+}
+
+export interface SkillAttributeRow {
+  skillTypeId: number;
+  primaryAttributeId: number;
+  secondaryAttributeId: number;
+}
+
+export function replaceSkillAttributes(rows: SkillAttributeRow[]): void {
+  const db = getDb();
+  const ins = db.prepare(
+    'INSERT OR REPLACE INTO sde_skill_attributes (skill_type_id, primary_attribute_id, secondary_attribute_id) VALUES (?, ?, ?)',
+  );
+  db.transaction(() => {
+    db.exec('DELETE FROM sde_skill_attributes');
+    for (const r of rows) ins.run(r.skillTypeId, r.primaryAttributeId, r.secondaryAttributeId);
+  })();
+}
+
+/** Training attributes (dogma 180/181 values) keyed by skill type id. */
+export function getSkillAttributes(
+  skillTypeIds: number[],
+): Map<number, { primaryAttributeId: number; secondaryAttributeId: number }> {
+  const result = new Map<number, { primaryAttributeId: number; secondaryAttributeId: number }>();
+  if (skillTypeIds.length === 0) return result;
+  const placeholders = skillTypeIds.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(
+      `SELECT skill_type_id, primary_attribute_id, secondary_attribute_id
+       FROM sde_skill_attributes WHERE skill_type_id IN (${placeholders})`,
+    )
+    .all(...skillTypeIds) as Array<{
+    skill_type_id: number;
+    primary_attribute_id: number;
+    secondary_attribute_id: number;
+  }>;
+  for (const r of rows) {
+    result.set(r.skill_type_id, {
+      primaryAttributeId: r.primary_attribute_id,
+      secondaryAttributeId: r.secondary_attribute_id,
+    });
+  }
+  return result;
 }
 
 /** Direct skill requirements for the given type ids. */
@@ -216,6 +259,35 @@ export function getSystems(systemIds: number[]): Map<number, SystemInfo> {
   return result;
 }
 
+/**
+ * Solar systems whose name contains the query, for the pod-whitelist picker.
+ * Case-insensitive; `%`/`_` in the query are matched literally. Exact-name
+ * hits sort first so typing "Jita" doesn't bury Jita under fuzzy matches.
+ */
+export function searchSystemsByName(query: string, limit = 15): SystemSearchResult[] {
+  const needle = query.trim().replace(/[\\%_]/g, (c) => `\\${c}`);
+  if (needle === '') return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT s.id AS id, s.name AS name, s.security AS security, r.name AS region_name
+       FROM sde_systems s LEFT JOIN sde_regions r ON s.region_id = r.id
+       WHERE s.name LIKE ? ESCAPE '\\'
+       ORDER BY (s.name = ? COLLATE NOCASE) DESC, s.name LIMIT ?`,
+    )
+    .all(`%${needle}%`, query.trim(), limit) as Array<{
+    id: number;
+    name: string;
+    security: number;
+    region_name: string | null;
+  }>;
+  return rows.map((r) => ({
+    solarSystemId: r.id,
+    name: r.name,
+    security: r.security,
+    regionName: r.region_name,
+  }));
+}
+
 export function setSdeVersion(version: string): void {
   getDb()
     .prepare(
@@ -235,12 +307,16 @@ export function getSdeStatus(): SdeStatus {
   const mapData = getDb()
     .prepare('SELECT EXISTS(SELECT 1 FROM sde_systems LIMIT 1) AS present')
     .get() as { present: number };
+  const skillAttributes = getDb()
+    .prepare('SELECT EXISTS(SELECT 1 FROM sde_skill_attributes LIMIT 1) AS present')
+    .get() as { present: number };
   return {
     installed: row !== undefined,
     version: row?.version ?? null,
     importedAt: row?.imported_at ?? null,
     hasSkillData: skillData.present === 1,
     hasMapData: mapData.present === 1,
+    hasSkillAttributes: skillAttributes.present === 1,
   };
 }
 

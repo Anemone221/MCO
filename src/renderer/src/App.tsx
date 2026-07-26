@@ -1,15 +1,49 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
+import Dashboard from './pages/Dashboard';
 import Roster from './pages/Roster';
 import CharacterDetail from './pages/CharacterDetail';
 import Accounts from './pages/Accounts';
+import Groups from './pages/Groups';
+import GroupDetail from './pages/GroupDetail';
+import Tags from './pages/Tags';
 import Location from './pages/Location';
 import Fits from './pages/Fits';
 import FitDetail from './pages/FitDetail';
 import Plans from './pages/Plans';
 import PlanDetail from './pages/PlanDetail';
+import Clones from './pages/Clones';
+import Wallet from './pages/Wallet';
+import Settings from './pages/Settings';
 import SdeBanner from './components/SdeBanner';
+import NotificationBell from './components/NotificationBell';
+import {
+  CopyIcon,
+  CreditCardIcon,
+  DashboardIcon,
+  GraduationCapIcon,
+  LayersIcon,
+  MapPinIcon,
+  RocketIcon,
+  SettingsIcon,
+  TagIcon,
+  UsersIcon,
+  WalletIcon,
+} from './components/icons';
 import { mco } from './lib/ipc';
+
+const NAV = [
+  { to: '/', label: 'Dashboard', end: true, icon: DashboardIcon },
+  { to: '/roster', label: 'Roster', icon: UsersIcon },
+  { to: '/accounts', label: 'Accounts', icon: CreditCardIcon },
+  { to: '/groups', label: 'Groups', icon: LayersIcon },
+  { to: '/tags', label: 'Tags', icon: TagIcon },
+  { to: '/location', label: 'Location', icon: MapPinIcon },
+  { to: '/fits', label: 'Fits', icon: RocketIcon },
+  { to: '/plans', label: 'Skill Plans', icon: GraduationCapIcon },
+  { to: '/clones', label: 'Clones', icon: CopyIcon },
+  { to: '/wallet', label: 'Wallet', icon: WalletIcon },
+];
 
 export default function App() {
   const [clientConfigured, setClientConfigured] = useState(true);
@@ -20,47 +54,68 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <h1>MCO</h1>
-        <p className="tagline">Massive Character Organization</p>
-        <nav className="app-nav">
-          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>
-            Roster
-          </NavLink>
-          <NavLink to="/accounts" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Accounts
-          </NavLink>
-          <NavLink to="/location" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Location
-          </NavLink>
-          <NavLink to="/fits" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Fits
-          </NavLink>
-          <NavLink to="/plans" className={({ isActive }) => (isActive ? 'active' : '')}>
-            Skill Plans
-          </NavLink>
-        </nav>
-      </header>
-
-      {!clientConfigured && (
-        <div className="config-banner" data-testid="config-banner">
-          ESI client_id is not configured — adding characters will fail. Set
-          <code> MCO_ESI_CLIENT_ID</code> or edit <code>src/main/config.ts</code>.
+      <aside className="sidebar">
+        <div className="sidebar__brand">
+          <h1>MCO</h1>
+          <p className="tagline">Massive Character Organizer</p>
         </div>
-      )}
+        <nav className="app-nav">
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => (isActive ? 'active' : '')}
+            >
+              <item.icon size={15} />
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="sidebar__footer">
+          <NotificationBell />
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              isActive ? 'sidebar__gear sidebar__gear--active' : 'sidebar__gear'
+            }
+            title="Settings"
+            aria-label="Settings"
+            data-testid="settings-gear"
+          >
+            <SettingsIcon size={16} />
+          </NavLink>
+        </div>
+      </aside>
 
-      <SdeBanner />
+      <main className="app-main">
+        {!clientConfigured && (
+          <div className="config-banner" data-testid="config-banner">
+            ESI client_id is not configured — adding characters will fail. Set
+            <code> MCO_ESI_CLIENT_ID</code> or edit <code>src/main/config.ts</code>.
+          </div>
+        )}
 
-      <Routes>
-        <Route path="/" element={<Roster />} />
-        <Route path="/character/:id" element={<CharacterDetail />} />
-        <Route path="/accounts" element={<Accounts />} />
-        <Route path="/location" element={<Location />} />
-        <Route path="/fits" element={<Fits />} />
-        <Route path="/fits/:id" element={<FitDetail />} />
-        <Route path="/plans" element={<Plans />} />
-        <Route path="/plans/:id" element={<PlanDetail />} />
-      </Routes>
+        <SdeBanner />
+
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/roster" element={<Roster />} />
+          <Route path="/character/:id" element={<CharacterDetail />} />
+          <Route path="/accounts" element={<Accounts />} />
+          <Route path="/groups" element={<Groups />} />
+          <Route path="/groups/:id" element={<GroupDetail />} />
+          <Route path="/tags" element={<Tags />} />
+          <Route path="/location" element={<Location />} />
+          <Route path="/fits" element={<Fits />} />
+          <Route path="/fits/:id" element={<FitDetail />} />
+          <Route path="/plans" element={<Plans />} />
+          <Route path="/plans/:id" element={<PlanDetail />} />
+          <Route path="/clones" element={<Clones />} />
+          <Route path="/wallet" element={<Wallet />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </main>
     </div>
   );
 }

@@ -7,12 +7,14 @@ function AccountRow({
   characterCount,
   busy,
   onRename,
+  onSetOmega,
   onRemove,
 }: {
   account: AccountBucket;
   characterCount: number;
   busy: boolean;
   onRename: (label: string) => void;
+  onSetOmega: (isOmega: boolean) => void;
   onRemove: () => void;
 }) {
   const [name, setName] = useState(account.label);
@@ -43,8 +45,20 @@ function AccountRow({
         />
       </td>
       <td>{characterCount}</td>
+      <td>
+        <label className="omega-toggle">
+          <input
+            type="checkbox"
+            checked={account.isOmega}
+            disabled={busy}
+            onChange={(e) => onSetOmega(e.target.checked)}
+            data-testid={`account-omega-${account.id}`}
+          />{' '}
+          Omega
+        </label>
+      </td>
       <td className="row-actions">
-        <button type="button" className="danger" disabled={busy} onClick={onRemove}>
+        <button type="button" className="danger btn-sm" disabled={busy} onClick={onRemove}>
           Delete
         </button>
       </td>
@@ -98,13 +112,14 @@ export default function Accounts() {
     await run(() => mco.accounts.create(label));
   }
 
-  function removeAccount(account: AccountBucket): void {
+  async function removeAccount(account: AccountBucket): Promise<void> {
     const count = counts.get(account.id) ?? 0;
     if (
       count > 0 &&
-      !window.confirm(
+      !(await mco.system.confirm(
         `"${account.label}" has ${count} character(s) assigned. Delete it and leave them unassigned?`,
-      )
+        'Delete',
+      ))
     ) {
       return;
     }
@@ -149,6 +164,7 @@ export default function Accounts() {
             <tr>
               <th>Account name</th>
               <th>Characters</th>
+              <th>Status</th>
               <th aria-label="actions" />
             </tr>
           </thead>
@@ -160,7 +176,8 @@ export default function Accounts() {
                 characterCount={counts.get(account.id) ?? 0}
                 busy={busy}
                 onRename={(label) => void run(() => mco.accounts.rename(account.id, label))}
-                onRemove={() => removeAccount(account)}
+                onSetOmega={(isOmega) => void run(() => mco.accounts.setOmega(account.id, isOmega))}
+                onRemove={() => void removeAccount(account)}
               />
             ))}
           </tbody>

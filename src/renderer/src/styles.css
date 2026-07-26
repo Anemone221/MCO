@@ -1,16 +1,135 @@
 :root {
   color-scheme: dark;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family:
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    sans-serif;
   --bg: #0d1117;
   --panel: #161b22;
+  --panel-raised: #1c2129;
   --border: #30363d;
   --text: #e6edf3;
   --muted: #8b949e;
   --accent: #2f81f7;
+  --accent-dim: rgba(47, 129, 247, 0.15);
   --danger: #f85149;
+  --warn: #d29922;
   --ok: #3fb950;
+  --row-hover: rgba(177, 186, 196, 0.08);
+  /* Shared motion tokens — every animated system (tiles, carousel, charts)
+     draws from these so the app moves at one consistent tempo. */
+  --anim-fast: 150ms;
+  --anim-med: 300ms;
+  --anim-slow: 600ms;
+  --anim-ease: cubic-bezier(0.22, 1, 0.36, 1);
   background: var(--bg);
   color: var(--text);
+  font-size: 14px;
+}
+
+/* Honor the OS "reduce motion" preference app-wide: everything lands in its
+   final state instantly. JS-driven motion (count-ups, carousel drift) checks
+   prefersReducedMotion() in lib/motion.ts for the same effect. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------- Themes ----------
+   Each theme overrides the :root palette via data-theme on <html>; anything
+   not overridden inherits the dark defaults above. Picked on Settings. */
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f6f8fa;
+  --panel: #ffffff;
+  --panel-raised: #ffffff;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --muted: #59636e;
+  --accent: #0969da;
+  --accent-dim: rgba(9, 105, 218, 0.12);
+  --danger: #cf222e;
+  --warn: #9a6700;
+  --ok: #1a7f37;
+  --row-hover: rgba(31, 35, 40, 0.06);
+}
+
+:root[data-theme='void'] {
+  --bg: #000000;
+  --panel: #0a0d10;
+  --panel-raised: #12161a;
+  --border: #24282d;
+  --row-hover: rgba(177, 186, 196, 0.1);
+}
+
+:root[data-theme='amber'] {
+  --bg: #14100a;
+  --panel: #1c1712;
+  --panel-raised: #251e16;
+  --border: #3d342a;
+  --text: #ede4d3;
+  --muted: #a3947c;
+  --accent: #d29922;
+  --accent-dim: rgba(210, 153, 34, 0.15);
+  --row-hover: rgba(210, 153, 34, 0.08);
+}
+
+:root[data-theme='holo'] {
+  --bg: #030811;
+  --panel: #061224;
+  --panel-raised: #0a1c36;
+  --border: #14456b;
+  --text: #d9f6ff;
+  --muted: #6fa2c0;
+  --accent: #00d4ff;
+  --accent-dim: rgba(0, 212, 255, 0.13);
+  --danger: #ff5c69;
+  --warn: #ffc857;
+  --ok: #2fe6a7;
+  --row-hover: rgba(0, 212, 255, 0.07);
+}
+
+/* Holo extras: a faint holographic glow on structure and emphasis. Scoped to
+   the theme so the other themes stay flat. */
+[data-theme='holo'] .sidebar {
+  box-shadow: inset -8px 0 24px rgba(0, 212, 255, 0.04);
+}
+
+[data-theme='holo'] .sidebar__brand h1,
+[data-theme='holo'] .page h2 {
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+}
+
+[data-theme='holo'] .app-nav a.active,
+[data-theme='holo'] .sidebar__gear--active {
+  box-shadow:
+    inset 0 0 10px rgba(0, 212, 255, 0.12),
+    0 0 6px rgba(0, 212, 255, 0.15);
+  text-shadow: 0 0 6px rgba(0, 212, 255, 0.5);
+}
+
+[data-theme='holo'] .card,
+[data-theme='holo'] .settings-section,
+[data-theme='holo'] .status-square {
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.06);
+}
+
+[data-theme='holo'] .chip {
+  text-shadow: 0 0 6px currentColor;
+}
+
+[data-theme='holo'] button:not(.ghost):not(.danger):not(.collapse-toggle) {
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+  background: linear-gradient(180deg, #00d4ff, #0090c9);
+  color: #02141f;
+  font-weight: 600;
 }
 
 * {
@@ -26,12 +145,14 @@ html,
 
 button {
   font: inherit;
+  font-size: 0.85rem;
   background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 6px;
-  padding: 0.4rem 0.8rem;
+  padding: 0.35rem 0.75rem;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 button:disabled {
@@ -45,14 +166,27 @@ button.danger {
   border: 1px solid var(--danger);
 }
 
+button.ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+button.btn-sm {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
 input,
 select {
   font: inherit;
+  font-size: 0.85rem;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 0.35rem 0.5rem;
+  padding: 0.3rem 0.5rem;
 }
 
 a {
@@ -70,32 +204,197 @@ code {
   border-radius: 4px;
 }
 
+/* ---------- App shell: sidebar + scrolling content ---------- */
+
 .app-shell {
   display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  padding: 1.5rem 2.5rem 3rem;
+  height: 100vh;
+  overflow: hidden;
 }
 
-.app-header h1 {
+.sidebar {
+  width: 185px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding: 0.9rem 0.75rem;
+}
+
+.sidebar__brand h1 {
   margin: 0;
-  font-size: 1.6rem;
-  letter-spacing: 0.08em;
+  font-size: 1.3rem;
+  letter-spacing: 0.1em;
 }
 
 .tagline {
-  margin: 0.15rem 0 1rem;
+  margin: 0.1rem 0 1rem;
   color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.app-nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.icon {
+  flex-shrink: 0;
+}
+
+.app-nav a:hover {
+  text-decoration: none;
+  color: var(--text);
+  background: var(--row-hover);
+}
+
+.app-nav a.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sidebar__footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Settings gear — sized to match the notification bell button beside it. */
+.sidebar__gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.sidebar__gear:hover {
+  text-decoration: none;
+  background: var(--row-hover);
+}
+
+.sidebar__gear--active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 0.9rem 1.4rem 2.5rem;
+  scrollbar-gutter: stable;
+}
+
+/* ---------- Notification bell (opens rightward from sidebar footer) ---------- */
+
+.notification-bell {
+  position: relative;
+}
+
+.notification-bell__button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.95rem;
+}
+
+.notification-bell__badge {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.4rem;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.65rem;
+  line-height: 1;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  min-width: 1rem;
+  text-align: center;
+}
+
+.notification-bell__panel {
+  position: absolute;
+  bottom: 0;
+  left: calc(100% + 0.75rem);
+  width: 340px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.notification-bell__panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.notification-bell__item {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.notification-bell__item:last-child {
+  border-bottom: none;
+}
+
+.notification-bell__item--unread .notification-bell__item-title {
+  font-weight: 600;
+}
+
+.notification-bell__item-title {
   font-size: 0.85rem;
 }
+
+.notification-bell__item-body {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.notification-bell__item-time {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+/* ---------- Banners ---------- */
 
 .config-banner {
   background: rgba(248, 81, 73, 0.12);
   border: 1px solid var(--danger);
   border-radius: 8px;
-  padding: 0.6rem 1rem;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
+  padding: 0.5rem 0.9rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
 }
 
 .sde-banner {
@@ -105,44 +404,269 @@ code {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 0.6rem 1rem;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
+  padding: 0.5rem 0.9rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
 }
 
+/* Once static data is ready this is just a quiet status line, not a banner. */
 .sde-banner--ok {
   color: var(--muted);
+  background: transparent;
+  border: none;
+  padding: 0 0 0.15rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.72rem;
 }
 
 .sde-banner__text {
   flex: 1;
 }
 
+/* ---------- Page scaffolding ---------- */
+
 .page {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
+}
+
+/* Fill-height variant: the page caps itself at the remaining viewport height
+   and delegates scrolling to an inner .table-scroll, so the toolbar, stats,
+   and filter bar stay pinned while only the table rows scroll. (A sticky
+   thead in the page-wide scroller paints unreliably in Chromium and left the
+   controls scrolling away.) */
+.page--fill {
+  flex: 1;
+  min-height: 0;
 }
 
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .toolbar h2 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.1rem;
 }
 
 .toolbar__actions {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
 }
 
-.account-name {
-  min-width: 18rem;
+/* Filter row: search box + dropdowns + result count. */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
+
+.filter-bar input[type='search'] {
+  width: 16rem;
+}
+
+.filter-bar__count {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-left: auto;
+}
+
+/* Summary chips above big lists: totals at a glance. */
+.stats-strip {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.stat-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.stat-chip strong {
+  color: var(--text);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-chip--warn strong {
+  color: var(--warn);
+}
+
+.stat-chip--ok strong {
+  color: var(--ok);
+}
+
+/* ---------- Tables ---------- */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* Dedicated table scroller (see .page--fill): sized to its content but never
+   taller than the space left under the pinned controls. The panel border
+   lives here so the table edges don't scroll out of it. */
+.table-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.table-scroll .data-table {
+  border: none;
+  /* Collapsed borders belong to the table, not the header cells, so they
+     scroll out from under a stuck thead — separate borders stay attached. */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.data-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  /* Headers stay visible while scrolling a long roster. */
+  position: sticky;
+  top: 0;
+  background: var(--panel-raised);
+  z-index: 2;
+  white-space: nowrap;
+}
+
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.data-table th.sortable:hover {
+  color: var(--text);
+}
+
+.data-table th .sort-arrow {
+  font-size: 0.65rem;
+  margin-left: 0.2rem;
+}
+
+.data-table tbody tr:hover {
+  background: var(--row-hover);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Keep the training skill and its remaining time on a single line each. */
+.data-table td.train-skill,
+.data-table td.time-left {
+  white-space: nowrap;
+}
+
+.data-table td.time-left {
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table th.num {
+  text-align: right;
+}
+
+.data-table select {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.3rem;
+  max-width: 11rem;
+}
+
+/* Row actions fade in on hover/focus so 90+ rows aren't a wall of buttons.
+   Kept as a plain (non-flex) table cell so its bottom border stays aligned
+   with the rest of the row — a flex td shrinks to content height and its
+   border drifts out of line with the neighbouring cells. */
+.row-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.row-actions button {
+  vertical-align: middle;
+}
+
+.row-actions button + button {
+  margin-left: 0.4rem;
+}
+
+tr .row-actions button {
+  opacity: 0.15;
+  transition: opacity 0.1s ease-in-out;
+}
+
+tr:hover .row-actions button,
+tr:focus-within .row-actions button {
+  opacity: 1;
+}
+
+.cell-with-avatar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.avatar--lg {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+}
+
+.avatar--xl {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+}
+
+/* ---------- Status colours ---------- */
 
 .sec-high {
   color: var(--ok);
@@ -150,7 +674,7 @@ code {
 }
 
 .sec-low {
-  color: #d29922;
+  color: var(--warn);
   font-weight: 600;
 }
 
@@ -163,48 +687,100 @@ code {
   color: var(--muted);
 }
 
-.location-sub {
-  font-size: 0.78rem;
-  margin-top: 0.1rem;
+.chip {
+  display: inline-block;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--bg);
+  white-space: nowrap;
 }
 
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--panel);
+/* Idle is routine — only one character per account trains unless MCT is active —
+   so it reads as neutral, not a warning. */
+.chip--idle {
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+/* A character still carrying jump fatigue. Blue to match the in-game fatigue timer. */
+.chip--fatigue {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Traffic-light pills for the character-sheet status squares. */
+.chip--ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.chip--danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* "Fatigue / Jump Clone / Training" at-a-glance boxes in the sheet toolbar. */
+.status-squares {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.status-square {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  background: var(--panel);
+  min-width: 5.5rem;
 }
 
-.data-table th,
-.data-table td {
-  text-align: left;
-  padding: 0.6rem 0.8rem;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.9rem;
-}
-
-.data-table th {
+.status-square__title {
+  font-size: 0.7rem;
   color: var(--muted);
-  font-weight: 600;
-  font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
 }
 
-.data-table tbody tr:last-child td {
-  border-bottom: none;
+/* Omega checkbox on the Accounts table. */
+.omega-toggle {
+  white-space: nowrap;
+  font-size: 0.85rem;
 }
 
-.row-actions {
-  display: flex;
-  gap: 0.4rem;
+.status-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--bg);
+  margin: 0.15rem 0;
+}
+
+.status-pill--scope-missing,
+.status-pill--login-expired {
+  border-color: #9e6a03;
+  color: var(--warn);
 }
 
 .muted {
   color: var(--muted);
 }
+
+.location-sub {
+  font-size: 0.75rem;
+  margin-top: 0.05rem;
+}
+
+/* ---------- Empty / error states ---------- */
 
 .empty-state {
   border: 1px dashed var(--border);
@@ -219,47 +795,188 @@ code {
   color: var(--text);
 }
 
+.no-matches {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 1rem;
+  text-align: center;
+}
+
 .error-box {
   background: rgba(248, 81, 73, 0.12);
   border: 1px solid var(--danger);
   border-radius: 8px;
   padding: 0.6rem 1rem;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
 }
+
+/* ---------- Cards ---------- */
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+/* Character sheet only: every card shares one height, sized so the 10-entry
+   skill queue fits; anything taller scrolls inside its card body. */
+.detail-grid--uniform {
+  --detail-card-height: 19rem;
+}
+
+.detail-grid--uniform .card {
+  height: var(--detail-card-height);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detail-grid--uniform .card-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Two half-width cards (Groups + Tags) sharing a single grid slot. */
+.detail-grid--uniform .card-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+/* Two half-height cards (Wallet + Jump fatigue) stacked in a single grid slot. */
+.detail-grid--uniform .card-pair--stack {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+  height: var(--detail-card-height);
+}
+
+.detail-grid--uniform .card-pair--stack .card {
+  height: auto;
+  min-height: 0;
+}
+
+/* Headline figure on the Wallet card. */
+.wallet-balance {
+  margin: 0 0 0.25rem;
+  font-size: 1.35rem;
+  font-weight: 600;
 }
 
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1rem;
 }
 
 .card h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+}
+
+.card h4 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.8rem;
 }
 
 .card dl {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.4rem 1rem;
+  gap: 0.3rem 1rem;
   margin: 0;
 }
 
 .card dt {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 .card dd {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+}
+
+.clone-block {
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+
+/* Expandable jump clone (details/summary) on the character sheet. */
+details.clone-block {
+  margin-top: 0;
+}
+
+details.clone-block:first-child {
+  border-top: none;
+}
+
+details.clone-block summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.35rem 0;
+  user-select: none;
+}
+
+details.clone-block .implant-list,
+details.clone-block > p {
+  margin: 0 0 0.4rem;
+  padding-left: 1.9rem;
+}
+
+.queue-more {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+}
+
+/* Skill-plan progress rows on the character sheet. */
+.plan-progress {
+  padding: 0.35rem 0 0.45rem;
+}
+
+.plan-progress + .plan-progress {
+  border-top: 1px solid var(--border);
+}
+
+.plan-progress__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+
+.plan-progress__bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-raised);
+}
+
+/* Fill width and colour both track the completion ratio (set inline): the whole
+   bar reads red when far from done and green when finished. */
+.plan-progress__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 3px;
+}
+
+/* “Close enough” marker: remaining SP crosses the almost-there threshold here. */
+.plan-progress__tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--text);
+}
+
+.clone-updated {
+  margin-bottom: 0;
+  font-size: 0.72rem;
 }
 
 .queue-list,
@@ -268,18 +985,18 @@ code {
   padding-left: 1.2rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.25rem;
 }
 
 .queue-list li {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .back-link {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .spinner {
@@ -297,42 +1014,87 @@ code {
   }
 }
 
-.app-nav {
+/* ---------- Dense expandable rows (Clones page) ---------- */
+
+.row-list {
   display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.app-nav a {
-  padding: 0.3rem 0.8rem;
-  border-radius: 6px;
+  flex-direction: column;
   border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.row-list__row {
+  border-bottom: 1px solid var(--border);
+}
+
+.row-list__row:last-child {
+  border-bottom: none;
+}
+
+.row-list__header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.row-list__header:hover {
+  background: var(--row-hover);
+}
+
+.row-list__chevron {
+  width: 1rem;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.7rem;
+  flex-shrink: 0;
 }
 
-.app-nav a:hover {
-  text-decoration: none;
-  color: var(--text);
+.row-list__title {
+  min-width: 14rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.app-nav a.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+.row-list__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  margin-left: auto;
+  white-space: nowrap;
 }
+
+.row-list__body {
+  padding: 0.4rem 0.9rem 0.75rem 2.2rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 0.83rem;
+}
+
+/* ---------- Fit / plan import + analysis ---------- */
 
 .eft-input {
   width: 100%;
   font-family: 'Cascadia Code', 'Consolas', monospace;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   resize: vertical;
   margin: 0.5rem 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
 }
 
 .fit-source summary {
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
 }
 
@@ -343,7 +1105,7 @@ code {
   border: 1px solid var(--border);
   border-radius: 6px;
   font-family: 'Cascadia Code', 'Consolas', monospace;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   line-height: 1.5;
   white-space: pre-wrap;
   color: var(--text);
@@ -355,7 +1117,39 @@ code {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
+}
+
+/* Group member picker: a dense, scrollable checkbox grid over the roster. */
+.member-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.1rem 1rem;
+  max-height: 22rem;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+}
+
+.member-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+  font-size: 0.83rem;
+  cursor: pointer;
+}
+
+/* Long name-only lists (e.g. "can fly" with 80 entries) flow into columns. */
+.result-list--columns {
+  display: block;
+  columns: 4 180px;
+  column-gap: 1.5rem;
+}
+
+.result-list--columns li {
+  break-inside: avoid;
+  padding: 0.1rem 0;
+  font-size: 0.83rem;
 }
 
 .result-row {
@@ -365,17 +1159,871 @@ code {
 }
 
 .missing-skills {
-  margin: 0.25rem 0 0;
+  margin: 0.2rem 0 0;
   padding-left: 1.1rem;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--muted);
 }
 
 .threshold-control {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--muted);
 }
 
 .threshold-control input {
   width: 8rem;
+}
+
+/* Cost-system toggle (SP / Injectors / Time): the tab-bar pattern, inline in a toolbar. */
+.tab-bar--inline {
+  margin: 0;
+  border-bottom: none;
+}
+
+.account-name {
+  min-width: 18rem;
+}
+
+/* ---------- Group page ---------- */
+
+/* A link that reads as a small ghost button (e.g. "Open" on a group card). */
+.link-btn {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.link-btn:hover {
+  text-decoration: none;
+  background: var(--row-hover);
+}
+
+.priority-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.priority-row label,
+.priority-row .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.priority-row select {
+  min-width: 14rem;
+}
+
+/* Home-station picker: type-ahead over imported structures. */
+.station-picker {
+  position: relative;
+}
+
+.station-picker input[type='search'] {
+  min-width: 14rem;
+  width: 100%;
+}
+
+.station-picker__results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 100%;
+  max-width: 26rem;
+  z-index: 10;
+  margin-top: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 16rem;
+  overflow-y: auto;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.station-picker__option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.station-picker__option:hover {
+  background: var(--row-hover);
+}
+
+.station-picker__empty {
+  display: block;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+.station-picker__current {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.8rem;
+  color: var(--text);
+}
+
+.station-picker__current span {
+  max-width: 18rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pod whitelist: removable allowed-system chips + the add-system picker on
+   one line, with the violations table (pods to move) underneath. */
+.pod-whitelist__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.pod-whitelist__systems {
+  margin: 0;
+}
+
+.pod-whitelist__systems .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text);
+}
+
+.pod-whitelist__picker input[type='search'] {
+  min-width: 11rem;
+}
+
+/* Collapsible header: chevron + title + "N to move" chip stay visible even
+   when the section body is collapsed. */
+.pod-whitelist__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pod-whitelist__header h3 {
+  margin: 0;
+}
+
+.collapse-toggle {
+  background: none;
+  border: none;
+  padding: 0.1rem 0.25rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.collapse-toggle:hover {
+  color: var(--text);
+}
+
+/* "To move" / "Ignored" tab strip. */
+.tab-bar {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin: 0.6rem 0 0.5rem;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.3rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab--active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.pod-ignored__actions {
+  text-align: right;
+}
+
+.pod-whitelist__ok {
+  color: var(--ok);
+  font-size: 0.8rem;
+}
+
+.chip__remove {
+  background: none;
+  border: none;
+  padding: 0 0 0 0.15rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chip__remove:hover {
+  color: var(--danger);
+}
+
+/* Member status cards: dense grid of portrait-oriented cards (tall and
+   narrow, like in-game character selection), one per character in the group. */
+.member-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.75rem;
+}
+
+.member-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+/* Anchor objective bars to the card's bottom edge so they line up across a
+   row of equal-height cards; only the first bar takes up the slack. */
+.member-card > .plan-progress {
+  margin-top: auto;
+}
+
+.member-card > .plan-progress ~ .plan-progress {
+  margin-top: 0;
+}
+
+/* Red halo: this member's medical clone is not at the group's home station. */
+.member-card--clone-away {
+  border-color: var(--danger);
+  box-shadow:
+    0 0 0 1px var(--danger),
+    0 0 12px color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.med-clone-away {
+  color: var(--danger);
+}
+
+.member-card__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.4rem;
+  margin-bottom: 0.55rem;
+}
+
+.member-card__title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.member-card__title a {
+  font-weight: 600;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.member-card__title .muted {
+  font-size: 0.72rem;
+}
+
+.member-card__sp {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.member-card__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+}
+
+.member-card__facts dt {
+  color: var(--muted);
+}
+
+.member-card__facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+/* Structure names run long; keep the fact grid one line tall per row. */
+.member-card__facts .fact-ellipsis {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.member-card .tag-chips {
+  margin-bottom: 0.45rem;
+}
+
+/* Portrait cards are narrow: objective labels may wrap instead of colliding. */
+.member-card .plan-progress__label {
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  font-size: 0.78rem;
+}
+
+/* A non-empty skill queue that is not training is worth noticing. */
+.queue-paused {
+  color: var(--warn);
+}
+
+.objective-done {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.objective-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Tags ---------- */
+
+/* Small colour picker beside a tag name. */
+.color-swatch {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cell-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  white-space: normal;
+}
+
+/* Capability chips in the roster's Tags column and on the character sheet. */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.tag-chip {
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  /* User-picked tag/group colors (and the default gray) are blended toward the
+     text color so pills stay readable on dark panels. */
+  --tag-color: var(--muted);
+  border-color: color-mix(in srgb, var(--tag-color) 60%, var(--text));
+  color: color-mix(in srgb, var(--tag-color) 60%, var(--text));
+}
+
+/* Character sheet pills are roomier for readability. */
+.detail-grid--uniform .tag-chip {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+}
+
+/* Right-click tag-assignment menu on the Roster. */
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 12rem;
+  max-width: 14rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 0.3rem;
+  font-size: 0.83rem;
+}
+
+.context-menu__title {
+  padding: 0.2rem 0.4rem 0.35rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu__empty {
+  padding: 0.3rem 0.4rem;
+  color: var(--muted);
+}
+
+/* A top-level item that opens a submenu flyout. */
+.context-menu__group {
+  position: relative;
+}
+
+.context-menu__item--parent {
+  justify-content: space-between;
+}
+
+.context-menu__arrow {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.context-menu__submenu {
+  position: absolute;
+  top: -0.3rem;
+  left: 100%;
+  /* Flush against the parent (no gap) so hover doesn't drop while crossing. */
+  min-width: 12rem;
+  max-width: 14rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 0.3rem;
+}
+
+/* Flip to the left when there's no room on the right. */
+.context-menu__submenu--left {
+  left: auto;
+  right: 100%;
+}
+
+/* Near the bottom of the window the flyout grows upward instead. */
+.context-menu__submenu--up {
+  top: auto;
+  bottom: -0.3rem;
+}
+
+.context-menu__list {
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.context-menu__item:hover {
+  background: var(--bg);
+}
+
+.context-menu__dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+/* A menu item that is a real <button> (single-action menus). */
+.context-menu__item--button {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: inherit;
+  text-align: left;
+}
+
+/* "Columns" dropdown on the Roster filter bar. */
+.column-picker {
+  position: relative;
+}
+
+.column-picker__panel {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 11rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 0.3rem;
+  font-size: 0.83rem;
+}
+
+.column-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.column-picker__item:hover {
+  background: var(--bg);
+}
+
+.column-picker__item--locked {
+  color: var(--muted);
+  cursor: default;
+}
+
+.column-picker__item--locked:hover {
+  background: none;
+}
+
+/* Section header carrying a right-aligned action (bulk-tag on fit/plan buckets). */
+.bucket-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.bucket-head h3 {
+  margin: 0;
+}
+
+/* Bulk capability tagging dropdown on a fit/plan result section. */
+.bulk-tag {
+  position: relative;
+}
+
+.bulk-tag__panel {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 15rem;
+  max-width: 18rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 0.3rem;
+  font-size: 0.83rem;
+}
+
+.bulk-tag__hint {
+  padding: 0.25rem 0.4rem 0.35rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+}
+
+.bulk-tag__list {
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.bulk-tag__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-tag__held {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.bulk-tag__new {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.35rem 0.4rem 0.15rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.25rem;
+}
+
+.bulk-tag__new input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- Settings ---------- */
+
+.settings-section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.settings-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.6rem;
+  font-size: 1rem;
+}
+
+.settings-section h3 .icon {
+  color: var(--muted);
+}
+
+/* Collapsible section header: toggle, title, at-a-glance squares, action. */
+.settings-section__header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.settings-section__header h3 {
+  margin: 0;
+}
+
+.settings-section__header-action {
+  margin-left: auto;
+}
+
+.settings-section__body {
+  margin-top: 0.75rem;
+}
+
+/* Smaller squares than the character sheet's, so they fit a section header. */
+.status-squares--compact .status-square {
+  padding: 0.25rem 0.5rem;
+  min-width: 4.2rem;
+  gap: 0.2rem;
+}
+
+.status-squares--compact .status-square__title {
+  font-size: 0.62rem;
+}
+
+.settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.settings-section > p.muted {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  max-width: 72ch;
+}
+
+/* Scheduler / SDE / structures one-liners above the character table. */
+.settings-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.7rem 0 0.9rem;
+  font-size: 0.85rem;
+}
+
+.settings-facts .muted {
+  display: inline-block;
+  width: 130px;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.settings-scope-note {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.stat-chip--danger strong {
+  color: var(--danger);
+}
+
+.theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 210px;
+  padding: 0.55rem 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.theme-option--active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.theme-option input {
+  accent-color: var(--accent);
+}
+
+.theme-option__desc {
+  display: block;
+  font-size: 0.75rem;
+}
+
+/* Half background / half accent, so the swatch previews both. */
+.theme-swatch {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.theme-swatch--dark {
+  background: linear-gradient(135deg, #0d1117 50%, #2f81f7 50%);
+}
+
+.theme-swatch--holo {
+  background: linear-gradient(135deg, #030811 50%, #00d4ff 50%);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+}
+
+.theme-swatch--light {
+  background: linear-gradient(135deg, #f6f8fa 50%, #0969da 50%);
+}
+
+.theme-swatch--void {
+  background: linear-gradient(135deg, #000000 50%, #2f81f7 50%);
+}
+
+.theme-swatch--amber {
+  background: linear-gradient(135deg, #14100a 50%, #d29922 50%);
+}
+
+/* ---------- Dashboard ---------- */
+
+/* Shared entrance: fade + small rise. fill-mode backwards (not both) so the
+   animation releases its transform when done and hover lifts still work. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dashboard-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+}
+
+.dashboard-tile {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  animation: rise-in var(--anim-med) var(--anim-ease) backwards;
+  animation-delay: calc(var(--tile-index, 0) * 40ms);
+  transition:
+    transform var(--anim-fast) var(--anim-ease),
+    border-color var(--anim-fast) var(--anim-ease);
+}
+
+.dashboard-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+
+.dashboard-tile__label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.3rem;
+}
+
+.dashboard-tile__value {
+  font-size: 1.35rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-tile__sub {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+/* Chart cards (Wallet income, Dashboard SP circles); the inner canvas div is
+   what amCharts renders into. */
+.chart-card,
+.sp-chart-card {
+  animation: rise-in var(--anim-med) var(--anim-ease) backwards;
+  animation-delay: 200ms;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 220px;
+}
+
+/* Packed-circles chart: taller than the bar chart so 90+ circles breathe. */
+.sp-chart {
+  width: 100%;
+  height: 460px;
+}
+
+/* Character sheet skill-group radar: opts out of the uniform 19rem card height
+   and spans the full grid width, so the canvas (capped + centred below) sits in
+   a sensible square rather than a wide empty band. */
+.detail-grid--uniform .skill-radar-card {
+  grid-column: 1 / -1;
+  height: auto;
+  overflow: visible;
+}
+
+.skill-radar {
+  width: 100%;
+  max-width: 560px;
+  height: 360px;
+  margin-inline: auto;
 }

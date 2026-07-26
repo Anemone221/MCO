@@ -98,6 +98,38 @@ describe('parseTypeDogmaStream', () => {
     expect(skillReqs).toEqual([{ typeId: 587, skillTypeId: 3327, level: 3 }]);
     expect(ranks).toEqual([{ typeId: 3327, rank: 2 }]);
   });
+
+  it('extracts primary/secondary training attributes from skill blocks', async () => {
+    const yaml = [
+      '3327:',
+      '  dogmaAttributes:',
+      '  - attributeID: 275',
+      '    value: 2.0',
+      '  - attributeID: 180',
+      '    value: 164.0',
+      '  - attributeID: 181',
+      '    value: 165.0',
+      '',
+    ].join('\n');
+
+    const { skillAttributes } = await parseTypeDogmaStream(Readable.from(yaml));
+    expect(skillAttributes).toEqual([
+      { typeId: 3327, primaryAttributeId: 164, secondaryAttributeId: 165 },
+    ]);
+  });
+
+  it('skips blocks missing either training attribute', async () => {
+    const yaml = [
+      '3327:',
+      '  dogmaAttributes:',
+      '  - attributeID: 180',
+      '    value: 167.0',
+      '',
+    ].join('\n');
+
+    const { skillAttributes } = await parseTypeDogmaStream(Readable.from(yaml));
+    expect(skillAttributes).toEqual([]);
+  });
 });
 
 describe('parseSolarSystems', () => {

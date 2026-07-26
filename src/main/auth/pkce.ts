@@ -42,6 +42,16 @@ export function decodeJwtPayload(jwt: string): JwtPayload {
   return JSON.parse(json) as JwtPayload;
 }
 
+/**
+ * Scopes actually granted to an access token, from its `scp` claim. EVE SSO
+ * encodes a single scope as a bare string and multiple scopes as an array.
+ */
+export function scopesFromPayload(payload: JwtPayload): string[] {
+  if (Array.isArray(payload.scp)) return payload.scp;
+  if (typeof payload.scp === 'string') return [payload.scp];
+  return [];
+}
+
 /** Extract the numeric character id from the JWT `sub` claim (e.g. "CHARACTER:EVE:90000001"). */
 export function characterIdFromSub(sub: string | undefined): number {
   if (!sub) throw new Error('JWT missing sub claim');

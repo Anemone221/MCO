@@ -11,9 +11,16 @@ import {
   isClientIdConfigured,
 } from '../config';
 import { upsertCharacter } from '../db/repositories/characters';
+import { clearTokenInvalid, markTokenInvalid } from '../db/repositories/tokens';
 import type { CharacterSummary } from '@shared/types';
 import { cacheAccessToken, persistRefreshToken, readRefreshToken } from './token-store';
-import { characterIdFromSub, createPkcePair, createState, decodeJwtPayload } from './pkce';
+import {
+  characterIdFromSub,
+  createPkcePair,
+  createState,
+  decodeJwtPayload,
+  scopesFromPayload,
+} from './pkce';
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
@@ -77,6 +84,15 @@ function awaitCallback(expectedState: string): Promise<string> {
   });
 }
 
+class TokenRequestError extends Error {
+  constructor(
+    readonly status: number,
+    body: string,
+  ) {
+    super(`Token endpoint returned ${status}: ${body}`);
+  }
+}
+
 async function postToken(body: Record<string, string>): Promise<TokenResponse> {
   const res = await fetch(SSO_TOKEN_URL, {
     method: 'POST',
@@ -88,9 +104,15 @@ async function postToken(body: Record<string, string>): Promise<TokenResponse> {
     body: new URLSearchParams(body).toString(),
   });
   if (!res.ok) {
-    throw new Error(`Token endpoint returned ${res.status}: ${await res.text()}`);
+    throw new TokenRequestError(res.status, await res.text());
   }
   return (await res.json()) as TokenResponse;
+}
+
+/** The scopes actually granted to the token, per its JWT — not what we asked for. */
+function grantedScopeString(token: TokenResponse): string {
+  const scopes = scopesFromPayload(decodeJwtPayload(token.access_token));
+  return scopes.length > 0 ? scopes.join(' ') : ESI_SCOPES.join(' ');
 }
 
 function storeFromTokenResponse(token: TokenResponse): CharacterSummary {
@@ -99,7 +121,7 @@ function storeFromTokenResponse(token: TokenResponse): CharacterSummary {
   const name = payload.name ?? `Character ${characterId}`;
 
   upsertCharacter({ id: characterId, name });
-  persistRefreshToken(characterId, token.refresh_token, ESI_SCOPES.join(' '));
+  persistRefreshToken(characterId, token.refresh_token, grantedScopeString(token));
   cacheAccessToken(characterId, token.access_token, new Date(Date.now() + token.expires_in * 1000));
 
   return {
@@ -154,13 +176,25 @@ export async function refreshAccessToken(characterId: number): Promise<string> {
   const refreshToken = readRefreshToken(characterId);
   if (!refreshToken) throw new Error(`No stored refresh token for character ${characterId}`);
 
-  const token = await postToken({
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    client_id: ESI_CLIENT_ID,
-  });
+  let token: TokenResponse;
+  try {
+    token = await postToken({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: ESI_CLIENT_ID,
+    });
+  } catch (err) {
+    // A 4xx from SSO means the refresh token itself was rejected (expired,
+    // revoked, or the family was invalidated) — record it so the UI can show
+    // a calm "login expired" state instead of a raw error.
+    if (err instanceof TokenRequestError && err.status >= 400 && err.status < 500) {
+      markTokenInvalid(characterId);
+    }
+    throw err;
+  }
 
-  persistRefreshToken(characterId, token.refresh_token, ESI_SCOPES.join(' '));
+  clearTokenInvalid(characterId);
+  persistRefreshToken(characterId, token.refresh_token, grantedScopeString(token));
   cacheAccessToken(characterId, token.access_token, new Date(Date.now() + token.expires_in * 1000));
   return token.access_token;
 }

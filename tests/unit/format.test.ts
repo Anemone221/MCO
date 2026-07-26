@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatBytes,
+  formatDuration,
+  formatIsk,
   formatSp,
   formatTimeUntil,
   romanLevel,
@@ -11,6 +13,27 @@ describe('formatSp', () => {
     expect(formatSp(12_300_000)).toBe('12.3M SP');
     expect(formatSp(45_000)).toBe('45k SP');
     expect(formatSp(512)).toBe('512 SP');
+  });
+
+  it('formats billions (a 90+ character roster combined)', () => {
+    expect(formatSp(43_150_500_000)).toBe('43.15B SP');
+  });
+});
+
+describe('formatIsk', () => {
+  it('formats billions, millions, thousands and small balances', () => {
+    expect(formatIsk(1_234_000_000)).toBe('1.23B ISK');
+    expect(formatIsk(45_600_000)).toBe('45.6M ISK');
+    expect(formatIsk(789_000)).toBe('789k ISK');
+    expect(formatIsk(123.45)).toBe('123 ISK');
+  });
+
+  it('formats trillions (a whale wallet)', () => {
+    expect(formatIsk(1_450_000_000_000)).toBe('1.45T ISK');
+  });
+
+  it('keeps the sign on a negative balance', () => {
+    expect(formatIsk(-2_500_000)).toBe('-2.5M ISK');
   });
 });
 
@@ -39,5 +62,20 @@ describe('formatTimeUntil', () => {
   it('formats a future timestamp as a relative duration', () => {
     const future = new Date(Date.now() + 3 * 86_400_000 + 4 * 3_600_000).toISOString();
     expect(formatTimeUntil(future)).toBe('in 3d 4h');
+  });
+});
+
+describe('formatDuration', () => {
+  it('formats days, hours and minutes', () => {
+    expect(formatDuration(20_340)).toBe('14d 3h');
+    expect(formatDuration(192)).toBe('3h 12m');
+    expect(formatDuration(45)).toBe('45m');
+  });
+
+  it('handles sub-minute, zero and invalid spans', () => {
+    expect(formatDuration(0.4)).toBe('<1m');
+    expect(formatDuration(0)).toBe('0m');
+    expect(formatDuration(-5)).toBe('—');
+    expect(formatDuration(Number.NaN)).toBe('—');
   });
 });

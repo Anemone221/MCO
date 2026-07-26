@@ -117,4 +117,56 @@ describe('analyzeFit', () => {
     expect(result!.canFly).toBe(false);
     expect(result!.spGap).toBe(spForLevel(1, 3) + spForLevel(1, 2));
   });
+
+  it('zeroes the injector and time gaps for a capable character', () => {
+    const [result] = analyzeFit({
+      ...base,
+      characters: [character(1, 'Able', { 100: { sp: 8000, trainedLevel: 3 } })],
+    });
+    expect(result!.lsiGap).toBe(0);
+    expect(result!.timeGapMinutes).toBe(0);
+  });
+
+  it('computes training time from skill attributes and character attributes', () => {
+    const [result] = analyzeFit({
+      ...base,
+      skillAttributes: new Map([[100, { primary: 'perception', secondary: 'willpower' }]]),
+      characters: [
+        {
+          ...character(2, 'Partial', { 100: { sp: 250, trainedLevel: 1 } }),
+          attributes: { charisma: 17, intelligence: 17, memory: 17, perception: 17, willpower: 17 },
+        },
+      ],
+    });
+    // 7750 SP short at 17 + 17/2 = 25.5 SP/min.
+    expect(result!.timeGapMinutes).toBeCloseTo(7750 / 25.5, 5);
+  });
+
+  it('nulls the time gap when the character has no synced attributes', () => {
+    const [result] = analyzeFit({
+      ...base,
+      skillAttributes: new Map([[100, { primary: 'perception', secondary: 'willpower' }]]),
+      characters: [character(2, 'Partial', { 100: { sp: 250, trainedLevel: 1 } })],
+    });
+    expect(result!.timeGapMinutes).toBeNull();
+  });
+
+  it('takes total SP for the injector tier from the skills map', () => {
+    // 100m SP parked in an unrelated skill puts the character in the 150k tier.
+    const [result] = analyzeFit({
+      ...base,
+      characters: [character(4, 'Veteran', { 999: { sp: 100_000_000, trainedLevel: 5 } })],
+    });
+    expect(result!.spGap).toBe(8000);
+    expect(result!.lsiGap).toBe(1);
+    const [fresh] = analyzeFit({
+      directReqs: [{ skillTypeId: 100, level: 5 }],
+      skillPrereqs: new Map(),
+      ranks: new Map([[100, 5]]),
+      skillNames: new Map(),
+      characters: [character(5, 'Deep', { 999: { sp: 100_000_000, trainedLevel: 5 } })],
+    });
+    // 1,280,000 SP gap at 150k per injector = 9 injectors.
+    expect(fresh!.lsiGap).toBe(9);
+  });
 });

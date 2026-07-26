@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron';
 import { getToken, saveToken, updateAccessToken } from '../db/repositories/tokens';
+import { decodeJwtPayload, scopesFromPayload } from './pkce';
 
 function assertEncryptionAvailable(): void {
   if (!safeStorage.isEncryptionAvailable()) {
@@ -40,4 +41,28 @@ export function getValidCachedAccessToken(characterId: number, skewMs = 60_000):
   const expiresAt = new Date(stored.accessExpiresAt).getTime();
   if (Number.isNaN(expiresAt) || expiresAt - Date.now() < skewMs) return null;
   return stored.accessToken;
+}
+
+/**
+ * Scopes actually granted to a character's token. Prefers the `scp` claim of
+ * the last-seen access token (the source of truth for the token family, even
+ * once expired) over the stored scope list recorded at login.
+ */
+export function grantedScopes(characterId: number): string[] {
+  const stored = getToken(characterId);
+  if (!stored) return [];
+  if (stored.accessToken) {
+    try {
+      const scopes = scopesFromPayload(decodeJwtPayload(stored.accessToken));
+      if (scopes.length > 0) return scopes;
+    } catch {
+      // fall through to the recorded scope list
+    }
+  }
+  return stored.scopes.split(' ').filter((s) => s.length > 0);
+}
+
+/** True when the character's token was granted the given ESI scope. */
+export function hasGrantedScope(characterId: number, scope: string): boolean {
+  return grantedScopes(characterId).includes(scope);
 }

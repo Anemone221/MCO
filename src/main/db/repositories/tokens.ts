@@ -27,9 +27,32 @@ export function saveToken(input: {
        VALUES (@characterId, @refreshTokenEncrypted, @scopes)
        ON CONFLICT(character_id) DO UPDATE SET
          refresh_token_encrypted = excluded.refresh_token_encrypted,
-         scopes = excluded.scopes`,
+         scopes = excluded.scopes,
+         invalid_at = NULL`,
     )
     .run(input);
+}
+
+/** Record that a character's refresh token was rejected by SSO (expired/revoked). */
+export function markTokenInvalid(characterId: number): void {
+  getDb()
+    .prepare("UPDATE tokens SET invalid_at = datetime('now') WHERE character_id = ?")
+    .run(characterId);
+}
+
+/** Clear the invalid marker after a successful refresh. */
+export function clearTokenInvalid(characterId: number): void {
+  getDb()
+    .prepare('UPDATE tokens SET invalid_at = NULL WHERE character_id = ?')
+    .run(characterId);
+}
+
+/** Character ids whose refresh token has been rejected by SSO. */
+export function getInvalidTokenIds(): Set<number> {
+  const rows = getDb()
+    .prepare('SELECT character_id FROM tokens WHERE invalid_at IS NOT NULL')
+    .all() as Array<{ character_id: number }>;
+  return new Set(rows.map((r) => r.character_id));
 }
 
 export function getToken(characterId: number): StoredToken | null {

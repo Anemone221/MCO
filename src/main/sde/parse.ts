@@ -135,9 +135,16 @@ export interface TypeRank {
   rank: number;
 }
 
+export interface TypeSkillAttributes {
+  typeId: number;
+  primaryAttributeId: number;
+  secondaryAttributeId: number;
+}
+
 export interface TypeDogmaResult {
   skillReqs: TypeSkillReq[];
   ranks: TypeRank[];
+  skillAttributes: TypeSkillAttributes[];
 }
 
 /** Dogma attribute id pairs: [skill-typeId attribute, required-level attribute]. */
@@ -151,6 +158,9 @@ const SKILL_REQ_ATTR_PAIRS: ReadonlyArray<readonly [number, number]> = [
 ];
 /** Dogma attribute id for skillTimeConstant (skill rank). */
 const RANK_ATTR_ID = 275;
+/** Dogma attribute ids whose values name a skill's training attributes. */
+const PRIMARY_ATTR_ID = 180;
+const SECONDARY_ATTR_ID = 181;
 
 interface DogmaBlock {
   dogmaAttributes?: { attributeID: number; value: number }[];
@@ -168,6 +178,7 @@ export async function parseTypeDogmaStream(
 ): Promise<TypeDogmaResult> {
   const skillReqs: TypeSkillReq[] = [];
   const ranks: TypeRank[] = [];
+  const skillAttributes: TypeSkillAttributes[] = [];
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
   let blockId: number | null = null;
@@ -195,6 +206,16 @@ export async function parseTypeDogmaStream(
 
       const rank = byId.get(RANK_ATTR_ID);
       if (rank !== undefined && rank > 0) ranks.push({ typeId: blockId, rank });
+
+      const primary = byId.get(PRIMARY_ATTR_ID);
+      const secondary = byId.get(SECONDARY_ATTR_ID);
+      if (primary !== undefined && primary > 0 && secondary !== undefined && secondary > 0) {
+        skillAttributes.push({
+          typeId: blockId,
+          primaryAttributeId: Math.round(primary),
+          secondaryAttributeId: Math.round(secondary),
+        });
+      }
     }
     processed += 1;
     if (processed % 10_000 === 0) onProgress?.({ typesProcessed: processed });
@@ -211,5 +232,5 @@ export async function parseTypeDogmaStream(
     }
   }
   flush();
-  return { skillReqs, ranks };
+  return { skillReqs, ranks, skillAttributes };
 }

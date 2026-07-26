@@ -1,3 +1,4 @@
+import type { SkillGroupSp } from '@shared/types';
 import { getDb } from '../index';
 
 export interface SkillRow {
@@ -71,11 +72,50 @@ export function getQueue(characterId: number): QueueRow[] {
   }));
 }
 
+/**
+ * Trained SP per skill group for one character, biggest first. Each trained
+ * skill maps to its SDE group (all of which live in the Skills category), so
+ * the join needs no category filter. Returns [] when the character has no
+ * skills or the SDE has not been imported yet (the type/group tables are empty).
+ */
+export function getCharacterSkillGroupSp(characterId: number): SkillGroupSp[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT g.name AS group_name, SUM(cs.sp) AS sp
+       FROM character_skills cs
+       JOIN sde_types t ON cs.skill_type_id = t.id
+       JOIN sde_groups g ON t.group_id = g.id
+       WHERE cs.character_id = ?
+       GROUP BY g.id
+       ORDER BY sp DESC`,
+    )
+    .all(characterId) as Array<{ group_name: string; sp: number }>;
+  return rows.map((r) => ({ group: r.group_name, sp: r.sp }));
+}
+
 export function getTotalSp(characterId: number): number {
   const row = getDb()
     .prepare('SELECT COALESCE(SUM(sp), 0) AS total FROM character_skills WHERE character_id = ?')
     .get(characterId) as { total: number };
   return row.total;
+}
+
+/** Active level of one skill for one character (0 when not injected). */
+export function getActiveSkillLevel(characterId: number, skillTypeId: number): number {
+  const row = getDb()
+    .prepare(
+      'SELECT active_level FROM character_skills WHERE character_id = ? AND skill_type_id = ?',
+    )
+    .get(characterId, skillTypeId) as { active_level: number } | undefined;
+  return row?.active_level ?? 0;
+}
+
+/** Active level of one skill for every character that has it injected. */
+export function getActiveSkillLevels(skillTypeId: number): Map<number, number> {
+  const rows = getDb()
+    .prepare('SELECT character_id, active_level FROM character_skills WHERE skill_type_id = ?')
+    .all(skillTypeId) as Array<{ character_id: number; active_level: number }>;
+  return new Map(rows.map((r) => [r.character_id, r.active_level]));
 }
 
 export interface CharacterSkill {
