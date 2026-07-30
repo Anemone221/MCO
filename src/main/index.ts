@@ -1,6 +1,6 @@
-import { app, BrowserWindow, shell, type Tray } from 'electron';
+import { app, BrowserWindow, nativeImage, shell, type Tray } from 'electron';
 import { join } from 'node:path';
-import appIcon from '../../resources/icon.png?asset';
+import appIconPath from '../../resources/icon.png?asset';
 import { closeDb, getDb } from './db';
 import { initLogCapture } from './log';
 import { registerIpc } from './ipc/register';
@@ -31,8 +31,10 @@ function createWindow(): void {
     autoHideMenuBar: true,
     title: 'MCO — Massive Character Organization',
     // Window/taskbar icon for dev and Linux; the packaged Windows exe and macOS
-    // bundle carry their own icon from electron-builder (build/icon.*).
-    icon: appIcon,
+    // bundle carry their own icon from electron-builder (build/icon.*). Load via
+    // nativeImage (like the tray) — a raw string path into app.asar isn't
+    // reliably loaded as a window icon and falls back to the default Electron icon.
+    icon: nativeImage.createFromPath(appIconPath),
     backgroundColor: '#0d1117',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

@@ -13,21 +13,19 @@ public build · **P2** = quality/robustness · **P3** = nice-to-have.
 
 ## A. Release readiness — generating `.exe`s
 
-### A1 · App icon (P0) — ✅ done (2026-07-26)
+### A1 · App icon (P0) — ✅ done
 Was: no application icon (default Electron icon on exe/installer/window). Now wired from
-`Clonebay.png`:
+the crisp `Clonebay_1024.png` master:
 
-- `build/icon.ico` — multi-resolution (16/24/32/48/64/128/256), referenced by `win.icon`
+- `build/icon.ico` — multi-resolution (16/24/32/48/64/128/256, each a PNG frame
+  downscaled from the 1024 master; verified all frames decode), referenced by `win.icon`
   in `electron-builder.yml`.
-- `build/icon.png` — 1024×1024; electron-builder generates the macOS `.icns` and Linux
-  icon set from it (auto-discovered in `buildResources: build`).
+- `build/icon.png` — 1024×1024 (copy of the master); electron-builder generates the macOS
+  `.icns` and Linux icon set from it (auto-discovered in `buildResources: build`).
 - `resources/icon.png` — 256×256; the runtime `BrowserWindow` icon, imported via
   `?asset` in `src/main/index.ts` (same proven mechanism as the tray icon).
 
-**Caveat:** the source `Clonebay.png` is only **64×64**, so the generated icons are
-upscaled and slightly soft. For crisp rendering, replace `Clonebay.png` with a **512×512
-or 1024×1024** master (or a vector/SVG) and regenerate. Regeneration steps are documented
-in [development.md](development.md) (icons section).
+Regeneration steps are documented in [development.md](development.md) (App icons section).
 
 ### A2 · Commit the build inputs (P0)
 `build/` and `resources/` are untracked. They're required for `npm run dist` to produce a

@@ -8,8 +8,11 @@ directories:
 
 # better-sqlite3 ships a native .node binary that cannot be loaded from inside
 # an asar archive, so it must be unpacked.
+# resources/ (window + tray icons) is also unpacked so nativeImage loads them
+# from a real file on disk — window icons are not reliably read from inside asar.
 asarUnpack:
   - '**/node_modules/better-sqlite3/**'
+  - 'resources/**'
 
 files:
   - out/**/*
@@ -18,7 +21,7 @@ files:
 
 # App icons live in the buildResources dir (build/): icon.ico for Windows,
 # icon.png (1024x1024) for macOS/Linux — electron-builder generates the .icns
-# and Linux icon set from it. Regenerate from Clonebay.png; see docs/development.md.
+# and Linux icon set from it. Regenerate from Clonebay_1024.png; see docs/development.md.
 win:
   icon: build/icon.ico
   target:

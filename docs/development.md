@@ -73,27 +73,59 @@ typecheck → lint → unit tests → build → e2e (under `xvfb-run` on Linux).
   (`com.anemone221.mco`) for Windows toasts to work under NSIS.
 - `resources/tray.png` is the tray icon, imported with electron-vite's `?asset` suffix.
 
-### App icons
+### Windows packaging: `winCodeSign` symlink error
 
-The app icon derives from `Clonebay.png` (repo root, the editable master). Generated
-assets:
-
-- `build/icon.ico` — multi-resolution Windows icon (16/24/32/48/64/128/256), referenced
-  by `win.icon` in `electron-builder.yml`. Embedded in `MCO.exe` and the NSIS installer.
-- `build/icon.png` — 1024×1024; electron-builder generates the macOS `.icns` and Linux
-  icon set from it (auto-discovered in `buildResources: build`).
-- `resources/icon.png` — 256×256; the runtime `BrowserWindow` icon (dev + Linux window /
-  taskbar), imported via `?asset` in `src/main/index.ts`. Windows/macOS packaged builds
-  use the embedded exe/bundle icon instead.
-
-To regenerate after replacing the master (use a **≥512×512** source for crisp results —
-64×64 upscales soft), re-run the `System.Drawing` resize used to create them, or convert
-with ImageMagick:
+On Windows, `npm run dist` may fail while unpacking electron-builder's toolchain:
 
 ```
-magick Clonebay.png -resize 1024x1024 build/icon.png
-magick Clonebay.png -resize 256x256   resources/icon.png
-magick Clonebay.png -define icon:auto-resize=256,128,64,48,32,24,16 build/icon.ico
+⨯ cannot execute … 7za.exe x … winCodeSign-2.6.0.7z …
+  ERROR: Cannot create symbolic link : A required privilege is not held by the
+  client. : …\winCodeSign\…\darwin\10.12\lib\libssl.dylib
+```
+
+The `winCodeSign` bundle (used for `rcedit`, which stamps the app icon/version onto
+`MCO.exe`) contains **macOS `.dylib` symlinks**, and Windows forbids creating symlinks
+without elevation. The `darwin/*` files are never used on Windows. Any one of these fixes
+it — pick the first that applies:
+
+1. **Enable Developer Mode** (Settings → System → For developers → Developer Mode = On),
+   then `npm run dist`. Grants symlink privilege to normal user shells; persists.
+2. **Run the build once from an Administrator terminal.** The toolchain extracts and
+   caches, after which normal (non-admin) builds work.
+3. **Pre-seed the cache without the symlinks** (no admin needed), then build:
+   ```sh
+   CACHE="$LOCALAPPDATA/electron-builder/Cache/winCodeSign"   # %LOCALAPPDATA%\electron-builder\Cache\winCodeSign
+   node_modules/7zip-bin/win/x64/7za.exe x "$CACHE"/*.7z -o"$CACHE/winCodeSign-2.6.0" -xr'!'darwin -y
+   npm run dist
+   ```
+   app-builder finds the extracted `winCodeSign-2.6.0` folder and skips its own (failing)
+   extraction. The cache persists, so this is a one-time step per machine.
+
+CI (GitHub-hosted Windows runners) is unaffected — those images allow symlink creation.
+
+### App icons
+
+The app icon derives from `Clonebay_1024.png` (repo root, the 1024×1024 master; the
+smaller `Clonebay_256/128.png` and the original 64px `Clonebay.png` are kept as
+convenience copies). Generated assets:
+
+- `build/icon.ico` — multi-resolution Windows icon (16/24/32/48/64/128/256, each a PNG
+  frame downscaled from the 1024 master), referenced by `win.icon` in
+  `electron-builder.yml`. Embedded in `MCO.exe` and the NSIS installer.
+- `build/icon.png` — 1024×1024; a direct copy of the master. electron-builder generates
+  the macOS `.icns` and Linux icon set from it (auto-discovered in `buildResources: build`).
+- `resources/icon.png` — 256×256 (copy of `Clonebay_256.png`); the runtime `BrowserWindow`
+  icon (dev + Linux window / taskbar), imported via `?asset` in `src/main/index.ts`.
+  Windows/macOS packaged builds use the embedded exe/bundle icon instead.
+
+To regenerate after replacing the master (keep it **1024×1024** for crisp downscales),
+copy the master to `build/icon.png` + a 256 to `resources/icon.png`, then rebuild the
+`.ico` by downscaling the master to each size. With ImageMagick:
+
+```
+cp Clonebay_1024.png build/icon.png
+magick Clonebay_1024.png -resize 256x256 resources/icon.png
+magick Clonebay_1024.png -define icon:auto-resize=256,128,64,48,32,24,16 build/icon.ico
 ```
 
 ## Conventions
