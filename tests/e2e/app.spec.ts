@@ -2,18 +2,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
-
-/**
- * The host environment sets ELECTRON_RUN_AS_NODE=1, which would make Electron
- * run as plain Node (no window). Strip it before launching the app.
- */
-function appEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'ELECTRON_RUN_AS_NODE') env[key] = value;
-  }
-  return env;
-}
+import { appEnv } from '../support/electronEnv';
 
 /** Launch the built app against an isolated, throwaway userData directory. */
 async function launchApp(userDataDir: string): Promise<ElectronApplication> {
@@ -261,6 +250,44 @@ test('demo mode toggle persists across restarts', async () => {
   await secondWindow.getByTestId('settings-gear').click();
   await expect(secondWindow.getByTestId('demo-mode-toggle')).toBeChecked();
   await second.close();
+});
+
+test('close-to-tray preference persists across restarts', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+
+  // Unlike theme/demo mode this one lives in the database (app_settings), because
+  // the main process reads it with no renderer around to ask.
+  const first = await launchApp(userDataDir);
+  const firstWindow = await first.firstWindow();
+  await firstWindow.getByTestId('settings-gear').click();
+  const toggle = firstWindow.getByTestId('close-to-tray-toggle');
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await expect(toggle).toBeChecked();
+  await first.close();
+
+  const second = await launchApp(userDataDir);
+  const secondWindow = await second.firstWindow();
+  await secondWindow.getByTestId('settings-gear').click();
+  await expect(secondWindow.getByTestId('close-to-tray-toggle')).toBeChecked();
+  // Turning it back off keeps the profile quittable for the next run.
+  await secondWindow.getByTestId('close-to-tray-toggle').uncheck();
+  await second.close();
+});
+
+test('"Run in background now" closes the window but keeps the app alive', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByTestId('settings-gear').click();
+  await window.getByTestId('settings-run-in-background').click();
+
+  // No windows left, but the process (and with it the hourly sweep) lives on.
+  await expect.poll(() => app.windows().length).toBe(0);
+  expect(await app.evaluate(({ app: electronApp }) => electronApp.isReady())).toBe(true);
+
+  await app.close();
 });
 
 test('shows an empty notification bell on a fresh profile', async () => {

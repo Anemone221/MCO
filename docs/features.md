@@ -303,7 +303,7 @@ board row. Station and structure names resolve the same way as clone locations.
 ## Settings (`/settings`, `pages/Settings.tsx`)
 
 Opened via the gear button at the bottom of the sidebar (next to the notification
-bell). Six sections:
+bell). Seven sections:
 
 - **Sync status** (`services/settingsService.ts` → `buildSyncStatus()`): a
   collapsible section (state persisted in `localStorage`) whose header shows
@@ -316,6 +316,13 @@ bell). Six sections:
   still fresh), `due` (cache lapsed — routine, the next sweep picks it up),
   `never-synced`, or `login-expired` (alarming, chip in red). Rows also flag tokens
   missing scopes from the current `ESI_SCOPES` set.
+- **Background sync** (`services/backgroundMode.ts`): keeps the hourly sweep running
+  with the window closed, without relaunching as `MCO.exe --background`. A checkbox
+  ("Keep syncing in the tray when I close the window", persisted in `app_settings`, so
+  the main process can read it with no renderer alive) plus "Run in background now",
+  which raises the tray and closes the window immediately. Disabled when the process
+  was launched with `--background` — that one always lives in the tray. See
+  [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts).
 - **Appearance**: theme picker. Themes are CSS custom-property override blocks in
   `styles.css` keyed off `data-theme` on `<html>` (`dark` default, `holo` — a sci-fi
   cyan HUD look with theme-scoped glow rules, `light`, `void`, `amber`). Definitions

@@ -5,6 +5,7 @@ import { getQueue } from '../db/repositories/skills';
 import { getTypeNames } from '../db/repositories/sde';
 import { createNotification, markRead } from '../db/repositories/notifications';
 import { findQueueDrainWarnings, type QueueDrainCandidate } from '../notifications/queueDrain';
+import { openWindow } from './backgroundMode';
 
 function formatRemaining(ms: number): string {
   const totalMinutes = Math.floor(ms / 60_000);
@@ -63,8 +64,9 @@ export function checkQueueDrainWarnings(
       toast.on('click', () => {
         markRead(created.id);
         getWindow()?.webContents.send(IpcChannel.notificationsChanged);
-        getWindow()?.show();
-        getWindow()?.focus();
+        // Not getWindow()?.show(): in tray-only mode there is no window to show,
+        // and clicking the toast would do nothing. This creates one if needed.
+        openWindow();
       });
       toast.show();
     }

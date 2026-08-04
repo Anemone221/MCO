@@ -66,6 +66,11 @@ import {
   getAppInfo,
   openDataFolder,
 } from '../services/settingsService';
+import {
+  enterBackgroundNow,
+  getBackgroundModeSettings,
+  setCloseToTray,
+} from '../services/backgroundMode';
 
 /** Wire every renderer-facing IPC channel to its main-process handler. */
 export function registerIpc(getWindow: () => BrowserWindow | null): void {
@@ -237,4 +242,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(IpcChannel.settingsExportLogs, () => exportLogs(getWindow()));
   ipcMain.handle(IpcChannel.settingsExportBackup, () => exportBackup(getWindow()));
   ipcMain.handle(IpcChannel.settingsOpenDataFolder, () => openDataFolder());
+  ipcMain.handle(IpcChannel.settingsBackgroundMode, () => getBackgroundModeSettings());
+  ipcMain.handle(IpcChannel.settingsSetCloseToTray, (_event, enabled: boolean) =>
+    setCloseToTray(enabled),
+  );
+  ipcMain.handle(IpcChannel.settingsRunInBackground, () => enterBackgroundNow());
 }

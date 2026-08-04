@@ -22,6 +22,7 @@
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "test:e2e": "electron-vite build && playwright test",
+    "test:packaged": "npm run dist:dir && playwright test --config=playwright.packaged.config.ts",
     "dist": "electron-vite build && electron-builder",
     "dist:dir": "electron-vite build && electron-builder --dir",
     "postinstall": "electron-builder install-app-deps"

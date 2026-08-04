@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type {
   AppInfo,
+  BackgroundModeSettings,
   CharacterSyncState,
   EsiActivitySummary,
   EsiEventKind,
@@ -21,6 +22,7 @@ import {
   FileTextIcon,
   GithubIcon,
   InfoIcon,
+  MinimizeIcon,
   PaletteIcon,
   RefreshIcon,
 } from '../components/icons';
@@ -186,6 +188,7 @@ export default function Settings() {
   const [status, setStatus] = useState<SyncStatusReport | null>(null);
   const [esi, setEsi] = useState<EsiActivitySummary | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [background, setBackground] = useState<BackgroundModeSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -199,14 +202,16 @@ export default function Settings() {
     setLoading(true);
     setError(null);
     try {
-      const [s, a, i] = await Promise.all([
+      const [s, a, i, b] = await Promise.all([
         mco.settings.syncStatus(),
         mco.settings.esiActivity(),
         mco.system.appInfo(),
+        mco.settings.backgroundMode(),
       ]);
       setStatus(s);
       setEsi(a);
       setInfo(i);
+      setBackground(b);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -251,6 +256,23 @@ export default function Settings() {
       setError(String(e));
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function toggleCloseToTray(): Promise<void> {
+    if (!background) return;
+    try {
+      setBackground(await mco.settings.setCloseToTray(!background.closeToTray));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function runInBackground(): Promise<void> {
+    try {
+      setBackground(await mco.settings.runInBackground());
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -413,6 +435,50 @@ export default function Settings() {
             )}
           </div>
         )}
+      </div>
+
+      <div className="settings-section">
+        <h3>
+          <MinimizeIcon size={15} />
+          Background sync
+        </h3>
+        <p className="muted">
+          The hourly sweep runs whenever MCO is running. Keep MCO in the notification area to
+          carry on syncing — and raising skill-queue warnings — with the window closed. Reopen
+          or quit it from the tray icon; there is still only one MCO per profile either way.
+        </p>
+        <label className="muted">
+          <input
+            type="checkbox"
+            checked={background?.closeToTray ?? false}
+            disabled={!background || background.launchedInBackground}
+            onChange={() => void toggleCloseToTray()}
+            data-testid="close-to-tray-toggle"
+          />{' '}
+          Keep syncing in the tray when I close the window
+        </label>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => void runInBackground()}
+            data-testid="settings-run-in-background"
+          >
+            Run in background now
+          </button>
+          {background?.launchedInBackground && (
+            <span className="muted">
+              Started in background mode — this MCO always lives in the tray.
+            </span>
+          )}
+          {/* Only after tray mode was actually asked for: trayActive is false
+              by design whenever the option is off. */}
+          {background?.closeToTray && !background.trayActive && (
+            <span className="muted" data-testid="tray-unavailable">
+              No notification area available on this desktop — MCO will stay in a window.
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="settings-section">

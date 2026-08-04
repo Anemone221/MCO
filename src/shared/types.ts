@@ -572,6 +572,16 @@ export interface SyncStatusReport {
   };
 }
 
+/** Tray residency — whether sync keeps running once the window is closed. */
+export interface BackgroundModeSettings {
+  /** Persisted: closing the window drops to tray-only sync instead of quitting. */
+  closeToTray: boolean;
+  /** This process was launched with `--background` (tray-only from the start). */
+  launchedInBackground: boolean;
+  /** A tray icon is up right now. */
+  trayActive: boolean;
+}
+
 /** Kinds of noteworthy ESI event captured by the structured ESI log. */
 export type EsiEventKind =
   | 'throttle' // HTTP 420 (legacy error limit) or 429 (floating-window bucket)

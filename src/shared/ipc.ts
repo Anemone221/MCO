@@ -2,6 +2,7 @@ import type {
   AccountBucket,
   AppInfo,
   AppNotification,
+  BackgroundModeSettings,
   CharacterDetail,
   CharacterGroup,
   CharacterSummary,
@@ -93,6 +94,9 @@ export const IpcChannel = {
   settingsExportLogs: 'settings:exportLogs',
   settingsExportBackup: 'settings:exportBackup',
   settingsOpenDataFolder: 'settings:openDataFolder',
+  settingsBackgroundMode: 'settings:backgroundMode',
+  settingsSetCloseToTray: 'settings:setCloseToTray',
+  settingsRunInBackground: 'settings:runInBackground',
 } as const;
 
 export interface SdeImportSummary {
@@ -238,5 +242,14 @@ export interface McoApi {
     exportBackup: () => Promise<string | null>;
     /** Open the profile's data folder (where mco.sqlite lives) in the OS file manager. */
     openDataFolder: () => Promise<void>;
+    /** Tray residency: whether sync keeps running once the window is closed. */
+    backgroundMode: () => Promise<BackgroundModeSettings>;
+    /** Persist close-to-tray; resolves to the resulting state. */
+    setCloseToTray: (enabled: boolean) => Promise<BackgroundModeSettings>;
+    /**
+     * Close the window now and keep syncing from the tray. Resolves to the
+     * resulting state — the window stays open if no tray icon could be raised.
+     */
+    runInBackground: () => Promise<BackgroundModeSettings>;
   };
 }

@@ -51,6 +51,7 @@ its own transaction. Rules:
 | 21 | sde_skill_attributes | `sde_skill_attributes` |
 | 22 | character_online | `character_online` |
 | 23 | character_wallet_journal | `character_wallet_journal` |
+| 24 | app_settings | `app_settings` |
 
 ## Schema reference
 
@@ -149,6 +150,11 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 - **`notifications`** — in-app notification feed. `dedupe_key` (UNIQUE) is what makes
   "notify once per distinct occurrence" work, e.g. `queue-drain:<charId>:<finishDate>`.
 - **`sde_version`** — single row (id=1): imported SDE build number + timestamp.
+- **`app_settings`** — key/value store for preferences the *main* process owns, i.e. ones
+  it must read with no renderer around (`close_to_tray`, `tray_notice_shown` — see
+  [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts)). Booleans are
+  `'1'`/`'0'`; a missing key reads as the caller's fallback, so nothing needs seeding.
+  Renderer-only view state (theme, demo mode, collapsed sections) stays in localStorage.
 
 ### SDE tables (filled by the import pipeline, see [sde.md](sde.md))
 

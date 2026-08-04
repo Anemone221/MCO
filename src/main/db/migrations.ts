@@ -447,6 +447,22 @@ const MIGRATIONS: Migration[] = [
         ON character_wallet_journal (occurred_at);
     `,
   },
+  {
+    // Key/value store for main-process preferences — settings the main process
+    // must know without a renderer (the window may be closed, or never opened
+    // in --background mode), so localStorage is not an option. Renderer-only
+    // view state (collapsed sections, theme, column choices) stays in
+    // localStorage; this table is for behaviour the main process owns.
+    version: 24,
+    name: 'app_settings',
+    sql: `
+      CREATE TABLE app_settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: Database): void {

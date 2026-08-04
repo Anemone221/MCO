@@ -88,14 +88,34 @@ Two ways to launch, distinguished by the `--background` flag (`launchMode.ts`):
   shortcut created by `build/installer.nsh`): no window — just a tray icon (`tray.ts`)
   with *Open MCO / Run sync now / Quit*, while the scheduler keeps syncing.
 
+The scheduler runs in **both** modes — the flag only decides whether a window and a tray
+icon exist at startup. Which is why tray residency is a *runtime* choice too, owned by
+`services/backgroundMode.ts`:
+
+- **Settings → Background sync → "Keep syncing in the tray when I close the window"**
+  persists `close_to_tray` in `app_settings` and raises the tray immediately.
+- **"Run in background now"** raises the tray and closes the window in one step.
+
+`window-all-closed` then asks `shouldQuitOnWindowClose({ platform, residentInTray })`
+(pure, unit-tested) instead of reading the launch flag. Resident = launched with
+`--background`, or the preference is on, or "Run in background now" was used this session.
+The first close into the tray raises a one-time "MCO is still running" toast, because a
+process that leaves the taskbar but keeps running otherwise reads as a crash.
+
+Runtime residency additionally requires the tray icon to have actually come up
+(`ensureTray` catches — some Linux desktops have no notification area): with no tray and
+no window there would be no way back into the app and no way to quit it. For the same
+reason a `--background` launch that cannot raise a tray falls back to opening a window.
+
 A **single-instance lock** guards both modes. This is not cosmetic: EVE SSO rotates the
 refresh token on every refresh, so two MCO processes racing to refresh the same character
 would invalidate the token family and de-auth the character. A second normal launch
 *promotes* the running instance (shows/creates the window); a second background launch is
 a no-op. Closing a promoted window in background mode drops back to tray-only sync.
 
-Startup order: open DB (runs migrations) → `registerIpc` → `startScheduler` → window or
-tray. On quit: destroy tray, stop scheduler, close DB.
+Startup order: open DB (runs migrations) → `initBackgroundMode` (reads the preference, so
+it must follow the DB open) → `registerIpc` → `startScheduler` → window or tray. On quit:
+destroy tray, stop scheduler, close DB.
 
 `app.setAppUserModelId('com.anemone221.mco')` is required for Windows toast notifications
 under the NSIS build target (which, unlike Squirrel, does not auto-register the AUMID).

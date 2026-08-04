@@ -44,12 +44,26 @@ Decide the target audience. If it's "me + a few corpmates," document the right-c
 public, budget for certs. Either way, make it an explicit, written decision — don't let
 the first user discover it.
 
-### A4 · CI never packages (P1)
-CI runs `build` but not `electron-builder`, so a broken packaging config (a bad `files`
-glob, an `asarUnpack` regression for `better-sqlite3`, a missing icon) is only caught by a
-manual `npm run dist`. Add a `dist:dir` (unpacked, no installer — fast) job to CI, at
-least on `windows-latest`, so packaging is exercised on every push. Optionally upload the
-artifact.
+### A4 · CI never packages (P1) — ✅ done
+Was: CI ran `build` but not `electron-builder`, so a broken packaging config (a bad
+`files` glob, an `asarUnpack` regression for `better-sqlite3`, a missing icon) was only
+caught by a manual `npm run dist`. Now a `package` job runs on every push:
+
+- `.github/workflows/ci.yml` gains a **`package` job on `windows-latest`** (parallel with
+  `verify`, Electron/electron-builder downloads cached on `package-lock.json`) running
+  `npm run test:packaged` → `electron-vite build && electron-builder --dir` plus a smoke
+  test. Pushes to `main` upload `release/win-unpacked` (7-day retention; skipped on PRs).
+- **`tests/packaged/smoke.spec.ts`** (own config, `playwright.packaged.config.ts`) —
+  because electron-builder exiting 0 does *not* mean the package works. It asserts
+  `app.asar` plus the unpacked `better_sqlite3.node` and `resources/{icon,tray,tray@2x}.png`,
+  then boots the real `MCO.exe` against a temp profile and checks the Dashboard renders.
+  A missing icon needs no assertion — electron-builder fails the build when `win.icon`
+  points at nothing.
+- `tests/support/electronEnv.ts` — the `ELECTRON_RUN_AS_NODE` strip, shared by both
+  Playwright suites.
+
+Windows only for now (primary target; packaging is slow) — see the CI section of
+[development.md](development.md) for adding the macOS/Linux targets.
 
 ### A5 · EVE third-party distribution terms (P1 — non-code)
 MCO is a third-party EVE tool distributing an app that logs into players' accounts. CCP has
@@ -135,9 +149,9 @@ empty profile — cheap insurance for the "no data yet" states.
 
 ## Suggested sequencing
 
-1. **Ship-blocking:** A1 (icon), A2 (commit build inputs), A4 (CI packaging), then run
-   `npm run dist` on all three OSes and smoke-test the installers. This gets you real,
-   correct `.exe`s.
+1. **Ship-blocking:** ~~A1 (icon), A2 (commit build inputs), A4 (CI packaging)~~ — done.
+   Remaining: run `npm run dist` on macOS and Linux and smoke-test those installers
+   (CI now covers Windows packaging on every push).
 2. **Trust decision:** A3 + A5 — decide signing/distribution scope and write it down.
 3. **Hardening:** B1 (IPC error boundary), C1 (DB-backed tests), B2 (JWT verify).
 4. **Everything else** as capacity allows.

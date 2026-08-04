@@ -133,6 +133,9 @@ const api: McoApi = {
     exportLogs: () => ipcRenderer.invoke(IpcChannel.settingsExportLogs),
     exportBackup: () => ipcRenderer.invoke(IpcChannel.settingsExportBackup),
     openDataFolder: () => ipcRenderer.invoke(IpcChannel.settingsOpenDataFolder),
+    backgroundMode: () => ipcRenderer.invoke(IpcChannel.settingsBackgroundMode),
+    setCloseToTray: (enabled) => ipcRenderer.invoke(IpcChannel.settingsSetCloseToTray, enabled),
+    runInBackground: () => ipcRenderer.invoke(IpcChannel.settingsRunInBackground),
   },
 };
 
