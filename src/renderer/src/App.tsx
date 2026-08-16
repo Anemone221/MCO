@@ -12,12 +12,16 @@ import Fits from './pages/Fits';
 import FitDetail from './pages/FitDetail';
 import Plans from './pages/Plans';
 import PlanDetail from './pages/PlanDetail';
+import PlanCreator from './pages/PlanCreator';
 import Clones from './pages/Clones';
+import Blueprints from './pages/Blueprints';
 import Wallet from './pages/Wallet';
 import Settings from './pages/Settings';
 import SdeBanner from './components/SdeBanner';
+import UpdateBanner from './components/UpdateBanner';
 import NotificationBell from './components/NotificationBell';
 import {
+  BlueprintIcon,
   CopyIcon,
   CreditCardIcon,
   DashboardIcon,
@@ -42,6 +46,7 @@ const NAV = [
   { to: '/fits', label: 'Fits', icon: RocketIcon },
   { to: '/plans', label: 'Skill Plans', icon: GraduationCapIcon },
   { to: '/clones', label: 'Clones', icon: CopyIcon },
+  { to: '/blueprints', label: 'Blueprints', icon: BlueprintIcon },
   { to: '/wallet', label: 'Wallet', icon: WalletIcon },
 ];
 
@@ -96,6 +101,8 @@ export default function App() {
           </div>
         )}
 
+        <UpdateBanner />
+
         <SdeBanner />
 
         <Routes>
@@ -110,8 +117,11 @@ export default function App() {
           <Route path="/fits" element={<Fits />} />
           <Route path="/fits/:id" element={<FitDetail />} />
           <Route path="/plans" element={<Plans />} />
+          <Route path="/plans/new" element={<PlanCreator />} />
           <Route path="/plans/:id" element={<PlanDetail />} />
+          <Route path="/plans/:id/edit" element={<PlanCreator />} />
           <Route path="/clones" element={<Clones />} />
+          <Route path="/blueprints" element={<Blueprints />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>

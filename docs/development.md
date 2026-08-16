@@ -29,6 +29,7 @@
 | --- | --- |
 | `MCO_ESI_CLIENT_ID` | Override the committed EVE developer app client_id (`src/main/config.ts`). |
 | `MCO_SDE_URL` | Override the pinned SDE zip URL. |
+| `MCO_UPDATE_CHECK` | `1` enables the GitHub release check in a dev build, `0` disables it in a packaged one. Default: packaged builds only. |
 | `ELECTRON_RENDERER_URL` | Set by electron-vite dev — main loads the dev server instead of the built `index.html`. |
 
 To use your own EVE application: register at https://developers.eveonline.com/ with
@@ -43,7 +44,7 @@ Three layers, deliberately:
   why parsers, analysis math, filtering/sorting, scope classification, and queue-drain
   detection live in dependency-free modules. Current suites: `eft`, `fitAnalyze`,
   `skillPlanParse`, `planAnalyze`, `sdeParse`, `rateLimiter`, `pkce`, `scopeStatus`,
-  `queueDrain`, `launchMode`, `format`, `rosterView`, `groups`, `tags`.
+  `queueDrain`, `launchMode`, `format`, `rosterView`, `groups`, `tags`, `updateCheck`.
 - **E2E (Playwright, `tests/e2e/app.spec.ts`)** — launches the **built** app
   (`out/main/index.js`) via Playwright's `_electron` against a throwaway temp
   `userData` dir per test, so tests are hermetic and don't touch your real profile.
@@ -59,8 +60,8 @@ Three layers, deliberately:
   (`playwright.packaged.config.ts`, longer timeouts) so `test:e2e` never needs a package.
 
 When adding logic, keep the testable core pure and put the I/O at the edges — follow the
-existing pattern (e.g. `notifications/queueDrain.ts` pure + `notificationService.ts`
-does DB/toast/IPC).
+existing pattern (e.g. `notifications/queueDrain.ts` pure, `notificationService.ts` does
+the DB reads and the copy, `notificationDelivery.ts` does the insert/toast/IPC).
 
 Both Playwright suites launch through `tests/support/electronEnv.ts`, which strips
 `ELECTRON_RUN_AS_NODE` from the inherited environment — otherwise Electron runs as plain
@@ -82,6 +83,41 @@ On push to `main` and PRs, two jobs run in parallel:
 Windows is the only packaging platform in CI — it's the primary distribution target and
 packaging is slow. Add `macos-latest` / `ubuntu-latest` to that job if the DMG and
 AppImage targets start shipping.
+
+## Releasing (`.github/workflows/release.yml`)
+
+Pushing a `v*` tag runs typecheck → lint → unit tests → `electron-builder --publish
+always`, which uploads the NSIS installer and opens a **draft** GitHub release
+(`publish.releaseType` in `electron-builder.yml`). Write the notes, then publish it.
+
+```
+# 1. bump "version" in package.json, commit
+# 2. tag and push
+git tag v0.2.0 && git push origin v0.2.0
+# 3. write the notes on the draft release GitHub Actions created, then publish
+```
+
+The tag must equal `package.json`'s version — the workflow fails the run if it doesn't.
+Both feed the in-app update check: `APP_VERSION` is read from `package.json`
+(`src/main/config.ts`), and the check compares it against the tag of the repository's
+latest release. A tag that disagreed with the shipped version would notify the wrong
+people, or nobody.
+
+Draft and prerelease releases are invisible to the check, which reads GitHub's
+`/releases/latest` — so a build can be uploaded and tested before anyone is told about
+it, and tagging a beta never prompts a reinstall.
+
+### Update checking (`src/main/services/updateService.ts`)
+
+MCO only *notices* a new release and links to it; nothing is downloaded or installed
+in-place. (That is `electron-updater`'s job, and worth adding only alongside a signed
+installer — an unsigned auto-update triggers a SmartScreen warning on every install.)
+
+The result is cached in `app_settings` and refreshed at most daily, because the check is
+unauthenticated and GitHub allows 60 API requests an hour per IP. Only packaged builds
+check on their own — see `MCO_UPDATE_CHECK` above — while Settings → "Check for updates"
+always asks now. A failed check keeps the last known answer and explains itself; it never
+blocks a page load.
 
 ## Packaging (`electron-builder.yml`)
 
@@ -134,7 +170,16 @@ CI (GitHub-hosted Windows runners) is unaffected — those images allow symlink 
 
 The app icon derives from `Clonebay_1024.png` (repo root, the 1024×1024 master; the
 smaller `Clonebay_256/128.png` and the original 64px `Clonebay.png` are kept as
-convenience copies). Generated assets:
+convenience copies).
+
+> **Provenance:** `Clonebay.png` is EVE Online's in-game clone bay station-service icon,
+> copied unmodified; the larger masters are upscales of it, and **every icon below —
+> window, exe, installer and tray — derives from it.** It is CCP hf.'s artwork, used under
+> the EVE Developer License Agreement — not ours, and not covered by this repo's MIT
+> license. See A5 in [improvement-plan.md](improvement-plan.md) before reusing it
+> anywhere, or if you ever want a mark MCO actually owns.
+
+Generated assets:
 
 - `build/icon.ico` — multi-resolution Windows icon (16/24/32/48/64/128/256, each a PNG
   frame downscaled from the 1024 master), referenced by `win.icon` in

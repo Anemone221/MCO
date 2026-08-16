@@ -126,6 +126,49 @@ test('imports an EFT fit and shows it on the Fits page', async () => {
   await app.close();
 });
 
+test('shows a failed import as plain copy, not as a raw internal error', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  // A parse failure is deliberate user-facing copy (UserFacingError), so it
+  // crosses the IPC boundary verbatim — and without the plumbing Electron wraps
+  // a rejected handler in. See src/main/errors.ts.
+  await window.getByRole('link', { name: 'Fits' }).click();
+  await window.getByTestId('eft-input').fill('not a fit at all');
+  await window.getByTestId('import-fit').click();
+
+  const fitsError = window.getByTestId('fits-error');
+  await expect(fitsError).toHaveText(
+    'Not a valid EFT fit — the first line must be "[Ship, Fit name]"',
+  );
+  await expect(fitsError).not.toContainText('Error invoking remote method');
+
+  await app.close();
+});
+
+test('reports a duplicate tag name without leaking SQL', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  // tags(name) is UNIQUE COLLATE NOCASE. Unwrapped, better-sqlite3's message
+  // would put "UNIQUE constraint failed: tags.name" on screen.
+  await window.getByRole('link', { name: 'Tags' }).click();
+  await window.getByTestId('new-tag-input').fill('Cyno');
+  await window.getByTestId('add-tag').click();
+  await expect(window.getByTestId('tag-name-1')).toHaveValue('Cyno');
+
+  await window.getByTestId('new-tag-input').fill('cyno');
+  await window.getByTestId('add-tag').click();
+
+  const tagsError = window.getByTestId('tags-error');
+  await expect(tagsError).toHaveText('That name is already in use.');
+  await expect(tagsError).not.toContainText('UNIQUE constraint');
+
+  await app.close();
+});
+
 test('imports a skill plan and shows it on the Plans page', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
   const app = await launchApp(userDataDir);
@@ -137,6 +180,36 @@ test('imports a skill plan and shows it on the Plans page', async () => {
   await window.getByTestId('import-plan').click();
 
   await expect(window.getByTestId('plans-table')).toContainText('E2E Test Plan');
+
+  await app.close();
+});
+
+test('edits a plan in the creator, reorders it and saves it back', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Skill Plans' }).click();
+  await window.getByTestId('plan-name-input').fill('Reorder Me');
+  await window.getByTestId('plan-text-input').fill('Gunnery V\nSmall Hybrid Turret IV');
+  await window.getByTestId('import-plan').click();
+  await expect(window.getByTestId('plans-table')).toContainText('Reorder Me');
+
+  // A fresh profile has no SDE, so both lines load as unrecognised names — the
+  // point here is that the creator keeps them verbatim rather than dropping
+  // them, and that the reordered draft is what gets saved.
+  await window.getByTestId('edit-plan-1').click();
+  await expect(window.getByTestId('creator-name')).toHaveValue('Reorder Me');
+  await expect(window.getByTestId('creator-row-0')).toContainText('Gunnery');
+  await expect(window.getByTestId('creator-row-1')).toContainText('Small Hybrid Turret');
+
+  await window.getByTestId('creator-down-0').click();
+  await expect(window.getByTestId('creator-row-0')).toContainText('Small Hybrid Turret');
+
+  await window.getByTestId('creator-save').click();
+  await expect(window.locator('h2')).toContainText('Reorder Me');
+  await window.locator('.fit-source summary').click();
+  await expect(window.locator('.eft-block')).toHaveText(/Small Hybrid Turret IV\s+Gunnery V/);
 
   await app.close();
 });
@@ -174,8 +247,14 @@ test('opens the Wallet page with the income chart placeholder', async () => {
   // No income this month → the chart card shows its quiet placeholder, so
   // amCharts never initializes on an empty profile.
   await expect(window.getByTestId('income-chart-empty')).toContainText(
-    'No ratted income recorded this month.',
+    'No income recorded this month.',
   );
+
+  // Previous months start collapsed; expanding an empty profile explains why
+  // there is no history rather than drawing an empty chart.
+  await expect(window.getByTestId('wallet-history-empty')).toHaveCount(0);
+  await window.getByTestId('wallet-history-toggle').click();
+  await expect(window.getByTestId('wallet-history-empty')).toContainText('No completed months');
 
   await app.close();
 });
@@ -188,6 +267,22 @@ test('opens the Clones page', async () => {
   await window.getByRole('link', { name: 'Clones' }).click();
   await expect(window.locator('h2')).toContainText('Clones');
   await expect(window.locator('.empty-state h3')).toHaveText('No characters yet');
+
+  await app.close();
+});
+
+test('opens the Blueprints page, which explains it needs the SDE', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Blueprints' }).click();
+  await expect(window.locator('h2')).toContainText('Blueprints');
+  // Without an SDE import there is no blueprint universe to check against, so
+  // the page says so rather than claiming 0 of 0 blueprints owned.
+  await expect(window.locator('.empty-state h3')).toHaveText('No blueprint data');
+  // Tracking an alt corp is still offered — it is what the page is for.
+  await expect(window.getByTestId('bp-add-corp')).toBeVisible();
 
   await app.close();
 });
@@ -219,6 +314,15 @@ test('opens Settings from the gear and persists a theme change', async () => {
   // GitHub links are present.
   await expect(firstWindow.getByRole('link', { name: 'GitHub repository' })).toBeVisible();
   await expect(firstWindow.getByRole('link', { name: 'Report an issue' })).toBeVisible();
+
+  // CCP's third-party notice has to be displayed, not just written down
+  // somewhere — see A5 in docs/improvement-plan.md.
+  await expect(firstWindow.locator('.legal-notice')).toContainText(
+    'is not in any way affiliated with, MCO',
+  );
+
+  // The profile's migration version, for bug reports (A6).
+  await expect(firstWindow.getByTestId('settings-page')).toContainText(/schema v\d+/);
 
   // Switching theme applies immediately (data-theme on <html>)…
   await expect(firstWindow.locator('html')).toHaveAttribute('data-theme', 'dark');
@@ -257,21 +361,27 @@ test('close-to-tray preference persists across restarts', async () => {
 
   // Unlike theme/demo mode this one lives in the database (app_settings), because
   // the main process reads it with no renderer around to ask.
+  //
+  // Click + expect, not check()/uncheck(): the box is fully controlled by state
+  // that only lands after the IPC round trip, so check() verifies `checked` too
+  // early and reports "clicking the checkbox did not change its state".
   const first = await launchApp(userDataDir);
   const firstWindow = await first.firstWindow();
   await firstWindow.getByTestId('settings-gear').click();
   const toggle = firstWindow.getByTestId('close-to-tray-toggle');
   await expect(toggle).not.toBeChecked();
-  await toggle.check();
+  await toggle.click();
   await expect(toggle).toBeChecked();
   await first.close();
 
   const second = await launchApp(userDataDir);
   const secondWindow = await second.firstWindow();
   await secondWindow.getByTestId('settings-gear').click();
-  await expect(secondWindow.getByTestId('close-to-tray-toggle')).toBeChecked();
+  const restored = secondWindow.getByTestId('close-to-tray-toggle');
+  await expect(restored).toBeChecked();
   // Turning it back off keeps the profile quittable for the next run.
-  await secondWindow.getByTestId('close-to-tray-toggle').uncheck();
+  await restored.click();
+  await expect(restored).not.toBeChecked();
   await second.close();
 });
 

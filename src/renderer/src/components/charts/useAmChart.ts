@@ -7,9 +7,13 @@ import { prefersReducedMotion } from '../../lib/motion';
 export interface ChartPalette {
   accent: string;
   ok: string;
+  warn: string;
+  danger: string;
   muted: string;
   border: string;
   text: string;
+  /** The card surface behind the chart — drawn between stacked segments as a gap. */
+  panel: string;
 }
 
 function readPalette(): ChartPalette {
@@ -18,9 +22,12 @@ function readPalette(): ChartPalette {
   return {
     accent: read('--accent'),
     ok: read('--ok'),
+    warn: read('--warn'),
+    danger: read('--danger'),
     muted: read('--muted'),
     border: read('--border'),
     text: read('--text'),
+    panel: read('--panel'),
   };
 }
 

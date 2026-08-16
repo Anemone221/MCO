@@ -4,7 +4,7 @@ MCO is a desktop tool for EVE Online players with a **high character count (10+,
 around ~90+)**. It organizes characters outside the game: training/skill data, account
 mapping, fit testing ("how many of my characters can fly this?"), skill plan tracking,
 grouping, capability tags, location tracking, jump-clone/implant tracking, jump fatigue,
-and skill-queue notifications.
+a blueprint (BPO) checklist, and skill-queue notifications.
 
 Deeper documentation lives in [`docs/`](docs/README.md):
 
@@ -40,8 +40,9 @@ npm run dist             # build + package installer (electron-builder)
 
 The renderer is sandboxed (no Node) and talks to the main process only through
 `window.mco`, a typed API (`McoApi` in `src/shared/ipc.ts`) exposed by the preload script.
-Every channel is declared in `IpcChannel` and wired in `src/main/ipc/register.ts` to a
-service or repository call. Services (`src/main/services/`) compose ESI fetches, SDE
+Every channel is declared in `IpcChannel` and wired to a service or repository call in
+`src/main/ipc/channels/<domain>.ts`, which `register.ts` composes (and then checks that no
+declared channel was left unwired). Services (`src/main/services/`) compose ESI fetches, SDE
 lookups and DB reads into view models; repositories (`src/main/db/repositories/`) are the
 only code that touches SQL. Pure logic (parsers, analysis math, roster filtering/sorting)
 is kept in dependency-free modules (`src/main/fits/`, `src/main/plans/`,
@@ -50,10 +51,15 @@ is kept in dependency-free modules (`src/main/fits/`, `src/main/plans/`,
 Key invariants:
 
 - **Renderer never touches ESI, SQLite, or Node APIs.** Add a channel to
-  `src/shared/ipc.ts` + preload + `register.ts` instead.
+  `src/shared/ipc.ts` + preload + `ipc/channels/<domain>.ts` instead.
+- **Pages load through `useMcoData`** (`src/renderer/src/lib/useMcoData.ts`) — never a
+  hand-rolled `useState`/`useEffect`/try-catch copy. It owns the data/error/loading
+  state, `errorMessage()`, the optional `mco.characters.onChanged` subscription, and
+  discarding superseded requests.
 - **All ESI calls go through `esiGet` in `src/main/esi/client.ts`** — it handles caching
   (ETag/Expires), token refresh, the error-limit rate limiter, and retries. Never `fetch`
-  ESI directly.
+  ESI directly. Paginated routes use its sibling `esiGetPaged`, which pages by ESI's
+  `X-Pages` — never write a page loop that infers the end from a short page or a 404.
 - **One process per profile** (single-instance lock): EVE SSO rotates refresh tokens on
   every refresh, so two processes racing a refresh would invalidate the token family.
 - **Refresh tokens are encrypted at rest** with Electron `safeStorage`; the client_id is
@@ -62,6 +68,12 @@ Key invariants:
   cache entry has expired (ESI's own `Expires` header), swept hourly by the scheduler.
 - **Schema changes are new migrations** appended to `src/main/db/migrations.ts` — never
   edit an existing migration.
+- **MCO is not a corporation tool.** The one corporation scope it takes
+  (`esi-corporations.read_blueprints.v1`) exists because BPO collections live in an
+  **alt corp** — a corporation wholly controlled by one player, used as a shared
+  hangar. It is *not* in `ESI_SCOPES`: one character opts into it per tracked corp and
+  becomes that corp's reader (`startLogin(extraScopes)`). Resist letting other corp
+  endpoints in behind it; each one is its own decision.
 
 ## Organization model
 

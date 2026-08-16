@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Readable } from 'node:stream';
 import {
+  parseBlueprints,
   parseNamedFile,
   parseSolarSystems,
   parseTypeDogmaStream,
@@ -62,9 +63,25 @@ describe('parseTypesStream', () => {
 
     const rows = await parseTypesStream(Readable.from(yaml));
     expect(rows).toEqual([
-      { id: 587, groupId: 25, name: 'Rifter', published: 1 },
-      { id: 34, groupId: 18, name: 'Tritanium', published: 1 },
+      { id: 587, groupId: 25, name: 'Rifter', published: 1, marketGroupId: null, metaGroupId: null },
+      { id: 34, groupId: 18, name: 'Tritanium', published: 1, marketGroupId: null, metaGroupId: null },
     ]);
+  });
+
+  it('extracts market and meta group, which decide what the blueprint checklist counts', async () => {
+    const yaml = [
+      '11372:',
+      '  groupID: 105',
+      '  marketGroupID: 1010',
+      '  metaGroupID: 2',
+      '  name:',
+      '    en: Wolf Blueprint',
+      '  published: true',
+      '',
+    ].join('\n');
+
+    const rows = await parseTypesStream(Readable.from(yaml));
+    expect(rows[0]).toMatchObject({ marketGroupId: 1010, metaGroupId: 2 });
   });
 
   it('skips entries that have no english name', async () => {
@@ -73,6 +90,109 @@ describe('parseTypesStream', () => {
     );
     const rows = await parseTypesStream(Readable.from(yaml));
     expect(rows).toEqual([]);
+  });
+});
+
+describe('parseBlueprints', () => {
+  /** Shape lifted from the real blueprints.yaml: a T1 frigate BP that can also be invented from. */
+  const RIFTER_BP = [
+    '691:',
+    '  activities:',
+    '    copying:',
+    '      time: 4800',
+    '    invention:',
+    '      materials:',
+    '      - quantity: 2',
+    '        typeID: 20416',
+    '      products:',
+    '      - probability: 0.3',
+    '        quantity: 1',
+    '        typeID: 39581',
+    '      time: 63900',
+    '    manufacturing:',
+    '      materials:',
+    '      - quantity: 24000',
+    '        typeID: 34',
+    '      products:',
+    '      - quantity: 1',
+    '        typeID: 587',
+    '      skills:',
+    '      - level: 1',
+    '        typeID: 3380',
+    '      time: 6000',
+    '    research_material:',
+    '      time: 2100',
+    '  blueprintTypeID: 691',
+    '  maxProductionLimit: 30',
+  ];
+
+  it('takes the manufacturing product, not the invention product', () => {
+    // Invention yields the *Tech II blueprint*; reading it would file every
+    // Tech I blueprint under its Tech II descendant.
+    expect(parseBlueprints(RIFTER_BP.join('\n'))).toEqual([
+      {
+        blueprintTypeId: 691,
+        productTypeId: 587,
+        activity: 'manufacturing',
+        maxProductionLimit: 30,
+      },
+    ]);
+  });
+
+  it('takes the reaction product for reaction formulas', () => {
+    const yaml = [
+      '46166:',
+      '  activities:',
+      '    copying:',
+      '      time: 4800',
+      '    reaction:',
+      '      materials:',
+      '      - quantity: 100',
+      '        typeID: 16275',
+      '      products:',
+      '      - quantity: 200',
+      '        typeID: 16679',
+      '      time: 10800',
+      '  blueprintTypeID: 46166',
+    ].join('\n');
+
+    expect(parseBlueprints(yaml)).toEqual([
+      {
+        blueprintTypeId: 46166,
+        productTypeId: 16679,
+        activity: 'reaction',
+        maxProductionLimit: null,
+      },
+    ]);
+  });
+
+  it('parses every entry in a multi-blueprint file', () => {
+    const yaml = [
+      ...RIFTER_BP,
+      '681:',
+      '  activities:',
+      '    manufacturing:',
+      '      products:',
+      '      - quantity: 1',
+      '        typeID: 165',
+      '      time: 600',
+      '  blueprintTypeID: 681',
+      '  maxProductionLimit: 300',
+      '',
+    ].join('\n');
+
+    const rows = parseBlueprints(yaml);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ blueprintTypeId: 681, productTypeId: 165 });
+  });
+
+  it('reports no product for a blueprint that builds nothing', () => {
+    const yaml = ['1234:', '  activities:', '    copying:', '      time: 1', '  blueprintTypeID: 1234'].join(
+      '\n',
+    );
+    expect(parseBlueprints(yaml)).toEqual([
+      { blueprintTypeId: 1234, productTypeId: null, activity: 'other', maxProductionLimit: null },
+    ]);
   });
 });
 

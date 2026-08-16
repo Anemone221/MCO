@@ -78,6 +78,11 @@
   --muted: #a3947c;
   --accent: #d29922;
   --accent-dim: rgba(210, 153, 34, 0.15);
+  /* This theme's accent IS the default --warn (#d29922), so warn has to move or
+     the two are literally the same color wherever they meet — including as two
+     segments of one wallet column. Shifted to orange: the most separation a
+     warning can keep from a gold accent while still reading as a warning. */
+  --warn: #e8703a;
   --row-hover: rgba(210, 153, 34, 0.08);
 }
 
@@ -92,7 +97,10 @@
   --accent-dim: rgba(0, 212, 255, 0.13);
   --danger: #ff5c69;
   --warn: #ffc857;
-  --ok: #2fe6a7;
+  /* Was #2fe6a7 — only ΔE 14.9 from this theme's aqua accent, i.e. hard to tell
+     from it even with full color vision, and the two sit side by side as wallet
+     chart series. Pushed green, which clears the floor (ΔE 20.2). */
+  --ok: #3ce67a;
   --row-hover: rgba(0, 212, 255, 0.07);
 }
 
@@ -125,7 +133,18 @@
   text-shadow: 0 0 6px currentColor;
 }
 
-[data-theme='holo'] button:not(.ghost):not(.danger):not(.collapse-toggle) {
+/* Tabs opt out of the button fill below, so the picked one gets holo's own
+   "this is on" treatment — the same glow the active nav link carries. */
+[data-theme='holo'] .tab--active {
+  text-shadow: 0 0 6px rgba(0, 212, 255, 0.5);
+}
+
+/* Only *controls* get the holo fill. Buttons that are really text — a row you
+   click, a menu item, a chip's ✕ — have to opt out, and because :not() carries
+   its argument's specificity this rule outranks anything they declare
+   themselves. `.plain` marks new ones; the classes after it predate it. */
+[data-theme='holo']
+  button:not(.ghost):not(.danger):not(.plain):not(.collapse-toggle):not(.tab):not(.chip__remove):not(.station-picker__option):not(.context-menu__item--button) {
   box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
   background: linear-gradient(180deg, #00d4ff, #0090c9);
   color: #02141f;
@@ -176,6 +195,21 @@ button.btn-sm {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
+}
+
+/* A button that should read as text rather than as a control: no fill, no
+   chrome, inherits the type around it. Themes that restyle buttons leave these
+   alone (see the holo rule above). */
+button.plain {
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  font: inherit;
+  font-weight: inherit;
+  color: var(--text);
+  cursor: pointer;
 }
 
 input,
@@ -421,6 +455,34 @@ code {
 
 .sde-banner__text {
   flex: 1;
+}
+
+/* A new release is news, not a problem — accent-tinted rather than danger-red. */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--accent-dim);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.update-banner__text {
+  flex: 1;
+}
+
+.update-banner__link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.update-banner__link:hover {
+  text-decoration: underline;
 }
 
 /* ---------- Page scaffolding ---------- */
@@ -1174,12 +1236,6 @@ details.clone-block > p {
   width: 8rem;
 }
 
-/* Cost-system toggle (SP / Injectors / Time): the tab-bar pattern, inline in a toolbar. */
-.tab-bar--inline {
-  margin: 0;
-  border-bottom: none;
-}
-
 .account-name {
   min-width: 18rem;
 }
@@ -1363,6 +1419,44 @@ details.clone-block > p {
 .tab--active {
   color: var(--text);
   border-bottom-color: var(--accent);
+}
+
+/* Cost-system toggle (SP / Injectors / Time): the same tab pattern, but inline
+   in a toolbar. A bare underline tab works under a heading; next to a dropdown
+   and a number input it reads as loose text, so the inline variant is a
+   segmented control — one bordered group the height of the controls beside it,
+   the picked segment filled. It styles itself rather than borrowing the base
+   button fill, so themes that restyle buttons leave it intact.
+   Must stay after .tab / .tab--active: same specificity, so it only wins the
+   cascade by coming later. */
+.tab-bar--inline {
+  margin: 0;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* Segments share one border: the group draws the outside, each tab after the
+   first draws the divider on its left. */
+.tab-bar--inline .tab {
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0.3rem 0.7rem;
+}
+
+.tab-bar--inline .tab:first-child {
+  border-left: none;
+}
+
+.tab-bar--inline .tab:not(.tab--active):hover {
+  background: var(--row-hover);
+}
+
+.tab-bar--inline .tab--active {
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
 .pod-ignored__actions {
@@ -1705,6 +1799,309 @@ details.clone-block > p {
   background: none;
 }
 
+/* ---------- Skill plan creator ---------- */
+
+/* Two panes, each scrolling its own list: the training queue being built on the
+   left, every skill in the game on the right. Both cap at the viewport so the
+   toolbar and totals stay put while only the rows move. */
+.plan-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.plan-split__pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+}
+
+.plan-split__pane .bucket-head {
+  margin-bottom: 0;
+}
+
+/* Narrow windows can't carry two dense panes; stack them instead. */
+@media (max-width: 1100px) {
+  .plan-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Skill browser: one collapsible block per SDE skill group. The group states
+   the attribute pair its skills train against, so only the skills that break
+   that pair repeat it. */
+.skill-browser {
+  padding: 0.25rem 0;
+}
+
+.skill-browser summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-browser summary:hover {
+  background: var(--row-hover);
+}
+
+.skill-browser__group {
+  font-weight: 600;
+}
+
+.skill-browser__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.15rem 0 0.35rem;
+}
+
+.skill-browser__skill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0.6rem 0.15rem 1.4rem;
+  font-size: 0.79rem;
+}
+
+.skill-browser__skill:hover {
+  background: var(--row-hover);
+}
+
+/* A skill already in the plan reads as "in", without shouting. */
+.skill-browser__skill--queued {
+  color: var(--accent);
+}
+
+.skill-browser__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-browser__level {
+  min-width: 1.6rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.skill-browser__buttons {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.skill-browser__buttons button {
+  min-width: 1.6rem;
+}
+
+.skill-browser__empty {
+  padding: 0.6rem;
+}
+
+/* Ship browser: a dialog, because a hull is picked occasionally and the queue
+   and skill browser want the width the rest of the time. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(40rem, 100%);
+  max-height: 100%;
+  padding: 0.9rem 1rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.modal__body {
+  flex: 1 1 auto;
+}
+
+.modal p.muted {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+/* A hull is a single click — the whole row is the button. */
+.ship-browser__pick {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 0.1rem 0;
+  font-size: 0.79rem;
+}
+
+.ship-browser__pick:hover {
+  color: var(--accent);
+}
+
+.ship-browser__pick span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hull icon from the EVE image server; the space is held even when it can't
+   load (offline) so the names stay in one column. */
+.type-icon {
+  flex: none;
+  border-radius: 2px;
+}
+
+/* Attributes the plan's training time is priced at. */
+.attribute-editor__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.attribute-editor__fields label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.attribute-editor__fields input {
+  width: 4rem;
+}
+
+/* The fit importer sits above the skill browser in the right pane. */
+.creator-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Transient confirmation ("Copied", "Added 14 skills") — informational, so it
+   is deliberately quieter than .error-box. */
+.creator-notice {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 0.82rem;
+}
+
+/* Tighter than the roster's tables: this one lives in half a screen and a plan
+   runs to a few hundred rows, so every column gives its padding to the names. */
+.plan-draft th,
+.plan-draft td {
+  padding: 0.28rem 0.4rem;
+  vertical-align: middle;
+}
+
+.plan-draft .row-actions button {
+  padding: 0.05rem 0.3rem;
+}
+
+/* The queue is long and the pane is half a screen: every other column shrinks
+   to its content (width: 1% does that in a full-width table) so the name column
+   takes all the room that is left, and only truncates when it has to — the full
+   name is on the row's title. Rows stay one line tall either way. */
+.plan-draft td:not(.plan-draft__name),
+.plan-draft th:not(.plan-draft__name-head) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.plan-draft td.plan-draft__name {
+  width: 100%;
+  max-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-draft__level {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* A queued level points back at the skill it trains: clicking anywhere on the
+   row opens that skill's group in the browser, where its − / + are. */
+.plan-draft tbody tr:hover .plan-draft__name--linked,
+.plan-draft__name--linked:focus-visible {
+  color: var(--accent);
+}
+
+/* The skill the plan just jumped to, until the eye has found it. */
+.skill-browser__skill--revealed {
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* The row is a link back to its skill in the browser; only the grip drags. */
+.plan-draft tbody tr {
+  cursor: pointer;
+}
+
+.plan-draft__grip {
+  color: var(--muted);
+  margin-right: 0.4rem;
+  cursor: grab;
+}
+
+.plan-draft__grip:active {
+  cursor: grabbing;
+}
+
+.plan-draft__row--dragging {
+  opacity: 0.45;
+}
+
+.plan-draft__row--over td {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.plan-draft__issue {
+  display: inline-block;
+  margin-right: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  cursor: help;
+}
+
+/* Only a line that trains before something it depends on is actually wrong;
+   an untrained prerequisite is routine (the character may already have it). */
+.plan-draft__issue--order {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
 /* Section header carrying a right-aligned action (bulk-tag on fit/plan buckets). */
 .bucket-head {
   display: flex;
@@ -1868,6 +2265,19 @@ details.clone-block > p {
   font-size: 0.75rem;
 }
 
+/*
+ * CCP's third-party notice in Settings → About. Required to be shown, so it is
+ * not collapsible — but it is reference text, not something to read on the way
+ * past, so it sits quieter than .muted body copy.
+ */
+.legal-notice {
+  margin: 0.9rem 0 0;
+  max-width: 78ch;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
 .stat-chip--danger strong {
   color: var(--danger);
 }
@@ -1987,10 +2397,11 @@ details.clone-block > p {
   font-variant-numeric: tabular-nums;
 }
 
-.dashboard-tile__sub {
-  font-size: 0.78rem;
-  color: var(--muted);
-  margin-top: 0.2rem;
+/* Tiles carry their explanation in a `title` (see components/StatTile.tsx), so
+   the row stays one line of figures per tile; the cursor is the only hint that
+   there is more to read. */
+.dashboard-tile[title] {
+  cursor: help;
 }
 
 /* Chart cards (Wallet income, Dashboard SP circles); the inner canvas div is
@@ -2004,6 +2415,12 @@ details.clone-block > p {
 .chart-canvas {
   width: 100%;
   height: 220px;
+}
+
+/* Wallet history: the chart reads the shape of a year, the table under it the
+   exact figures — they need a gap between them, not a card each. */
+.wallet-history-table {
+  margin-top: 0.9rem;
 }
 
 /* Packed-circles chart: taller than the bar chart so 90+ circles breathe. */
@@ -2026,4 +2443,52 @@ details.clone-block > p {
   max-width: 560px;
   height: 360px;
   margin-inline: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Blueprint checklist */
+
+/* A blueprint held by an alt corp rather than by a character. Accent-bordered
+   so a corp hangar reads as a different kind of holder at a glance, without
+   implying anything is wrong. */
+.chip--corp {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bp-holders {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+/* Not-yet-owned blueprints stay legible but recede: with ~1,900 rows the
+   interesting ones are the ticks, and a missing row is routine, not a warning. */
+.bp-row--missing td:first-child {
+  color: var(--muted);
+}
+
+.bp-corp .status-pill {
+  display: block;
+  margin: 0.4rem 0;
+}
+
+/* The checklist tick. Green like every other "yes" in the app; a blueprint held
+   only as a copy ticks muted, so a real BPO still reads differently at a glance
+   when "Originals only" is off. */
+.bp-tick {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.bp-tick--copy {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.bp-tick__count {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 0.15rem;
 }

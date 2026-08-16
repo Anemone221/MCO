@@ -141,6 +141,18 @@ export function CopyIcon(props: IconProps) {
   );
 }
 
+/** Blueprints — a drafting sheet with a plan drawn on it. */
+export function BlueprintIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M9 9v12" />
+      <rect x="12" y="12" width="6" height="6" />
+    </StrokeIcon>
+  );
+}
+
 /** Settings gear. */
 export function SettingsIcon(props: IconProps) {
   return (
@@ -202,6 +214,17 @@ export function FileTextIcon(props: IconProps) {
       <polyline points="14 2 14 8 20 8" />
       <line x1="16" y1="13" x2="8" y2="13" />
       <line x1="16" y1="17" x2="8" y2="17" />
+    </StrokeIcon>
+  );
+}
+
+/** A newer release is available. */
+export function DownloadIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
     </StrokeIcon>
   );
 }

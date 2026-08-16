@@ -3,6 +3,8 @@ import {
   formatBytes,
   formatDuration,
   formatIsk,
+  formatIskShort,
+  formatMonthLabel,
   formatSp,
   formatTimeUntil,
   romanLevel,
@@ -37,6 +39,26 @@ describe('formatIsk', () => {
   });
 });
 
+describe('formatIskShort', () => {
+  it('abbreviates without the unit, for breakdown lines under a labelled figure', () => {
+    expect(formatIskShort(1_234_000_000)).toBe('1.23B');
+    expect(formatIskShort(810_000_000)).toBe('810.0M');
+    expect(formatIskShort(0)).toBe('0');
+    expect(formatIskShort(-2_500_000)).toBe('-2.5M');
+  });
+});
+
+describe('formatMonthLabel', () => {
+  it('turns a YYYY-MM key into a short month label', () => {
+    expect(formatMonthLabel('2026-02')).toBe('Feb 2026');
+    expect(formatMonthLabel('2025-12')).toBe('Dec 2025');
+  });
+
+  it('falls back to the raw key rather than inventing a month', () => {
+    expect(formatMonthLabel('2026-13')).toBe('2026-13');
+  });
+});
+
 describe('romanLevel', () => {
   it('maps skill levels to roman numerals', () => {
     expect(romanLevel(0)).toBe('0');
@@ -60,7 +82,10 @@ describe('formatTimeUntil', () => {
   });
 
   it('formats a future timestamp as a relative duration', () => {
-    const future = new Date(Date.now() + 3 * 86_400_000 + 4 * 3_600_000).toISOString();
+    // 30s of slack, because formatTimeUntil floors to whole minutes: on an exact
+    // 3d4h target, a single millisecond ticking over between building the
+    // timestamp and reading the clock inside the formatter drops it to "3d 3h".
+    const future = new Date(Date.now() + 3 * 86_400_000 + 4 * 3_600_000 + 30_000).toISOString();
     expect(formatTimeUntil(future)).toBe('in 3d 4h');
   });
 });

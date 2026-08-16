@@ -1,4 +1,5 @@
 import type { RosterEntry } from '@shared/types';
+import { summarizeQueue } from './groupView';
 
 export type TrainingFilter = 'all' | 'training' | 'idle';
 
@@ -21,6 +22,7 @@ export type RosterSortKey =
   | 'ship'
   | 'training'
   | 'timeleft'
+  | 'queue'
   | 'fatigue'
   | 'clonejump'
   | 'sp'
@@ -43,6 +45,7 @@ export type RosterColumnKey =
   | 'ship'
   | 'training'
   | 'timeleft'
+  | 'queue'
   | 'fatigue'
   | 'clonejump'
   | 'sp'
@@ -56,6 +59,7 @@ export const ROSTER_COLUMNS: { key: RosterColumnKey; label: string; numeric?: bo
   { key: 'ship', label: 'Ship' },
   { key: 'training', label: 'Training' },
   { key: 'timeleft', label: 'Time left' },
+  { key: 'queue', label: 'Queue left' },
   { key: 'fatigue', label: 'Jump fatigue' },
   { key: 'clonejump', label: 'Jump clone' },
   { key: 'sp', label: 'Total SP', numeric: true },
@@ -73,6 +77,7 @@ export const DEFAULT_COLUMN_VISIBILITY: ColumnVisibility = {
   ship: true,
   training: true,
   timeleft: true,
+  queue: true,
   fatigue: true,
   clonejump: true,
   sp: true,
@@ -164,6 +169,17 @@ export function fatigueRemainingMs(entry: RosterEntry, now = Date.now()): number
 }
 
 /**
+ * Millis until the character's whole skill queue runs dry, or `null` when there
+ * is no time left to run down: an empty queue, a paused one (EVE clears queue
+ * dates while training is paused), or one whose last entry already finished.
+ */
+export function queueRemainingMs(entry: RosterEntry, now = Date.now()): number | null {
+  const queue = summarizeQueue(entry.queueLength, entry.queueEndDate, now);
+  if (queue.state !== 'active') return null;
+  return new Date(queue.endDate).getTime() - now;
+}
+
+/**
  * Millis until the character can clone-jump again: 0 when the jump is
  * available right now (never jumped, or the cooldown has elapsed), `null`
  * when clone data has never synced so availability is unknown.
@@ -234,6 +250,15 @@ export function sortRoster(
       case 'timeleft':
         cmp = trainingRank(a) - trainingRank(b);
         break;
+      case 'queue': {
+        // Queues with nothing left to run (empty, paused, already finished)
+        // group at the end; otherwise soonest-to-run-dry first.
+        const aq = queueRemainingMs(a);
+        const bq = queueRemainingMs(b);
+        if ((aq === null) !== (bq === null)) return aq === null ? 1 : -1;
+        cmp = (aq ?? 0) - (bq ?? 0);
+        break;
+      }
       case 'fatigue': {
         // Non-fatigued characters group at the end; otherwise soonest-to-clear first.
         const af = fatigueRemainingMs(a);

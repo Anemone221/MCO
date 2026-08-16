@@ -1,7 +1,9 @@
 import type { McoApi } from '@shared/ipc';
+import { cleanIpcErrorMessage } from '@shared/ipcError';
 import {
   demoAccount,
   demoAppInfo,
+  demoBlueprintBoard,
   demoCharacterDetail,
   demoCloneBoardEntry,
   demoDashboardSummary,
@@ -20,6 +22,16 @@ import {
 
 /** The preload-exposed main-process API. */
 const real: McoApi = window.mco;
+
+/**
+ * The text to show for a failed call — use this in a page's `catch`, never
+ * `String(e)`. Main decides what a failure may say and the preload unwraps it
+ * (see `src/main/errors.ts`); this is the last step, dropping the `Error: `
+ * that `String()` would prepend to an otherwise finished sentence.
+ */
+export function errorMessage(err: unknown): string {
+  return cleanIpcErrorMessage(err);
+}
 
 /** Apply a demo-mode scrub to a result, or pass it through untouched. */
 async function scrubbed<T>(result: Promise<T>, scrub: (value: T) => T): Promise<T> {
@@ -76,6 +88,12 @@ export const mco: McoApi = {
   },
   clones: {
     board: () => scrubbed(real.clones.board(), (b) => b.map(demoCloneBoardEntry)),
+  },
+  blueprints: {
+    ...real.blueprints,
+    board: () => scrubbed(real.blueprints.board(), demoBlueprintBoard),
+    refresh: () => scrubbed(real.blueprints.refresh(), demoBlueprintBoard),
+    addCorp: () => scrubbed(real.blueprints.addCorp(), demoBlueprintBoard),
   },
   dashboard: {
     summary: () => scrubbed(real.dashboard.summary(), demoDashboardSummary),

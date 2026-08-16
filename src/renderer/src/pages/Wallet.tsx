@@ -1,39 +1,55 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import type { WalletSummary } from '@shared/types';
+import { useState } from 'react';
 import { mco } from '../lib/ipc';
-import { formatIsk } from '../lib/format';
+import { formatIsk, formatIskShort, formatMonthLabel } from '../lib/format';
+import { useMcoData } from '../lib/useMcoData';
 import IncomeByDayChart from '../components/charts/IncomeByDayChart';
+import WalletHistoryChart from '../components/charts/WalletHistoryChart';
+import StatTile from '../components/StatTile';
+import { ChevronIcon } from '../components/icons';
+
+const HISTORY_COLLAPSED_KEY = 'mco-wallet-history-collapsed';
+
+/** Previous months start collapsed: this month is the page, history is the aside. */
+function loadHistoryCollapsed(): boolean {
+  try {
+    return localStorage.getItem(HISTORY_COLLAPSED_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function storeHistoryCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(HISTORY_COLLAPSED_KEY, collapsed ? '1' : '0');
+  } catch {
+    // A profile with storage blocked just loses the preference.
+  }
+}
 
 export default function Wallet() {
-  const [summary, setSummary] = useState<WalletSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: summary,
+    error,
+    loading,
+    reload,
+  } = useMcoData(() => mco.wallet.summary(), { onCharactersChanged: true });
+  const [historyCollapsed, setHistoryCollapsed] = useState(loadHistoryCollapsed);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setSummary(await mco.wallet.summary());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  function toggleHistory(): void {
+    setHistoryCollapsed((prev) => {
+      storeHistoryCollapsed(!prev);
+      return !prev;
+    });
+  }
 
-  useEffect(() => {
-    void load();
-    return mco.characters.onChanged(() => void load());
-  }, [load]);
-
-  const hasIncome =
-    summary !== null && summary.rattedIskByDay.some((d) => d.bountyIsk + d.missionIsk > 0);
+  const hasIncome = summary !== null && summary.byDay.some((d) => d.income.totalIsk > 0);
+  const months = summary?.previousMonths ?? [];
 
   return (
     <section className="page">
       <div className="toolbar">
         <h2>Wallet</h2>
-        <button type="button" className="ghost" onClick={() => void load()} disabled={loading}>
+        <button type="button" className="ghost" onClick={() => void reload()} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>
@@ -47,30 +63,166 @@ export default function Wallet() {
       {summary && (
         <>
           <div className="dashboard-tiles" data-testid="wallet-tiles">
-            <div className="dashboard-tile" style={{ '--tile-index': 0 } as CSSProperties}>
-              <div className="dashboard-tile__label">Ratted ISK this month</div>
-              <div className="dashboard-tile__value">{formatIsk(summary.rattedIsk.totalIsk)}</div>
-            </div>
-            <div className="dashboard-tile" style={{ '--tile-index': 1 } as CSSProperties}>
-              <div className="dashboard-tile__label">Bounties</div>
-              <div className="dashboard-tile__value">{formatIsk(summary.rattedIsk.bountyIsk)}</div>
-              <div className="dashboard-tile__sub muted">NPC bounties + ESS payouts</div>
-            </div>
-            <div className="dashboard-tile" style={{ '--tile-index': 2 } as CSSProperties}>
-              <div className="dashboard-tile__label">Missions</div>
-              <div className="dashboard-tile__value">{formatIsk(summary.rattedIsk.missionIsk)}</div>
-              <div className="dashboard-tile__sub muted">Agent mission rewards</div>
-            </div>
+            <StatTile
+              index={0}
+              label="Income"
+              testId="tile-income"
+              hint="This month · bounties + missions + reward payouts"
+            >
+              <div className="dashboard-tile__value">
+                {formatIsk(summary.totals.income.totalIsk)}
+              </div>
+            </StatTile>
+            <StatTile
+              index={1}
+              label="Bounties"
+              testId="tile-bounties"
+              hint="NPC bounties + ESS payouts"
+            >
+              <div className="dashboard-tile__value">
+                {formatIsk(summary.totals.income.bountyIsk)}
+              </div>
+            </StatTile>
+            <StatTile
+              index={2}
+              label="Missions"
+              testId="tile-missions"
+              hint="Agent mission rewards"
+            >
+              <div className="dashboard-tile__value">
+                {formatIsk(summary.totals.income.missionIsk)}
+              </div>
+            </StatTile>
+            <StatTile
+              index={3}
+              label="Corporate reward payout"
+              testId="tile-corp-reward"
+              hint={'CONCORD site rewards, net of corp tax\n(ESI reports the payout already taxed)'}
+            >
+              <div className="dashboard-tile__value">
+                {formatIsk(summary.totals.income.corpRewardIsk)}
+              </div>
+            </StatTile>
+            <StatTile
+              index={4}
+              label="Tax paid"
+              testId="tile-tax"
+              hint={
+                'Sales, industry and corp tax, incl. tax withheld at source\n' +
+                'ESI omits corp tax on CONCORD rewards, so that share is missing'
+              }
+            >
+              <div className="dashboard-tile__value">{formatIsk(summary.totals.taxIsk)}</div>
+            </StatTile>
+            <StatTile
+              index={5}
+              label="Expenses"
+              testId="tile-expenses"
+              hint={'Fees, skill purchases, gate tolls, repairs, PI\nNot market escrow or contracts'}
+            >
+              <div className="dashboard-tile__value">{formatIsk(summary.totals.expenseIsk)}</div>
+            </StatTile>
+            <StatTile
+              index={6}
+              label="Player donations"
+              testId="tile-donations"
+              hint={
+                summary.totals.internalTransferIsk > 0
+                  ? `${formatIsk(summary.totals.donationsInIsk)} received · ${formatIsk(
+                      summary.totals.donationsOutIsk,
+                    )} sent\n${formatIsk(
+                      summary.totals.internalTransferIsk,
+                    )} moved between your own characters (counted in neither)`
+                  : `${formatIsk(summary.totals.donationsInIsk)} received · ${formatIsk(
+                      summary.totals.donationsOutIsk,
+                    )} sent`
+              }
+            >
+              <div className="dashboard-tile__value">
+                {formatIskShort(summary.totals.donationsInIsk)} in ·{' '}
+                {formatIskShort(summary.totals.donationsOutIsk)} out
+              </div>
+            </StatTile>
           </div>
 
           <div className="card chart-card" data-testid="income-chart">
-            <h3>Ratted ISK by day</h3>
+            <h3>Income by day</h3>
             {hasIncome ? (
-              <IncomeByDayChart series={summary.rattedIskByDay} />
+              <IncomeByDayChart series={summary.byDay} />
             ) : (
               <p className="muted" data-testid="income-chart-empty">
-                No ratted income recorded this month.
+                No income recorded this month.
               </p>
+            )}
+          </div>
+
+          <div className="settings-section" data-testid="wallet-history">
+            <div className="settings-section__header">
+              <button
+                type="button"
+                className="collapse-toggle"
+                aria-expanded={!historyCollapsed}
+                title={historyCollapsed ? 'Expand' : 'Collapse'}
+                onClick={toggleHistory}
+                data-testid="wallet-history-toggle"
+              >
+                <ChevronIcon open={!historyCollapsed} size={14} />
+              </button>
+              <h3>Previous months</h3>
+              <span className="muted">
+                {months.length === 0
+                  ? 'nothing recorded yet'
+                  : `${months.length} month${months.length === 1 ? '' : 's'} recorded`}
+              </span>
+            </div>
+
+            {!historyCollapsed && (
+              <div className="settings-section__body">
+                {months.length === 0 ? (
+                  <p className="muted" data-testid="wallet-history-empty">
+                    No completed months yet. ESI's journal only reaches about 30 days back, so
+                    history builds up from the first sync onward — this fills in as MCO keeps
+                    running.
+                  </p>
+                ) : (
+                  <>
+                    <WalletHistoryChart months={months} />
+                    <table
+                      className="data-table wallet-history-table"
+                      data-testid="wallet-history-table"
+                    >
+                      <thead>
+                        <tr>
+                          <th>Month</th>
+                          <th className="num">Income</th>
+                          <th className="num">Bounties</th>
+                          <th className="num">Missions</th>
+                          <th className="num">Rewards</th>
+                          <th className="num">Tax paid</th>
+                          <th className="num">Expenses</th>
+                          <th className="num">Donations in</th>
+                          <th className="num">Donations out</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...months].reverse().map((month) => (
+                          <tr key={month.month}>
+                            <td>{formatMonthLabel(month.month)}</td>
+                            <td className="num">{formatIsk(month.income.totalIsk)}</td>
+                            <td className="num">{formatIsk(month.income.bountyIsk)}</td>
+                            <td className="num">{formatIsk(month.income.missionIsk)}</td>
+                            <td className="num">{formatIsk(month.income.corpRewardIsk)}</td>
+                            <td className="num">{formatIsk(month.taxIsk)}</td>
+                            <td className="num">{formatIsk(month.expenseIsk)}</td>
+                            <td className="num">{formatIsk(month.donationsInIsk)}</td>
+                            <td className="num">{formatIsk(month.donationsOutIsk)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </>

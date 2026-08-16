@@ -9,6 +9,7 @@ import { formatEsiDiagnostics } from '../esi/esiLog';
 import { missingScopes } from '../auth/scopeStatus';
 import { grantedScopes } from '../auth/token-store';
 import { getDb } from '../db';
+import { appliedSchemaVersion } from '../db/migrations';
 import { listAccounts } from '../db/repositories/accounts';
 import { listCharacters } from '../db/repositories/characters';
 import { getCached } from '../db/repositories/esiCache';
@@ -64,6 +65,10 @@ export function getAppInfo(): AppInfo {
     dbPath: join(app.getPath('userData'), 'mco.sqlite'),
     userDataPath: app.getPath('userData'),
     githubUrl: GITHUB_URL,
+    // Read from the database rather than reported from LATEST_SCHEMA_VERSION:
+    // the two always agree once the app has started (the open-time guard sees to
+    // that), so the useful readout is the one that would disagree if it didn't.
+    schemaVersion: appliedSchemaVersion(getDb()),
   };
 }
 
@@ -78,6 +83,61 @@ function fileStamp(): string {
 }
 
 /**
+ * Read one diagnostics field, degrading to a note rather than throwing.
+ *
+ * Only worth the wrapper because `buildDiagnosticsText` is also what the crash
+ * handler writes: at that point the thing being read (the database, most
+ * likely) may be exactly what just failed, and a header that throws would
+ * replace the diagnostic with a second crash.
+ */
+function safely(read: () => string): string {
+  try {
+    return read();
+  } catch (err) {
+    return `unavailable (${err instanceof Error ? err.message : String(err)})`;
+  }
+}
+
+function dbPathWithSize(): string {
+  const path = join(app.getPath('userData'), 'mco.sqlite');
+  try {
+    return `${path} (${statSync(path).size} bytes)`;
+  } catch {
+    return `${path} (not created yet)`; // fresh profile
+  }
+}
+
+function sdeSummary(): string {
+  const sde = getSdeStatus();
+  return sde.installed ? `${sde.version} (imported ${sde.importedAt})` : 'not imported';
+}
+
+/** Environment header + ESI activity + this session's captured log. */
+export function buildDiagnosticsText(title: string): string {
+  const header = [
+    title,
+    `Generated:  ${new Date().toISOString()}`,
+    `Version:    MCO ${APP_VERSION}`,
+    `Runtime:    Electron ${process.versions.electron}, Chrome ${process.versions.chrome}, Node ${process.versions.node}`,
+    `Platform:   ${process.platform} ${process.arch}`,
+    `User data:  ${safely(() => app.getPath('userData'))}`,
+    `Database:   ${safely(dbPathWithSize)}`,
+    `Schema:     ${safely(() => String(appliedSchemaVersion(getDb())))}`,
+    `Characters: ${safely(() => String(listCharacters().length))}`,
+    `SDE:        ${safely(sdeSummary)}`,
+    '',
+    '--- ESI activity (this run) ---',
+    '',
+    safely(formatEsiDiagnostics),
+    '',
+    '--- session log (oldest first; only the current run is captured) ---',
+    '',
+  ].join('\n');
+
+  return header + getCapturedLog() + '\n';
+}
+
+/**
  * Save a diagnostics file (environment header + this session's captured log)
  * to a user-chosen location. Resolves to the path, or null when cancelled.
  */
@@ -89,34 +149,7 @@ export async function exportLogs(window: BrowserWindow | null): Promise<string |
   });
   if (!target) return null;
 
-  const info = getAppInfo();
-  let dbSize = 'unknown';
-  try {
-    dbSize = `${statSync(info.dbPath).size} bytes`;
-  } catch {
-    // DB file may not exist yet on a fresh profile
-  }
-  const sde = getSdeStatus();
-  const header = [
-    'MCO diagnostics export',
-    `Generated:  ${new Date().toISOString()}`,
-    `Version:    MCO ${info.version}`,
-    `Runtime:    Electron ${info.electronVersion}, Chrome ${process.versions.chrome}, Node ${process.versions.node}`,
-    `Platform:   ${info.platform}`,
-    `User data:  ${info.userDataPath}`,
-    `Database:   ${info.dbPath} (${dbSize})`,
-    `Characters: ${listCharacters().length}`,
-    `SDE:        ${sde.installed ? `${sde.version} (imported ${sde.importedAt})` : 'not imported'}`,
-    '',
-    '--- ESI activity (this run) ---',
-    '',
-    formatEsiDiagnostics(),
-    '',
-    '--- session log (oldest first; only the current run is captured) ---',
-    '',
-  ].join('\n');
-
-  await writeFile(target, header + getCapturedLog() + '\n', 'utf8');
+  await writeFile(target, buildDiagnosticsText('MCO diagnostics export'), 'utf8');
   return target;
 }
 

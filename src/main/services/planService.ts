@@ -6,6 +6,7 @@ import type {
   SkillPlan,
 } from '@shared/types';
 import { parseSkillPlan } from '../plans/parse';
+import { UserFacingError } from '../errors';
 import { analyzePlan } from '../plans/analyze';
 import {
   buildSkillPrereqMap,
@@ -13,7 +14,7 @@ import {
   type AnalysisCharacter,
   type SkillRequirement,
 } from '../fits/analyze';
-import { createPlan, getPlan, listPlans } from '../db/repositories/plans';
+import { createPlan, getPlan, listPlans, updatePlan } from '../db/repositories/plans';
 import {
   getSdeStatus,
   getSkillRanks,
@@ -29,6 +30,17 @@ import { getNeuralAttributes, getSkillTrainingAttributes } from './trainingData'
 export function importPlan(name: string, planText: string): SkillPlan {
   parseSkillPlan(planText);
   return createPlan({ name, planText });
+}
+
+/**
+ * Overwrite a plan the creator re-saved. Updating in place rather than
+ * replacing keeps every group priority and character-sheet card pointed at it.
+ */
+export function updatePlanById(planId: number, name: string, planText: string): SkillPlan {
+  parseSkillPlan(planText);
+  const updated = updatePlan(planId, { name, planText });
+  if (!updated) throw new UserFacingError('That skill plan no longer exists.');
+  return updated;
 }
 
 /** Analyse a stored skill plan across the whole character roster. */

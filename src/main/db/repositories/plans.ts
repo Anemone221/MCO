@@ -40,6 +40,18 @@ export function createPlan(input: { name: string; planText: string }): SkillPlan
   return getPlan(Number(info.lastInsertRowid))!;
 }
 
+/**
+ * Overwrite a plan's name and skills in place, so every group priority and
+ * character-sheet reference keeps pointing at the edited plan. `imported_at`
+ * deliberately stays the creation time.
+ */
+export function updatePlan(id: number, input: { name: string; planText: string }): SkillPlan | null {
+  getDb()
+    .prepare('UPDATE skill_plans SET name = @name, plan_text = @planText WHERE id = @id')
+    .run({ ...input, id });
+  return getPlan(id);
+}
+
 export function removePlan(id: number): void {
   getDb().prepare('DELETE FROM skill_plans WHERE id = ?').run(id);
 }

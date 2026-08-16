@@ -27,6 +27,7 @@ sde:import (IPC)
             ├─ types.yaml           → sde_types        (streamed, progress-counted)
             ├─ typeDogma.yaml       → sde_type_skill_reqs + sde_skill_ranks
             │                         + sde_skill_attributes (streamed)
+            ├─ blueprints.yaml      → sde_blueprints
             ├─ mapRegions.yaml      → sde_regions
             └─ mapSolarSystems.yaml → sde_systems
 ```
@@ -41,11 +42,16 @@ Notes:
   by the SP formula plus the **primary/secondary training attributes** (dogma 180/181,
   whose values are attribute ids: 164 cha, 165 int, 166 mem, 167 per, 168 wil) used by
   the training-time cost metric.
+- `blueprints.yaml` (4 MB) supplies **what each blueprint makes**. Only the
+  `manufacturing` product is taken (or `reaction`, for reaction formulas):
+  `invention` carries a `products` list too, but that is the *Tech II blueprint* the
+  process yields, and reading it would file every Tech I blueprint under its Tech II
+  descendant. Parsed by the same kind of line scan as types.yaml (`parseBlueprints`).
 - Each table is fully replaced inside a transaction (`replace*` in
   `db/repositories/sde.ts`) — re-importing is idempotent and how you upgrade.
 - Progress stages surfaced to the renderer (`SdeProgress` in `shared/types.ts`):
   `downloading` (with byte counts) → `categories` → `groups` → `types` → `dogma` →
-  `maps` → `finalizing` → `done` | `error`.
+  `blueprints` → `maps` → `finalizing` → `done` | `error`.
 
 ## Status & gating (`getSdeStatus`)
 
@@ -57,6 +63,7 @@ derived from actual table contents (not the version stamp):
 | `hasSkillData` | `sde_type_skill_reqs` is non-empty | Fit/plan **analysis**. Without it, analyses return `needsSkillData: true` and the UI explains instead of showing wrong numbers. |
 | `hasMapData` | `sde_systems` is non-empty | System/region/security name resolution on Roster & Location (falls back to "—"). |
 | `hasSkillAttributes` | `sde_skill_attributes` is non-empty | The **Time** cost metric on fit/plan analysis. Without it, analyses return `needsSkillAttributes: true`, per-character `timeGapMinutes` is null, and the Time view explains why. |
+| `hasBlueprintData` | `sde_blueprints` is non-empty | The **blueprint checklist**. Without it the Blueprints page says so instead of claiming 0 of 0 owned. |
 
 Name resolution helpers used everywhere: `getTypeNames(ids)`, `getSystems(ids)`,
 `resolveTypeIdsByName(names)` (case-insensitive — how pasted EFT/plan text finds type

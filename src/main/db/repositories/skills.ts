@@ -1,4 +1,5 @@
 import type { SkillGroupSp } from '@shared/types';
+import { spForLevel } from '../../fits/analyze';
 import { getDb } from '../index';
 
 export interface SkillRow {
@@ -72,16 +73,32 @@ export function getQueue(characterId: number): QueueRow[] {
   }));
 }
 
+/** SP one rank of a skill is worth when trained to level V (rank 1 = 256,000 SP). */
+const SP_PER_RANK_AT_V = spForLevel(1, 5);
+
 /**
- * Trained SP per skill group for one character, biggest first. Each trained
- * skill maps to its SDE group (all of which live in the Skills category), so
- * the join needs no category filter. Returns [] when the character has no
- * skills or the SDE has not been imported yet (the type/group tables are empty).
+ * Trained SP per skill group for one character, biggest first, each with the SP
+ * that group holds at all-V (`maxSp`) so callers can show group completion.
+ * Each trained skill maps to its SDE group (all of which live in the Skills
+ * category), so the join needs no category filter. Returns [] when the character
+ * has no skills or the SDE has not been imported yet (the type/group tables are
+ * empty).
+ *
+ * `maxSp` counts only *published* skills — unpublished ones cannot be trained,
+ * so counting them would deflate every share. A character still holding SP in a
+ * since-unpublished skill can therefore exceed its group's max; the UI caps the
+ * display rather than this query hiding the SP. `maxSp` is 0 for every group
+ * when `sde_skill_ranks` is empty (SDE imported before ranks were stored).
  */
 export function getCharacterSkillGroupSp(characterId: number): SkillGroupSp[] {
   const rows = getDb()
     .prepare(
-      `SELECT g.name AS group_name, SUM(cs.sp) AS sp
+      `SELECT g.name AS group_name,
+              SUM(cs.sp) AS sp,
+              (SELECT COALESCE(SUM(r.rank), 0)
+                 FROM sde_skill_ranks r
+                 JOIN sde_types st ON r.skill_type_id = st.id
+                WHERE st.group_id = g.id AND st.published = 1) AS rank_sum
        FROM character_skills cs
        JOIN sde_types t ON cs.skill_type_id = t.id
        JOIN sde_groups g ON t.group_id = g.id
@@ -89,8 +106,12 @@ export function getCharacterSkillGroupSp(characterId: number): SkillGroupSp[] {
        GROUP BY g.id
        ORDER BY sp DESC`,
     )
-    .all(characterId) as Array<{ group_name: string; sp: number }>;
-  return rows.map((r) => ({ group: r.group_name, sp: r.sp }));
+    .all(characterId) as Array<{ group_name: string; sp: number; rank_sum: number }>;
+  return rows.map((r) => ({
+    group: r.group_name,
+    sp: r.sp,
+    maxSp: Math.round(r.rank_sum * SP_PER_RANK_AT_V),
+  }));
 }
 
 export function getTotalSp(characterId: number): number {

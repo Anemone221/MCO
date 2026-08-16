@@ -111,6 +111,8 @@ function rosterEntry(): RosterEntry {
       currentFinishLevel: null,
       finishDate: null,
     },
+    queueLength: 0,
+    queueEndDate: null,
     systemName: '1DQ1-A',
     shipTypeName: 'Rorqual',
     jumpFatigue: null,

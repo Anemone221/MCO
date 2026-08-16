@@ -11,6 +11,7 @@ import { getFit } from '../db/repositories/fits';
 import { getPlan } from '../db/repositories/plans';
 import { getSdeStatus, getSystems } from '../db/repositories/sde';
 import { getQueue } from '../db/repositories/skills';
+import { pendingQueue } from '../skills/queue';
 import { listTagsForCharacter } from '../db/repositories/tags';
 import { getAllActiveImplants, getAllCloneMeta, getAllJumpClones } from '../db/repositories/clones';
 import { listCharacterLocations } from '../db/repositories/characterLocation';
@@ -109,7 +110,7 @@ export async function buildGroupDetail(groupId: number): Promise<GroupDetail> {
   };
 
   const members: GroupMemberStatus[] = entries.map((entry) => {
-    const queue = getQueue(entry.character.id);
+    const queue = pendingQueue(getQueue(entry.character.id));
     return {
       character: entry.character,
       accountLabel: entry.accountLabel,

@@ -135,7 +135,7 @@ The dependency direction is one-way and enforced by convention + `externalizeDep
 renderer (sandboxed React)
   → window.mco  (preload/index.ts: typed McoApi over ipcRenderer.invoke)
     → IpcChannel (shared/ipc.ts: string-const map + McoApi interface)
-      → ipc/register.ts (one ipcMain.handle per channel, thin)
+      → ipc/channels/*  (one handle() per channel, thin)
         → services/*   (compose ESI + SDE + DB into view models)
           → repositories/*  (the ONLY code that runs SQL)
           → esi/client.ts (the ONLY code that fetches ESI)
@@ -147,10 +147,12 @@ Rules that keep this intact:
   `@shared/ipc` (types only) and calls `window.mco` (via `lib/ipc.ts`).
 - **Adding a feature = add a channel in three places**: `shared/ipc.ts` (channel const +
   `McoApi` method), `preload/index.ts` (the `ipcRenderer.invoke` wrapper),
-  `ipc/register.ts` (the handler). Keep the handler a one-liner that delegates to a
-  service/repository.
-- **`register.ts` handlers stay thin.** Business logic lives in a service; SQL lives in a
-  repository. A handler that does more than unwrap args and call one function is a smell.
+  `ipc/channels/<domain>.ts` (the handler). Keep the handler a one-liner that delegates to
+  a service/repository.
+- **Handlers stay thin.** Business logic lives in a service; SQL lives in a repository. A
+  handler that does more than unwrap args and call one function is a smell.
+- **Wiring goes through `handle()`**, never `ipcMain.handle` directly — that wrapper is
+  the error boundary, and it is also what the startup coverage check counts.
 - **Repositories never call services or ESI.** Services orchestrate; repositories persist.
 - **Pure logic has no imports from `electron`, `better-sqlite3`, or a service.** Parsers,
   analysis math, filtering/sorting live in dependency-free modules (`fits/`, `plans/`,
@@ -166,12 +168,19 @@ Rules that keep this intact:
 - **Two independent give-up budgets.** Transient failures (5xx/network/timeout) spend
   `MAX_RETRIES`; throttling (420/429) spends `MAX_THROTTLE_WAITS`. Don't collapse them —
   waiting out a shared backoff must not burn the transient budget.
-- **Best-effort sub-syncs never fail the whole sync.** In `syncCharacter`, each optional
-  data pull (location, clones, fatigue, wallet, online, attributes) is wrapped in its own
-  `try/catch` that `console.warn`s with character context and continues. Only the core
-  (public info + skills + queue) is allowed to throw.
-- **Scope-gate before you call.** Guard scope-dependent fetches with
-  `hasGrantedScope(characterId, SCOPE_…)` so you don't fire requests ESI will 403.
+- **A new per-character data domain is a `SYNC_TASKS` entry**, not another block inside
+  `syncCharacter`. Give it a `name`, a `scope` if it needs one, and a `run` that fetches
+  and stores; the driver owns the gate, the `try/catch`, the `console.warn` with character
+  context, and the ordering. Don't hand-roll the stanza — the registry exists so the
+  uniform parts stay uniform.
+- **Best-effort sub-syncs never fail the whole sync.** Only the core task (public info +
+  skills + queue) is `critical: true` and allowed to throw; every other task warns and the
+  sync continues. Fetch everything a critical task needs before storing any of it, so a
+  half-read sync stores nothing rather than a mix of ages.
+- **Scope-gate before you call**, so you don't fire requests ESI will 403. Inside
+  `syncCharacter` that's the task's `scope` field; elsewhere it's
+  `hasGrantedScope(characterId, SCOPE_…)` (or `grantedScopes` once, if you're checking
+  several in a row).
 - **Fan-out is waved, not bursted.** Batch work over a large fleet goes through
   `Promise.allSettled` in waves (`SWEEP_WAVE_SIZE`) with jitter, so a 90-character sweep
   de-bursts. Collect per-item `SyncResult`s; never let one failure abort the batch.
@@ -258,10 +267,11 @@ Rules that keep this intact:
 ## 12. Quick checklist for a new change
 
 - [ ] `npm run format` clean, no `any`, no suppressions.
-- [ ] New IPC surface? Added to `shared/ipc.ts` + `preload/index.ts` + `register.ts`, and
-      the handler is thin.
+- [ ] New IPC surface? Added to `shared/ipc.ts` + `preload/index.ts` +
+      `ipc/channels/<domain>.ts`, and the handler is thin.
 - [ ] SQL only inside a repository; new schema is a new appended migration.
-- [ ] ESI only through `esiGet`; scope-gated calls guarded; optional pulls are best-effort.
+- [ ] ESI only through `esiGet` (`esiGetPaged` if the route paginates); scope-gated calls
+      guarded; optional pulls are best-effort.
 - [ ] Non-trivial derivation extracted to a pure module with a unit test.
 - [ ] Nullable/absent fields documented with what absent means; reused `EsiDataStatus`
       where the reason matters.

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { CharacterGroup, RosterEntry } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 
 function GroupCard({
   group,
@@ -113,30 +114,23 @@ function GroupCard({
 }
 
 export default function Groups() {
-  const [groups, setGroups] = useState<CharacterGroup[]>([]);
-  const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [newGroup, setNewGroup] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const [g, r] = await Promise.all([mco.groups.list(), mco.characters.roster()]);
-    setGroups(g);
-    setRoster(r);
-  }, []);
-
-  useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
-  }, [load]);
+  const { data, error, reload, setError } = useMcoData(async () => {
+    const [groups, roster] = await Promise.all([mco.groups.list(), mco.characters.roster()]);
+    return { groups, roster };
+  });
+  const { groups = [], roster = [] } = data ?? {};
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
     setError(null);
     try {
       await action();
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

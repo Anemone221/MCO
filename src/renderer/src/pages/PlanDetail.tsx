@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import type { CharacterGroup, PlanAnalysis, PlanCharacterResult, Tag } from '@shared/types';
+import type { PlanCharacterResult } from '@shared/types';
 import { mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 import { formatSp, romanLevel } from '../lib/format';
 import { filterByGroup, memberIdSet, type GroupFilter } from '../lib/groups';
 import {
@@ -63,12 +64,7 @@ export default function PlanDetail() {
   const params = useParams<{ id: string }>();
   const planId = Number(params.id);
 
-  const [analysis, setAnalysis] = useState<PlanAnalysis | null>(null);
-  const [groups, setGroups] = useState<CharacterGroup[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
   const [group, setGroup] = useState<GroupFilter>('all');
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [view, setView] = useState<CostView>(() => loadCostView('plan', planId));
 
   useEffect(() => {
@@ -83,35 +79,24 @@ export default function PlanDetail() {
     [planId],
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [a, g, t] = await Promise.all([
+  const { data, error, loading, reload, setData, setError } = useMcoData(
+    async () => {
+      const [analysis, groups, tags] = await Promise.all([
         mco.plans.analyze(planId),
         mco.groups.list(),
         mco.tags.list(),
       ]);
-      setAnalysis(a);
-      setGroups(g);
-      setTags(t);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [planId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+      return { analysis, groups, tags };
+    },
+    { deps: [planId] },
+  );
+  const { analysis = null, groups = [], tags = [] } = data ?? {};
 
   // Membership toggles don't change the analysis, so only refresh tags/groups.
   const reloadOrg = useCallback(async () => {
-    const [g, t] = await Promise.all([mco.groups.list(), mco.tags.list()]);
-    setGroups(g);
-    setTags(t);
-  }, []);
+    const [groups, tags] = await Promise.all([mco.groups.list(), mco.tags.list()]);
+    setData((prev) => (prev ? { ...prev, groups, tags } : prev));
+  }, [setData]);
 
   const { openMenu, menuElement } = useCharacterContextMenu({
     tags,
@@ -148,9 +133,14 @@ export default function PlanDetail() {
           </Link>
           {analysis ? ` · ${analysis.plan.name}` : ''}
         </h2>
-        <button type="button" className="ghost" onClick={() => void load()} disabled={loading}>
-          {loading ? 'Analysing…' : 'Re-analyse'}
-        </button>
+        <div className="toolbar__actions">
+          <Link to={`/plans/${planId}/edit`} className="link-btn" data-testid="edit-plan">
+            Edit plan
+          </Link>
+          <button type="button" className="ghost" onClick={() => void reload()} disabled={loading}>
+            {loading ? 'Analysing…' : 'Re-analyse'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="error-box" data-testid="plan-detail-error">{error}</div>}

@@ -1,10 +1,11 @@
 import { safeStorage } from 'electron';
 import { getToken, saveToken, updateAccessToken } from '../db/repositories/tokens';
-import { decodeJwtPayload, scopesFromPayload } from './pkce';
+import { UserFacingError } from '../errors';
+import { decodeJwtPayload, scopesFromPayload } from './jwt';
 
 function assertEncryptionAvailable(): void {
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error(
+    throw new UserFacingError(
       'OS-level encryption is unavailable; refresh tokens cannot be stored securely.',
     );
   }
@@ -47,6 +48,11 @@ export function getValidCachedAccessToken(characterId: number, skewMs = 60_000):
  * Scopes actually granted to a character's token. Prefers the `scp` claim of
  * the last-seen access token (the source of truth for the token family, even
  * once expired) over the stored scope list recorded at login.
+ *
+ * Decoding without re-verifying is safe here: this token's signature was
+ * checked in `esi-oauth.ts` before it was ever written to the row, so the only
+ * way to reach a forged `scp` is to edit the profile database by hand — at
+ * which point the reward is that ESI answers the resulting call with a 403.
  */
 export function grantedScopes(characterId: number): string[] {
   const stored = getToken(characterId);

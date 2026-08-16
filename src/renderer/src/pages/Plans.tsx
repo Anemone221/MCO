@@ -1,24 +1,17 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { SkillPlan } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 import { formatDate } from '../lib/format';
 
 export default function Plans() {
-  const [plans, setPlans] = useState<SkillPlan[]>([]);
   const [name, setName] = useState('');
   const [planText, setPlanText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
-  const load = useCallback(async () => {
-    setPlans(await mco.plans.list());
-  }, []);
-
-  useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
-  }, [load]);
+  const { data, error, reload, setError } = useMcoData(() => mco.plans.list());
+  const plans = data ?? [];
 
   async function importPlan(): Promise<void> {
     const trimmedName = name.trim();
@@ -30,9 +23,9 @@ export default function Plans() {
       await mco.plans.import(trimmedName, trimmedText);
       setName('');
       setPlanText('');
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -43,9 +36,9 @@ export default function Plans() {
     setError(null);
     try {
       await mco.plans.remove(id);
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     }
   }
 
@@ -57,16 +50,21 @@ export default function Plans() {
     <section className="page">
       <div className="toolbar">
         <h2>Skill Plans ({plans.length})</h2>
-        {plans.length > 0 && (
-          <button
-            type="button"
-            className="ghost"
-            onClick={() => setImportOpen((prev) => !prev)}
-            data-testid="toggle-import-plan"
-          >
-            {showImport ? 'Hide import' : 'Import plan…'}
-          </button>
-        )}
+        <div className="toolbar__actions">
+          {plans.length > 0 && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => setImportOpen((prev) => !prev)}
+              data-testid="toggle-import-plan"
+            >
+              {showImport ? 'Hide import' : 'Import plan…'}
+            </button>
+          )}
+          <Link to="/plans/new" className="link-btn" data-testid="create-plan">
+            Create plan…
+          </Link>
+        </div>
       </div>
 
       {showImport && (
@@ -110,7 +108,10 @@ export default function Plans() {
       {plans.length === 0 ? (
         <div className="empty-state">
           <h3>No skill plans yet</h3>
-          <p>Paste a list of skills above to track your roster's progress against it.</p>
+          <p>
+            Paste a list of skills above to track your roster's progress against it, or build one
+            skill by skill in the <Link to="/plans/new">plan creator</Link>.
+          </p>
         </div>
       ) : (
         <table className="data-table" data-testid="plans-table">
@@ -129,6 +130,13 @@ export default function Plans() {
                 </td>
                 <td className="muted">{formatDate(plan.importedAt)}</td>
                 <td className="row-actions">
+                  <Link
+                    to={`/plans/${plan.id}/edit`}
+                    className="link-btn"
+                    data-testid={`edit-plan-${plan.id}`}
+                  >
+                    Edit
+                  </Link>
                   <button
                     type="button"
                     className="danger btn-sm"

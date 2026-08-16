@@ -19,9 +19,11 @@ every character sized by SP, assembled by `buildDashboardSummary()`
   `/status/` endpoint, alongside MCO's own ESI-call health read straight off
   `esi/rate-limiter.ts`'s backoff state); Characters online (scope-gated,
   `esi-location.read_online.v1` — see below); Characters registered; Total SP;
-  Ratted ISK this month (NPC bounty prizes + ESS reserve payouts + mission/incursion
-  rewards, kept as separate bounty/mission sub-totals so the combined tile can still
-  show the breakdown — the detailed by-day chart lives on the **Wallet** page).
+  Income this month — everything earned: NPC bounty prizes + ESS reserve payouts,
+  mission/incursion rewards, and CONCORD reward payouts, kept as separate
+  sub-totals so the combined tile can still show the breakdown. Donations are *not*
+  income (ISK handed over is a transfer, and it has its own Wallet card). The by-day
+  chart and every other wallet category live on the **Wallet** page.
   Headline numbers count up (`lib/useCountUp.ts`) and tiles stagger in on load.
 - **Characters by total SP** (`components/charts/CharacterSpChart.tsx`): an amCharts
   5 single-level packed-circles chart (`Pack`, the d3 circle-packing layout), one
@@ -48,23 +50,89 @@ every character sized by SP, assembled by `buildDashboardSummary()`
 
 ## Wallet (`/wallet`, `pages/Wallet.tsx`)
 
-Current-month ratted income, from `buildWalletSummary()`
-(`services/walletService.ts`): headline tiles (total / bounties / missions) plus
-**Ratted ISK by day** (`components/charts/IncomeByDayChart.tsx`) — amCharts 5
-stacked bounty/mission columns for the current UTC month, zero-filled through today
-(`sumIncomeByDayBetween` + `fillMonthDays` in `main/wallet/monthIncome.ts`). Built
-on the same `useAmChart` wrapper (Animated theme, palette recolors on theme switch,
-ISK-style number abbreviations). Free amCharts tier: the small logo on the chart is
-the license condition. Months with no income show a quiet placeholder instead of an
-empty chart. Income data (bounty = NPC bounties + ESS payouts; mission = agent
-mission rewards) is synced from each wallet-scoped character's journal — see
-[esi.md](esi.md#dashboard-specific-sync-notes).
+Where every character's ISK went this month, from `buildWalletSummary()`
+(`services/walletService.ts`). One SQL pass over the stored journal slice
+(`sumWalletTotalsBetween`) fills the card row; the same aggregate grouped by month
+(`sumWalletTotalsByMonth`) fills the history view.
+
+- **Cards** (`components/StatTile.tsx`, shared with the Dashboard): Income, then the
+  three categories that make it up — Bounties (NPC bounties + ESS payouts), Missions
+  (agent mission rewards) and Corporate reward payout — followed by Tax paid,
+  Expenses and Player donations.
+  - **`corporate_reward_payout` is not a corp project.** The payer is CONCORD
+    (`first_party_id` 1000125, *"CONCORD rewarded &lt;name&gt; for services
+    performed"*) settling a completed site, which makes it PvE income like a bounty.
+    The name is CCP's, and the card keeps it so it matches the in-game journal.
+  - **Income is everything earned**, those reward payouts included: leaving them out
+    of a tile labelled "Income" makes it read as wrong to anyone who knows what they
+    were paid. `IncomeSummary` carries `corpRewardIsk` alongside bounty/mission, and
+    the history chart plots bounties+missions and reward payouts as two stacked
+    series rather than one total over its own part.
+  - **Tax paid** is every `*_tax` ref_type that took ISK **plus** the `tax` ESI
+    reports on the entry itself: a corp-taxed bounty pays out net, with the cut in
+    that field rather than in a journal row of its own, so ignoring it would hide
+    the largest tax line a null-sec ratter has.
+    *It is tax ESI told us about, not all tax paid* — and the card says so. The
+    in-game journal pairs every CONCORD reward with a `Corporate Reward Tax` row
+    (45M gross / −4.5M tax), but ESI's character journal returns neither that row
+    nor a `tax` field for it, only the net 40.5M. Measured over one 73-character
+    roster's full 30-day journal (2,689 entries), ESI returned exactly **one**
+    `*_tax` row in total — so treat the total as a floor.
+  - **Expenses** are the costs of running the roster: every `*_fee` ref_type (a
+    suffix rule for the same reason tax uses one) plus `skill_purchase`,
+    `structure_gate_jump` (Ansiblex tolls), `planetary_construction` and
+    `repair_bill`. Only negative amounts count, so a refunded fee cannot read as
+    spending. **Not** included: `market_escrow` (ISK parked against a buy order),
+    `player_trading` and `corporation_account_withdrawal` (your own ISK moving),
+    and the contract ref_types — a contract can be a purchase or a sale, and
+    guessing which would make the figure fiction.
+  - **Player donations** separate in from out, and both from ISK shuffled *between*
+    tracked characters — with 90+ characters, moving ISK to a trading alt is
+    constant, and counting it as income would drown the real number. A donation is
+    internal when the counterparty id is one of the roster's characters; only the
+    receiving side is counted, so a transfer between two synced characters lands
+    once.
+- **Income by day** (`components/charts/IncomeByDayChart.tsx`) — amCharts 5 stacked
+  columns for the current UTC month, zero-filled through today
+  (`sumWalletTotalsByDay` + `fillMonthDays` in `main/wallet/monthIncome.ts`).
+  Carries all three income categories — missions, bounties, reward payouts — so a
+  column sums to exactly what the Income tile counts, and each segment's tooltip
+  repeats the day total. Outgoings stay off this chart on purpose: seven classes
+  over 31 columns pushes past the ~7 where adjacent classes blur, so tax,
+  expenses and donations are the monthly chart's job. Stacking order is set by
+  the palette, not preference — `--ok` and `--warn` are only ΔE 5.1 apart under
+  protanopia, so bounties (`--accent`) sit between them. Bounties and reward
+  payouts keep the hues they have on the monthly chart: color follows the
+  category, not its position.
+  Months with no income show a quiet placeholder instead of an empty chart.
+- **Previous months** — collapsible (collapsed by default, remembered in
+  localStorage under `mco-wallet-history-collapsed`; this month is the page, history
+  is the aside). Inside: `components/charts/WalletHistoryChart.tsx`, one stacked
+  column per completed month with earnings above the zero line and tax / donations
+  sent below it, over a compact table of the exact figures. Up to 12 completed
+  months (`previousMonthsBoundsUtc`), which never includes the month in progress.
+  Six series over five hues: donations reuse one hue in both directions (the side
+  of the zero line says which way the ISK went), with the outgoing side dimmed.
+  **History starts at the first sync**: ESI's journal reaches ~30 days back, so
+  the table is the archive — see [esi.md](esi.md#dashboard-specific-sync-notes).
+
+Both charts are built on the `useAmChart` wrapper (Animated theme, palette recolors
+on theme switch, ISK-style number abbreviations). Free amCharts tier: the small logo
+on the chart is the license condition. Both separate stacked segments with a 2px
+stroke in `--panel` — a gap in the surface color, not a border around each fill.
+
+Series hues come from the theme's semantic tokens, so the themes have to keep those
+tokens distinguishable from each other, not just from the background: `amber` needed
+its own `--warn` (its accent *was* the default `--warn`, the same hex) and `holo`'s
+`--ok` was within ΔE 15 of its aqua accent. Both are fixed in `styles.css`. The
+remaining known deviation is lightness band — the tokens are the app's status
+colors first and chart series second, so they are not re-stepped for charting.
 
 ## Roster (`/roster`, `pages/Roster.tsx`)
 
 The home table: every character with account, capability tags, last-known location and
-ship, currently-training skill, time left, jump fatigue, jump-clone availability
-(ready vs. cooldown countdown), total SP, wallet balance, and last sync.
+ship, currently-training skill, time left, queue left, jump fatigue, jump-clone
+availability (ready vs. cooldown countdown), total SP, wallet balance, and last sync.
 Built by `buildRoster()` (`services/characterSync.ts`).
 
 - **Filters**: free-text search (name / account / training skill / system / ship),
@@ -80,13 +148,19 @@ Built by `buildRoster()` (`services/characterSync.ts`).
 - **Add character** launches the SSO login flow (see [esi.md](esi.md#login-flow));
   per-row Sync / Sync all / Remove.
 - Summary chips: total characters, training, idle, combined SP.
-- Training status is *derived*, not stored: queue position 0 with a future finish date.
+- Training status is *derived*, not stored: the head of the *pending* queue
+  (`skills/queue.ts` — see [esi.md](esi.md#finished-skill-queue-entries)) with a future
+  finish date.
+- **Time left** is the current skill; **Queue left** is the whole queue running dry (the
+  last entry's finish date). A queue with skills but no dates is paused — EVE clears queue
+  dates while training is paused — so it shows "Paused" and sorts with the empty ones.
 
 ## Character detail (`/character/:id`, `pages/CharacterDetail.tsx`)
 
 The single-character sheet, assembled by `services/characterDetail.ts`:
 
-- From DB: total SP, full skill queue (SDE-resolved names), wallet balance, jump
+- From DB: total SP, pending skill queue (SDE-resolved names; finished entries
+  trimmed, so the count matches the in-game queue), wallet balance, jump
   fatigue, neural attributes (the five stats, bonus remaps, yearly-remap
   availability), jump clones, group memberships, capability tags, per-plan progress
   (complete / SP gap / % bar). The wallet scope postdates early tokens, so the wallet
@@ -253,7 +327,8 @@ twice. Structures nobody can access keep showing as `Structure <id>`.
 Same engine, aimed at goals instead of ships.
 
 - Import: name + pasted plan text, one `<skill name> <level>` per line (roman I–V or
-  digits 1–5; junk lines are skipped). Parser: `plans/parse.ts`.
+  digits 1–5; junk lines are skipped). Parser: `plans/parse.ts`. Plans can also be
+  **built** rather than pasted — see the plan creator below.
 - Analysis (`services/planService.ts`): resolves skills, expands prerequisites, and per
   character reports `complete` / `spGap` / `lsiGap` / `timeGapMinutes` /
   `missingSkills` — literally `analyzeFit` with `canFly` renamed (`plans/analyze.ts`).
@@ -265,6 +340,90 @@ Same engine, aimed at goals instead of ships.
   `1 - myGap/totalCost` is the progress fraction — same math both sides, no drift.
 - Result buckets support the same right-click tag/group assignment as fits, and the
   "Plan complete" section carries the same **+ Assign tag** bulk control (`BulkTagBar`).
+
+## Plan creator (`/plans/new`, `/plans/:id/edit`, `pages/PlanCreator.tsx`)
+
+Where a plan is written, rather than pasted in from somewhere else. Reached from
+**Create plan…** on the Plans page, or **Edit** on any plan (list row or detail page).
+
+The screen is split: the **training queue** being built on the left, **every skill in
+the game** on the right, each pane scrolling its own list.
+
+- **One row per level.** The queue is what a plan actually trains — `Gunnery I`,
+  `Gunnery II`, … — not a target level per skill. A row only costs the step it adds,
+  so a queue that walks a skill I→V totals exactly what holding V costs.
+- **The skill browser** (right) lists every published skill (SDE category 16)
+  collapsed by SDE skill group, with a filter over group and skill names. Each skill
+  carries **−** and **+**: `+` queues the next level (with anything it needs first),
+  `−` drops the top one. The level currently queued is shown beside each skill, and
+  skills already in the plan are tinted.
+- **Attributes are stated once per group.** The group header carries the
+  primary/secondary pair the majority of its skills train against
+  (`groupSkills` picks it, ties broken alphabetically so it never depends on row
+  order); only the skills that break that pair repeat it — Heavy Assault Cruisers
+  showing `Wil/Per` inside a `Per/Wil` group. The queue on the left keeps its own
+  Pri/Sec columns per row.
+- **Prerequisites come with the level that needs them**, transitively, ahead of it —
+  so a draft is in trainable order as it is built, and levels already queued are
+  never restated.
+- **Ship Browser** (`components/ShipBrowser.tsx`): a dialog over every published hull
+  (SDE category 6 — 415 ships in 47 groups), searchable by name or browsable by ship
+  group, each hull shown with its icon (`components/TypeIcon.tsx`, from the EVE image
+  server the portraits already come from — lazy-loaded, and it holds the row's space
+  rather than breaking when offline). Picking one queues every skill that flies it,
+  prerequisites and levels included, and offers the hull's name as the plan name. The
+  catalogue carries each hull's requirements with it (`plans:shipCatalog`, ~700 rows),
+  so a pick costs no round-trip.
+- **Add a fit's skills**: pick a saved fit, or paste EFT without saving one
+  (`plans:draftFromFit` / `plans:draftFromEft` → `eftSkillRequirements`, the same
+  "what counts toward flying this" rule the fit analysis uses). The fit's *direct*
+  requirements come back; the creator expands them into levels and threads the
+  prerequisites in. Merging into a non-empty draft only adds what isn't already there.
+- **Training time.** Every row is priced in time as well as SP, with a running "done
+  at" column, and the pane header totals both. Time is estimated at the attributes
+  in the **Attributes** button — a plan is written for a character who will often
+  remap before training it, so this is a setting, not synced data. It starts at an
+  even remap (20/20/20/20/19 — 17 base plus 14 points, spare point off charisma) and
+  is editable per attribute, persisted in localStorage (`lib/planAttributes.ts`).
+- **Optimize attributes** (`optimizeAttributes`) rearranges the points already set
+  into the fastest arrangement *for this plan*. It keeps the total rather than
+  raising it, and stays inside the window that total implies (`remapWindow`: EVE's
+  17–27 remap range, slid up by whatever the total says the implants are worth — so
+  a +5-implant character is optimised as 22–32, not handed free points). The plan
+  collapses to a handful of attribute-pair SP buckets and every legal arrangement in
+  the 11-wide window is evaluated, so the answer is exact, not a heuristic; ties keep
+  the arrangement closest to the current one. A unit test brute-forces the whole
+  legal space to confirm nothing beats it.
+- **The two panes are linked**: clicking a queued level — anywhere on the row, not
+  just the name — opens that skill's group in the browser, scrolls to it and marks it
+  briefly, so its − / + are to hand. A filter that already shows the skill is kept;
+  one that would hide it is cleared, since an open group the filter excludes shows
+  nothing.
+- **Reordering**: drag a row **by its grip**, or use its ↑/↓ buttons. Only the grip
+  arms `draggable`: with the whole row draggable, a click that drifted more than a
+  few pixels started a drag instead, and Chromium fires no click after a drag — which
+  made the click-to-reveal above work only sometimes. **Fix training order**
+  topologically sorts the queue (prerequisites first, lower levels before higher) and
+  is stable, so a hand-arranged order survives it.
+- **Per-row notes** (`draftIssues`): `order` (queued before something it needs — the
+  only one styled as a warning), `covered` (an earlier row already reaches this
+  level), `prereq` (needs something this plan never trains — routine, since the
+  character may already have it), `unknown` (a name no SDE skill matched).
+- **Export**: *Copy to clipboard* writes the same `Skill Name V` lines that MCO's
+  parser and EVE's own skill-plan import both accept (via Electron's clipboard —
+  `system:copyText` — since the renderer is sandboxed and packaged builds load from
+  `file://`). *Save* creates a plan, or updates the edited one **in place** so group
+  priorities and character-sheet cards keep pointing at it; *Save as new* forks it.
+- Opening a plan expands its lines into the per-level queue in place, preserving the
+  author's order (`expandLevels`). It is lossless: a line whose name matches no skill
+  is kept exactly as written (with `—` for its unknown data) rather than dropped.
+- The whole draft is pure renderer logic (`lib/planDraft.ts`, unit-tested in
+  `tests/unit/planDraft.test.ts`). The main process hands over the skill catalogue
+  once (`plans:skillCatalog` — ~600 skills with group, rank, attributes, per-level SP
+  and prerequisites), so browsing, filtering, adding, reordering and re-costing cost
+  no further IPC. Per-level SP comes from main so EVE's SP formula stays in one place
+  (`fits/analyze.ts`), and the SP/minute rule is shared outright
+  (`shared/training.ts`) with the roster-wide analysis.
 
 ## Clones (`/clones`, `pages/Clones.tsx`)
 
@@ -286,19 +445,85 @@ The **medical (home) clone location** — ESI's `home_location` from the same cl
 endpoint — appears on the character sheet's Overview card and in each expanded
 board row. Station and structure names resolve the same way as clone locations.
 
+## Blueprints (`/blueprints`, `pages/Blueprints.tsx`)
+
+A **BPO checklist**: every blueprint the game has, with the ones you own ticked off.
+Built by `buildBlueprintBoard()` (`services/blueprintService.ts`), which joins the SDE's
+blueprint universe (`sde_blueprints` + `sde_types`) against every original held by a
+character or a tracked alt corp. The counting rules live in `blueprints/ownership.ts`
+(pure, unit-tested).
+
+**What counts as a blueprint that exists.** The default denominator is *market-seeded*
+blueprints — published blueprint types that have a `marketGroupID`, ~1,879 in the pinned
+SDE. That is the set that genuinely exists as originals: it includes the legacy Tech II
+BPOs (Wolf, Crow, Raptor — the 50 bn ones from the original lottery) and Upwell structure
+BPOs, and excludes invention-only Tech II/III and faction blueprints that only ever drop
+as copies. Those are still in the table behind the **Include copy-only** toggle
+(~4,166 published blueprints total), for looking something up rather than for scoring.
+
+**What counts as owned.** The **Own** column is the checklist tick: a green ✓ means you
+hold an original (`×N` when you hold several). Only originals earn one — ESI reports
+copies through the same endpoint, and `quantity === -1` is the only thing that
+distinguishes them — so a stack of BPCs leaves the row blank, with a `+Nc` suffix beside
+the tick for context. The **Originals only** checkbox (on by default) is what enforces
+that; turning it off ticks copies-only blueprints in muted grey and counts them, for the
+"what could I actually build right now" reading. `isOwned` in `lib/blueprintView.ts` is
+the single rule behind the tick, the owned/missing filter and the header count, so those
+three can never contradict each other.
+
+Items are deduped by `item_id`, because a blueprint moved into the corp hangar sits in
+both tables until the character it left next syncs. Held originals whose blueprint type
+is no longer published (old POS arrays, say) are counted as **off-catalog** rather than
+invented as rows.
+
+`BlueprintTotals` from the main process deliberately carries no "owned" number — that
+answer depends on the two checkboxes, so it is counted in the renderer (`countOwned`)
+where they live, rather than shipped as a figure that could disagree with the table.
+
+Rows carry the best ME/TE across the originals held, and who holds each one — character
+name, or an accent-bordered chip for an alt corp. Filters: search (name, group, holder),
+category, owned/missing, **Originals only**, **Include copy-only**; every column sorts
+(sorting by Own puts originals first and uses copies only as a tie-break, so a pile of
+BPCs never floats above a blueprint you actually hold).
+
+### Alt corps (the reason this feature needs a corporation scope)
+
+Most of a serious collection lives in an **alt corp** — a corporation wholly controlled
+by one player, used as a shared hangar — where no character token can see it.
+"Track alt corp" runs SSO for one character with `esi-corporations.read_blueprints.v1`
+added to the normal grant (see [Opt-in scopes](esi.md#opt-in-scopes)); that character
+becomes the corp's **reader** and is the only token used for it. Nothing else about the
+corporation is read — no assets, wallet, members or structures.
+
+ESI serves the route only to a **Director**, and answers 403 otherwise. That is checked
+immediately on adding the corp, so the reason appears while the user is still looking at
+the dialog; it is then stored (`blueprint_corps.last_error`) and shown on the corp card
+rather than retried every sweep.
+
+The **Sources** panel is what keeps the number honest: the corp cards, plus any
+characters whose token cannot report blueprints (`scope-missing` — tokens predating the
+scope — or `login-expired`). The header chip turns warn-coloured whenever the fleet is
+not fully reporting, because a checklist quietly missing a third of the roster is worse
+than no checklist.
+
 ## Notifications
 
-- **Detection** (`notifications/queueDrain.ts`, pure): a character whose skill queue
-  has exactly one entry (nothing queued behind the training skill) finishing within
+- **Detection** (`notifications/queueDrain.ts`, pure): a character whose *pending* skill
+  queue has exactly one entry (nothing queued behind the training skill) finishing within
   **3 days** is about to waste training time.
-- **Delivery** (`services/notificationService.ts`), after each scheduler sweep: writes
-  to the `notifications` table (deduped by `queue-drain:<charId>:<finishDate>` so each
-  occurrence notifies exactly once), pushes `notifications:changed` to the renderer,
-  and shows an OS toast (clicking it marks read + focuses the window).
+- **Rule → sentences** (`services/notificationService.ts`), after each scheduler sweep:
+  gathers candidates from the DB, hands them to the pure rule, and turns each warning
+  into a title/body plus a dedupe key (`queue-drain:<charId>:<finishDate>`, so a
+  re-queued skill earns a fresh warning while a repeated sweep does not).
+- **Delivery** (`services/notificationDelivery.ts`): the half every kind shares —
+  dedupe-keyed insert into the `notifications` table, one `notifications:changed` push
+  to the renderer per batch, and an OS toast for each notification that was actually new
+  (clicking it marks read + opens the window, creating one if the app is tray-only).
 - **UI** (`components/NotificationBell.tsx`): sidebar bell with unread badge,
   mark-read/mark-all-read.
-- The `kind` column + dedupe-key pattern is ready for more notification types
-  (e.g. fatigue expired, extraction ready).
+- A second kind (fatigue expired, extraction ready, plan complete) is a pure rule module
+  beside `queueDrain.ts`, the reads that feed it, and the sentence it produces —
+  `deliverNotifications` is already the shared half and does not change.
 
 ## Settings (`/settings`, `pages/Settings.tsx`)
 
@@ -329,6 +554,11 @@ bell). Seven sections:
   live in `lib/theme.ts` (pure); applying/persisting in `renderer/src/theme.ts` — the
   choice is stored in `localStorage` and applied in `main.tsx` before first render,
   so no theme flash.
+  Holo is the one theme that restyles `button` itself, and `:not()` carries its
+  argument's specificity, so that rule outranks anything a button class declares.
+  Buttons that are really text — a clickable row, a menu item, a tab, a chip's ✕ —
+  therefore have to be excluded there or they come out as filled cyan controls.
+  **`.plain` is the marker for new ones**; the classes listed beside it predate it.
 - **Demo mode** (`lib/demo.ts`): a toggle (persisted in `localStorage`) that swaps
   identifying data — character names, account labels, system/region/station names,
   player-assigned ship names, portraits, OS-user path segments — for deterministic
@@ -342,7 +572,11 @@ bell). Seven sections:
   (`components/CharacterAvatar.tsx`).
 - **Logs**: `main/log.ts` patches `console.log/warn/error` in the main process at
   startup into a 5000-line ring buffer; "Export logs…" saves a diagnostics file
-  (version/runtime/platform/DB header + the session log) via a save dialog.
+  (version/runtime/platform/DB header + the session log) via a save dialog. If the
+  main process crashes there is no Settings page left to click, so `main/fatal.ts`
+  writes that same diagnostics file itself — `mco-crash-<stamp>.txt` in the profile
+  folder — and the dialog before exit names the path (see
+  [architecture.md](architecture.md#crash-handling-srcmainfatalts)).
 - **Backup**: "Back up database…" writes a consistent snapshot via better-sqlite3's
   online backup API (WAL-safe, app keeps running) to a user-chosen path; restore =
   quit MCO and copy the file back over `mco.sqlite`. Refresh tokens are
@@ -350,7 +584,8 @@ bell). Seven sections:
   machine/user keeps all data but characters must be re-added. "Open data folder"
   opens the profile directory.
 - **About**: version/runtime facts plus GitHub repository and issue-tracker links
-  (opened externally via the window-open handler).
+  (opened externally via the window-open handler), and the update check —
+  "Check for updates" plus a line on what the last check found.
 
 ## The skill-analysis engine (`fits/analyze.ts`)
 

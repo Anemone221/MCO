@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { app } from 'electron';
 import { SDE_URL, USER_AGENT } from '../config';
+import { UserFacingError } from '../errors';
 
 export interface DownloadProgress {
   receivedBytes: number;
@@ -24,7 +25,7 @@ export async function downloadSde(
 
   const res = await fetch(SDE_URL, { headers: { 'User-Agent': USER_AGENT } });
   if (!res.ok || !res.body) {
-    throw new Error(`SDE download failed: HTTP ${res.status}`);
+    throw new UserFacingError(`SDE download failed: HTTP ${res.status}`);
   }
 
   const totalBytes = Number(res.headers.get('content-length') ?? 0);

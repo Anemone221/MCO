@@ -6,6 +6,17 @@ directories:
   output: release
   buildResources: build
 
+# Where `electron-builder --publish` uploads to, and where the in-app update
+# check looks (src/main/services/updateService.ts reads this repo's latest
+# release). `releaseType: draft` means a published build is never announced
+# before its notes are written: /releases/latest ignores drafts, so the app
+# stays quiet until the release is actually published.
+publish:
+  provider: github
+  owner: Anemone221
+  repo: MCO
+  releaseType: draft
+
 # better-sqlite3 ships a native .node binary that cannot be loaded from inside
 # an asar archive, so it must be unpacked.
 # resources/ (window + tray icons) is also unpacked so nativeImage loads them

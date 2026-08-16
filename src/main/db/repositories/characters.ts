@@ -40,6 +40,25 @@ export function getCharacter(id: number): CharacterSummary | null {
   return row ? toSummary(row) : null;
 }
 
+/**
+ * Record a character by id and name alone, leaving everything else untouched.
+ *
+ * For the login path, where the JWT is all we have: it carries no corporation,
+ * and re-running SSO for a character that already exists (widening its scopes,
+ * or designating it a corp blueprint reader) must not blank the corp and
+ * alliance a previous sync recorded. Use {@link upsertCharacter} when ESI's
+ * public data is in hand and is authoritative.
+ */
+export function ensureCharacter(id: number, name: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO characters (id, name) VALUES (@id, @name)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name`,
+    )
+    .run({ id, name });
+}
+
+/** Record a character from ESI public data; corp and alliance are overwritten. */
 export function upsertCharacter(input: {
   id: number;
   name: string;

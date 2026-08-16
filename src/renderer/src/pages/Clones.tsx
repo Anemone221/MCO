@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { CloneBoardEntry, EsiDataStatus, ImplantInfo, JumpCloneEntry } from '@shared/types';
 import { mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 import { formatDate, formatTimeUntil } from '../lib/format';
 import CharacterAvatar from '../components/CharacterAvatar';
 
@@ -137,29 +138,14 @@ function CloneRow({
 }
 
 export default function Clones() {
-  const [board, setBoard] = useState<CloneBoardEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setBoard(await mco.clones.board());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-    return mco.characters.onChanged(() => void load());
-  }, [load]);
+  const { data, error, loading, reload } = useMcoData(() => mco.clones.board(), {
+    onCharactersChanged: true,
+  });
+  const board: CloneBoardEntry[] = data ?? [];
 
   const needsAttention = useMemo(
     () => board.filter((e) => e.status === 'scope-missing' || e.status === 'login-expired').length,
@@ -199,7 +185,7 @@ export default function Clones() {
     <section className="page">
       <div className="toolbar">
         <h2>Clones</h2>
-        <button type="button" className="ghost" onClick={() => void load()} disabled={loading}>
+        <button type="button" className="ghost" onClick={() => void reload()} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
       </div>

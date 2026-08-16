@@ -5,7 +5,7 @@ import { getServerStatus } from '../esi/endpoints';
 import { rateLimiter } from '../esi/rate-limiter';
 import { listCharacters } from '../db/repositories/characters';
 import { listCharacterOnline } from '../db/repositories/characterOnline';
-import { sumIncomeBetween } from '../db/repositories/characterWalletJournal';
+import { sumWalletTotalsBetween } from '../db/repositories/characterWalletJournal';
 import { getTotalSp } from '../db/repositories/skills';
 import { currentMonthBoundsUtc } from '../wallet/monthIncome';
 
@@ -52,7 +52,9 @@ export async function buildDashboardSummary(): Promise<DashboardSummary> {
   });
 
   const { start, end } = currentMonthBoundsUtc();
-  const rattedIsk = sumIncomeBetween(start, end);
+  // Only the income category is a Dashboard tile; the rest of the month's
+  // totals (tax, donations, corp rewards) belong to the Wallet page.
+  const { income } = sumWalletTotalsBetween(start, end);
 
   return {
     serverStatus,
@@ -60,7 +62,7 @@ export async function buildDashboardSummary(): Promise<DashboardSummary> {
     online: { onlineCount, missingScopeCount, totalCharacters: characters.length },
     charactersRegistered: characters.length,
     totalSp,
-    rattedIsk,
+    income,
     characters: characterEntries,
   };
 }

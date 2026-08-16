@@ -6,7 +6,7 @@ MCO is an Electron app with the standard three-process split, built by
 ```
 ┌────────────────────────── main process ──────────────────────────┐
 │  index.ts        window/tray lifecycle, single-instance lock     │
-│  ipc/register.ts every IPC channel → service/repository call     │
+│  ipc/           channels/ per domain → service/repository call   │
 │  services/       view-model assembly (roster, boards, analysis)  │
 │  esi/            HTTP client, rate limiter, endpoint wrappers    │
 │  auth/           SSO PKCE login, token store, scope status       │
@@ -14,6 +14,7 @@ MCO is an Electron app with the standard three-process split, built by
 │  fits/ plans/    pure parsers + analysis math (no I/O)           │
 │  notifications/  pure queue-drain detection                      │
 │  sync/           pure character sync-state classification        │
+│  update/         pure semver compare + GitHub release parsing    │
 │  wallet/         pure current-month income windowing             │
 │  db/             better-sqlite3 handle, migrations, repositories │
 │  log.ts          console capture for the Settings log export     │
@@ -29,7 +30,7 @@ MCO is an Electron app with the standard three-process split, built by
 │  pages/       Dashboard, Roster, CharacterDetail, Accounts,      │
 │               Groups, Tags, Location, Fits(+Detail),             │
 │               Plans(+Detail), Clones, Wallet, Settings           │
-│  components/  SdeBanner, NotificationBell, TagSelect, …          │
+│  components/  SdeBanner, UpdateBanner, NotificationBell, …       │
 │  lib/         pure view logic (filter/sort/format) — unit-tested │
 │  theme.ts     applies/persists the theme (DOM side of lib/theme) │
 └──────────────────────────────────────────────────────────────────┘
@@ -52,14 +53,102 @@ The contract lives in `src/shared/ipc.ts`:
 
 1. `src/shared/ipc.ts` — add the channel name and the `McoApi` method signature
    (+ any new types in `src/shared/types.ts`).
-2. `src/preload/index.ts` — bridge the method to `ipcRenderer.invoke`.
-3. `src/main/ipc/register.ts` — `ipcMain.handle(...)` wiring to a service/repository.
+2. `src/preload/index.ts` — bridge the method through the local `invoke` helper.
+3. `src/main/ipc/channels/<domain>.ts` — `handle(...)` wiring to a service/repository, in
+   the module for that domain (a new domain is a new module plus one line in
+   `register.ts`).
 4. The renderer page/component that calls `mco.<domain>.<method>()`.
+
+Miss step 3 and `registerIpc` says so at startup: it compares the channels `handle()`
+actually wired against every declared channel bar the push-only ones
+(`ipc/coverage.ts` + `IPC_EVENT_CHANNELS`), and throws unpackaged (dev, E2E) rather than
+letting one page fail later with "No handler registered". A packaged build logs it
+instead — one broken page beats refusing to start.
 
 Request/response uses `invoke`/`handle`. Main→renderer push uses `webContents.send` on
 two event channels, each with an `onChanged`-style subscription in the API:
 `characters:changed` (background sync finished a sweep) and `notifications:changed`
 (new notification recorded). `sde:progress` streams import progress the same way.
+
+### Loading data in a page
+
+Step 4 above is one hook, not a hand-rolled state machine. **`useMcoData`**
+(`src/renderer/src/lib/useMcoData.ts`) runs a loader on mount, again when its `deps`
+change (a route param), and — with `onCharactersChanged: true` — whenever a background
+sync sweep lands, returning `{ data, error, loading, reload, setData, setError }`:
+
+```ts
+const { data, error, loading, reload } = useMcoData(
+  () => mco.dashboard.summary(),
+  { onCharactersChanged: true },
+);
+```
+
+`data` is `null` until the first load resolves; a page fetching several sources returns an
+object and destructures with defaults (`const { roster = [], tags = [] } = data ?? {};`).
+The hook owns `errorMessage()`, clears the error at the start of every run, keeps the last
+good data on failure, and discards a run that a newer one has superseded — so a sweep
+firing mid-load, StrictMode's double mount, and a fast route change cannot land stale
+data. `load` is read from a ref, so it needs no `useCallback`.
+
+The two components that stream rather than fetch — `NotificationBell` (its own
+`notifications:changed` subscription) and `SdeBanner` (`sde:progress`) — stay outside it.
+
+Its sibling **`useDebouncedSearch`** (`src/renderer/src/lib/useDebouncedSearch.ts`) is the
+type-ahead equivalent: it debounces a query, runs a `search` channel, and drops answers the
+query has moved past. `HomeStationPicker` and `PodSystemPicker` are each just markup over
+it.
+
+### Error boundary
+
+A rejected `invoke` is rendered by whichever page made the call, so an unguarded throw
+puts a developer-facing message on screen. Every request/response call passes through a
+wrapper on each side of the bridge — use them; neither `ipcMain.handle` nor
+`ipcRenderer.invoke` should be called directly outside those two helpers.
+
+- **`handle()` in `src/main/ipc/handle.ts`** logs the real error with its channel
+  (`[ipc] tags:create failed: …`, captured for Settings → Export logs) and rethrows what
+  `toUserMessage` decides the renderer may see.
+- **`toUserMessage` in `src/main/errors.ts`** passes a **`UserFacingError`** through
+  verbatim, maps a `SQLITE_CONSTRAINT_UNIQUE` failure to "That name is already in use.",
+  and replaces everything else with a generic line. Plain `Error` stays the default, so a
+  message reaches the UI only when someone chose to write it for a user — throw
+  `UserFacingError` for the failures a user can act on (bad EFT paste, missing ESI scope).
+- **`invoke()` in `src/preload/index.ts`** strips the `Error invoking remote method
+  '<channel>': Error:` plumbing Electron wraps a rejection in, via
+  `cleanIpcErrorMessage` (`src/shared/ipcError.ts`).
+- **`errorMessage()` in `src/renderer/src/lib/ipc.ts`** is what a page's `catch` calls —
+  never `String(e)`, which re-prepends `Error: ` to a finished sentence.
+
+Net effect: `Unknown character 123` and `SqliteError: UNIQUE constraint failed: tags.name`
+stay in the log, while the UI shows a sentence. Covered by `tests/unit/ipcErrors.test.ts`
+and two E2E cases in `tests/e2e/app.spec.ts`.
+
+### Crash handling (`src/main/fatal.ts`)
+
+The error boundary above covers a throw *inside an IPC handler*. A throw outside one — in
+a timer, an event handler, the scheduler — is an uncaught exception, which ends the main
+process and takes the window with it. The catch is that Settings → Export logs, the only
+way to reach this session's log, dies with it: a crash would otherwise be a silent
+disappearance with nothing left to look at.
+
+`initFatalErrorHandler()` (installed in `index.ts` immediately after `initLogCapture()`,
+so there is a buffer to write) logs the error, writes
+`mco-crash-<stamp>.txt` **next to the profile database**, then shows a dialog naming that
+file and exits. Order matters: logging first puts the crash's own stack inside the report,
+and the write is synchronous because an async write queued behind a dying event loop may
+never reach the disk. A re-entrancy flag keeps a failure *while reporting* from looping.
+
+The report body is `buildDiagnosticsText()` from `settingsService.ts` — the same content
+Export logs writes. Every field in its header that touches the database or filesystem is
+read through `safely()`, since the crash being reported may well be the thing the header
+wants to read, and a header that throws would replace the diagnostic with a second crash.
+
+Unhandled promise *rejections* are deliberately not fatal: `log.ts` logs them (through the
+patched console, so they are visible live in a dev terminal, not just in an export) and
+the process carries on. Registering that listener is also what keeps them non-fatal —
+Node's default since v15 is to rethrow, which this handler would then treat as a crash.
+With ~90 characters syncing, one rejected background promise must not close the app.
 
 ## Layering rules
 
@@ -74,8 +163,12 @@ two event channels, each with an `onChanged`-style subscription in the API:
 - **Pure logic modules** have no Electron/DB/network imports so vitest can hit them
   directly: `fits/eft.ts` (EFT parser), `fits/analyze.ts` (SP math + prerequisite
   closure), `plans/parse.ts`, `notifications/queueDrain.ts`, `auth/pkce.ts`,
-  `auth/scopeStatus.ts`, `sync/characterSyncState.ts`, `launchMode.ts`, and all of
-  `renderer/src/lib/`.
+  `auth/scopeStatus.ts`, `sync/characterSyncState.ts`, `update/version.ts`,
+  `update/github.ts`, `launchMode.ts`, and the
+  view-model half of `renderer/src/lib/` (`rosterView`, `groupView`, `blueprintView`,
+  `costView`, `format`, `groups`, `tags`, `theme`, `motion`, `demo`). The bridge modules
+  there — `ipc.ts` and the `useMcoData` hook it backs — need `window.mco` and a React
+  renderer, so they are covered by E2E instead.
 
 Path aliases: `@main`, `@shared`, `@renderer` (see `electron.vite.config.ts`).
 

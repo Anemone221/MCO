@@ -12,6 +12,7 @@ import {
   upsertStructure,
 } from '../db/repositories/structures';
 import { getSystems } from '../db/repositories/sde';
+import { UserFacingError } from '../errors';
 import { isStructureDue } from '../structures/refreshPolicy';
 
 /**
@@ -127,7 +128,7 @@ export async function importPublicStructures(
 ): Promise<StructureImportSummary> {
   const characterId = pickStructureScopedCharacter();
   if (characterId === null) {
-    throw new Error(
+    throw new UserFacingError(
       `No character grants ${SCOPE_READ_STRUCTURES}. Re-add one character to enable structure import.`,
     );
   }

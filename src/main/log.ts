@@ -38,8 +38,13 @@ export function initLogCapture(): void {
     };
   }
 
+  // Via the patched console rather than record() directly, so a rejection is
+  // *visible* — printed to a dev terminal as it happens — instead of only
+  // surfacing later in an exported log. Registering this listener is also what
+  // keeps an unhandled rejection non-fatal: Node's default since v15 is to
+  // rethrow it, which `fatal.ts` would then treat as a crash.
   process.on('unhandledRejection', (reason) => {
-    record('error', ['[unhandledRejection]', reason]);
+    console.error('[unhandledRejection]', reason);
   });
 
   record('log', ['[mco] log capture started']);

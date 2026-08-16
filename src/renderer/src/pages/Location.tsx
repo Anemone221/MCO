@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { CharacterGroup, LocationEntry } from '@shared/types';
-import { mco } from '../lib/ipc';
+import type { LocationEntry } from '@shared/types';
+import { errorMessage, mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 import { formatDate, formatSecurity, securityTier } from '../lib/format';
 import { filterByGroup, memberIdSet, type GroupFilter } from '../lib/groups';
 import GroupSelect from '../components/GroupSelect';
@@ -78,33 +79,19 @@ function SystemHeader({ group }: { group: SystemGroup }) {
 }
 
 export default function Location() {
-  const [board, setBoard] = useState<LocationEntry[]>([]);
-  const [charGroups, setCharGroups] = useState<CharacterGroup[]>([]);
   const [group, setGroup] = useState<GroupFilter>('all');
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [b, g] = await Promise.all([mco.location.board(), mco.groups.list()]);
-      setBoard(b);
-      setCharGroups(g);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-    return mco.characters.onChanged(() => void load());
-  }, [load]);
+  const { data, error, loading, reload } = useMcoData(
+    async () => {
+      const [board, charGroups] = await Promise.all([mco.location.board(), mco.groups.list()]);
+      return { board, charGroups };
+    },
+    { onCharactersChanged: true },
+  );
+  const { board = [], charGroups = [] } = data ?? {};
 
   useEffect(
     () =>
@@ -125,13 +112,13 @@ export default function Location() {
           : `Named ${summary.resolved} of ${summary.totalPublic} public structures` +
             (summary.failed > 0 ? ` (${summary.failed} failed)` : ''),
       );
-      await load();
+      await reload();
     } catch (e) {
-      setImportStatus(String(e));
+      setImportStatus(errorMessage(e));
     } finally {
       setImporting(false);
     }
-  }, [load]);
+  }, [reload]);
 
   const visible = useMemo(() => {
     const ids = memberIdSet(charGroups, group);
@@ -145,7 +132,7 @@ export default function Location() {
     <section className="page">
       <div className="toolbar">
         <h2>Location</h2>
-        <button type="button" className="ghost" onClick={() => void load()} disabled={loading}>
+        <button type="button" className="ghost" onClick={() => void reload()} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
         <button

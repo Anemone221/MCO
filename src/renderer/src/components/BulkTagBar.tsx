@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Tag } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
 import { sectionTagCoverage } from '../lib/tags';
 
 /**
@@ -62,7 +62,7 @@ export default function BulkTagBar({
       setNewName('');
       setOpen(false);
     } catch (e) {
-      onError?.(String(e));
+      onError?.(errorMessage(e));
     } finally {
       setBusy(false);
     }

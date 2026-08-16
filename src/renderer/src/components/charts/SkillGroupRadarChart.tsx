@@ -7,28 +7,40 @@ import { useAmChart } from './useAmChart';
 interface RadarDatum {
   /** Skill-group name — the circular-axis category. */
   group: string;
-  /** Combined SP expressed in millions, so the radial axis reads "12.3M". */
-  millions: number;
-  /** Exact SP with thousands separators, shown in the hover tooltip. */
-  spExact: string;
+  /** How complete the group is, 0–100, so the radial axis reads "80%". */
+  percent: number;
+  /** "80.2% — 4,012,345 of 5,000,000 SP", shown in the hover tooltip. */
+  detail: string;
 }
 
 /**
- * Spider/web radar of a character's trained SP by skill group: skill groups run
- * around the circular axis, SP (in millions) on the radial axis. A single thin
- * line connects the per-group values with a small circular bullet at each spoke.
- * The radial axis is labelled in millions to one decimal; the hover tooltip
- * carries the exact SP. Lifecycle, theming (palette + Animated theme, skipped
- * under reduced motion) and disposal come from useAmChart.
+ * Spider/web radar of how far a character has trained each skill group: skill
+ * groups run around the circular axis, the group's completion — trained SP over
+ * what the group holds with every skill in it at level V — on the radial axis.
+ * So a character holding 4M of Shields' 5M SP reads 80% on that spoke.
+ * Completion (not raw SP) keeps the shape comparable between a 5M SP alt and a
+ * 200M SP main, and the axis is pinned to 0–100 so the web is comparable
+ * between characters too. A single thin line connects the per-group values with
+ * a small circular bullet at each spoke; the hover tooltip carries the SP behind
+ * the percentage. Lifecycle, theming (palette + Animated theme, skipped under
+ * reduced motion) and disposal come from useAmChart.
  */
 export default function SkillGroupRadarChart({ groups }: { groups: SkillGroupSp[] }) {
-  const data: RadarDatum[] = groups.map((g) => ({
-    group: g.group,
-    millions: g.sp / 1_000_000,
-    spExact: `${g.sp.toLocaleString()} SP`,
-  }));
+  const data: RadarDatum[] = groups.map((g) => {
+    // maxSp counts published skills only, so a character carrying SP in a
+    // since-unpublished skill can pass its group's ceiling — plot the cap, and
+    // let the tooltip's raw SP show what actually happened.
+    const percent = g.maxSp > 0 ? Math.min(100, (g.sp / g.maxSp) * 100) : 0;
+    const share = g.maxSp > 0 ? `${percent.toFixed(1)}% — ` : '';
+    const ceiling = g.maxSp > 0 ? ` of ${g.maxSp.toLocaleString()}` : '';
+    return {
+      group: g.group,
+      percent,
+      detail: `${share}${g.sp.toLocaleString()}${ceiling} SP`,
+    };
+  });
 
-  const dataKey = groups.map((g) => `${g.group}:${g.sp}`).join('|');
+  const dataKey = groups.map((g) => `${g.group}:${g.sp}:${g.maxSp}`).join('|');
 
   const containerRef = useAmChart((root, palette) => {
     const chart = root.container.children.push(
@@ -62,7 +74,9 @@ export default function SkillGroupRadarChart({ groups }: { groups: SkillGroupSp[
     // CategoryAxis must receive its own data in addition to the series data.
     xAxis.data.setAll(data);
 
-    // Radial (value) axis — combined SP in millions, from the centre outward.
+    // Radial (value) axis — group completion, from the centre outward. Pinned to
+    // a full 0–100 so the web reads as an absolute, and so two characters' webs
+    // can be compared by shape rather than each being scaled to its own best group.
     const radialRenderer = am5radar.AxisRendererRadial.new(root, {});
     radialRenderer.labels.template.setAll({ fill: am5.color(palette.muted), fontSize: 10 });
     radialRenderer.grid.template.setAll({
@@ -72,20 +86,23 @@ export default function SkillGroupRadarChart({ groups }: { groups: SkillGroupSp[
     const yAxis = chart.yAxes.push(
       am5xy.ValueAxis.new(root, {
         min: 0,
+        max: 100,
+        strictMinMax: true,
         renderer: radialRenderer,
-        numberFormat: "#.#'M'", // up to one decimal, in millions of SP
+        // Literal '%' — the values are already 0–100, so amCharts must not scale them.
+        numberFormat: "#'%'",
       }),
     );
 
-    // Single line series with the exact SP in its hover tooltip.
+    // Single line series; the tooltip pairs the percentage with the SP behind it.
     const series = chart.series.push(
       am5radar.RadarLineSeries.new(root, {
-        name: 'Skill points',
+        name: 'Group completion',
         xAxis,
         yAxis,
-        valueYField: 'millions',
+        valueYField: 'percent',
         categoryXField: 'group',
-        tooltip: am5.Tooltip.new(root, { labelText: '{group}: {spExact}' }),
+        tooltip: am5.Tooltip.new(root, { labelText: '{group}: {detail}' }),
       }),
     );
     series.strokes.template.setAll({ strokeWidth: 1, stroke: am5.color(palette.accent) });

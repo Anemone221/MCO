@@ -1,7 +1,11 @@
-import { app, BrowserWindow, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, dialog, nativeImage, session, shell } from 'electron';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import appIconPath from '../../resources/icon.png?asset';
+import { isAllowedNavigation, isSafeExternalUrl } from './webSecurity';
 import { closeDb, getDb } from './db';
+import { SchemaVersionError } from './db/migrations';
+import { initFatalErrorHandler } from './fatal';
 import { initLogCapture } from './log';
 import { registerIpc } from './ipc/register';
 import { isBackgroundLaunch, shouldQuitOnWindowClose } from './launchMode';
@@ -15,6 +19,9 @@ import { runSweepNow, startScheduler, stopScheduler } from './services/scheduler
 
 // Capture console output from the very start so "Export logs" sees everything.
 initLogCapture();
+// Must follow initLogCapture(): a crash report is only worth writing once there
+// is a captured buffer to write into it.
+initFatalErrorHandler();
 
 // Required for Windows toast notifications to display reliably under the nsis
 // build target, which (unlike Squirrel) does not auto-register the AUMID.
@@ -60,13 +67,30 @@ function createWindow(): void {
     mainWindow = null;
   });
 
+  // A link never opens in-app: it goes to the user's browser, and only if it is
+  // an http(s) URL. Handing an arbitrary scheme to the OS would let anything
+  // that can put a URL on the page launch a local protocol handler.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
+    else console.warn(`[security] refused to open a non-http(s) URL externally: ${url}`);
     return { action: 'deny' };
   });
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  const rendererUrl = process.env['ELECTRON_RENDERER_URL'];
+  const appUrl = rendererUrl ?? pathToFileURL(join(__dirname, '../renderer/index.html')).toString();
+
+  // The window stays on the document MCO loaded. React-router navigates through
+  // the history API and never raises this, so anything that does is a real page
+  // load — which for a remote URL would mean running that page against MCO's
+  // preload bridge.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAllowedNavigation(url, appUrl)) return;
+    event.preventDefault();
+    console.warn(`[security] blocked in-window navigation to ${url}`);
+  });
+
+  if (rendererUrl) {
+    void mainWindow.loadURL(rendererUrl);
   } else {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
@@ -98,7 +122,31 @@ if (!app.requestSingleInstanceLock({ background: backgroundMode })) {
   });
 
   void app.whenReady().then(() => {
-    getDb(); // open the database and run migrations before any IPC handler can fire
+    // Opening the profile is the one startup step with a failure mode users hit
+    // on their own — reinstalling an older MCO over a newer profile. Thrown from
+    // here it would reject the whenReady promise and the app would simply never
+    // appear, so say what happened before quitting.
+    try {
+      getDb(); // open the database and run migrations before any IPC handler can fire
+    } catch (err) {
+      console.error('[db] cannot open the profile database:', err);
+      dialog.showErrorBox(
+        'MCO cannot start',
+        err instanceof SchemaVersionError
+          ? err.message
+          : `MCO could not open its database.\n\n${err instanceof Error ? err.message : String(err)}`,
+      );
+      app.quit();
+      return;
+    }
+    // MCO's UI needs no web-platform permissions — no camera, microphone,
+    // geolocation, or the web Notification API (toasts are raised from the main
+    // process). Refusing them all is simpler than auditing which are reachable.
+    session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
+      console.warn(`[security] denied a renderer permission request: ${permission}`);
+      callback(false);
+    });
+
     // Reads the close-to-tray preference, so it must follow getDb(). Raises the
     // tray itself when this profile wants one (background launch or the pref).
     const background = initBackgroundMode({

@@ -8,6 +8,7 @@ import {
   filterRoster,
   loadColumnVisibility,
   NO_ROSTER_FILTERS,
+  queueRemainingMs,
   saveColumnVisibility,
   sortRoster,
   summarizeRoster,
@@ -26,6 +27,8 @@ function entry(overrides: {
   cloneJump?: RosterEntry['cloneJump'];
   walletBalance?: number | null;
   training?: Partial<RosterEntry['training']>;
+  queueLength?: number;
+  queueEndDate?: string | null;
 }): RosterEntry {
   return {
     character: {
@@ -39,6 +42,8 @@ function entry(overrides: {
     },
     accountLabel: overrides.accountLabel ?? null,
     totalSp: overrides.totalSp ?? 0,
+    queueLength: overrides.queueLength ?? 0,
+    queueEndDate: overrides.queueEndDate ?? null,
     systemName: overrides.systemName ?? null,
     shipTypeName: overrides.shipTypeName ?? null,
     jumpFatigue: overrides.jumpFatigue ?? null,
@@ -226,6 +231,64 @@ describe('sortRoster', () => {
     const input = [...roster];
     sortRoster(input, { key: 'sp', dir: 'desc' });
     expect(input).toEqual(roster);
+  });
+});
+
+describe('queueRemainingMs', () => {
+  const now = Date.parse('2026-07-14T00:00:00Z');
+
+  it('returns null for an empty queue', () => {
+    expect(queueRemainingMs(entry({ id: 1, name: 'A' }), now)).toBeNull();
+  });
+
+  it('returns null for a paused queue (EVE clears the dates)', () => {
+    const e = entry({ id: 1, name: 'A', queueLength: 4, queueEndDate: null });
+    expect(queueRemainingMs(e, now)).toBeNull();
+  });
+
+  it('returns null for a queue that already ran dry', () => {
+    const e = entry({ id: 1, name: 'A', queueLength: 2, queueEndDate: '2026-07-13T00:00:00Z' });
+    expect(queueRemainingMs(e, now)).toBeNull();
+  });
+
+  it('returns the millis until the last queued skill finishes', () => {
+    const e = entry({ id: 1, name: 'A', queueLength: 3, queueEndDate: '2026-07-14T01:00:00Z' });
+    expect(queueRemainingMs(e, now)).toBe(3_600_000);
+  });
+
+  it('measures the whole queue, not just the skill training now', () => {
+    // Current skill ends in an hour but four more skills follow.
+    const e = entry({
+      id: 1,
+      name: 'A',
+      queueLength: 5,
+      queueEndDate: '2026-07-24T00:00:00Z',
+      training: { isTraining: true, finishDate: '2026-07-14T01:00:00Z' },
+    });
+    expect(queueRemainingMs(e, now)).toBe(10 * 24 * 3_600_000);
+  });
+});
+
+describe('sortRoster by queue', () => {
+  // Far-future/past dates keep the assertion independent of the real clock.
+  const long = entry({ id: 1, name: 'Long', queueLength: 8, queueEndDate: '3000-01-01T00:00:00Z' });
+  const short = entry({ id: 2, name: 'Short', queueLength: 1, queueEndDate: '2999-01-01T00:00:00Z' });
+  const paused = entry({ id: 3, name: 'Paused', queueLength: 3, queueEndDate: null });
+  const empty = entry({ id: 4, name: 'Empty' });
+  const pool = [long, empty, short, paused];
+
+  it('orders soonest-to-run-dry first, with nothing left to run last', () => {
+    expect(sortRoster(pool, { key: 'queue', dir: 'asc' }).map((e) => e.character.id)).toEqual([
+      2, 1, 4, 3,
+    ]);
+  });
+
+  it('flips queued order but keeps empty and paused queues last', () => {
+    // The queued pair reverses; the two without a remaining time stay last,
+    // their name tiebreak flipping with direction (Paused before Empty).
+    expect(sortRoster(pool, { key: 'queue', dir: 'desc' }).map((e) => e.character.id)).toEqual([
+      1, 2, 3, 4,
+    ]);
   });
 });
 

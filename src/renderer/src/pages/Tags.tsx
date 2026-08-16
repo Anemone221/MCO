@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RosterEntry, Tag } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 
 function TagCard({
   tag,
@@ -120,30 +121,23 @@ function TagCard({
 }
 
 export default function Tags() {
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [newTag, setNewTag] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const [t, r] = await Promise.all([mco.tags.list(), mco.characters.roster()]);
-    setTags(t);
-    setRoster(r);
-  }, []);
-
-  useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
-  }, [load]);
+  const { data, error, reload, setError } = useMcoData(async () => {
+    const [tags, roster] = await Promise.all([mco.tags.list(), mco.characters.roster()]);
+    return { tags, roster };
+  });
+  const { tags = [], roster = [] } = data ?? {};
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
     setError(null);
     try {
       await action();
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

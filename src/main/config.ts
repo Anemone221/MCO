@@ -1,3 +1,5 @@
+import packageJson from '../../package.json';
+
 /**
  * ESI / EVE SSO configuration.
  *
@@ -16,6 +18,19 @@ export const ESI_CALLBACK_URL = `http://localhost:${ESI_CALLBACK_PORT}/callback`
 
 export const SSO_AUTHORIZE_URL = 'https://login.eveonline.com/v2/oauth/authorize';
 export const SSO_TOKEN_URL = 'https://login.eveonline.com/v2/oauth/token';
+
+/**
+ * Public keys that sign EVE SSO access tokens, used to verify every token's
+ * signature before anything is stored from it (see `auth/jwks.ts`).
+ */
+export const SSO_JWKS_URL = 'https://login.eveonline.com/oauth/jwks';
+
+/**
+ * Expected `iss` claim. CCP issues both the bare host and the https form
+ * depending on the endpoint, so the claim is normalized (scheme and trailing
+ * slash stripped) before it is compared against this.
+ */
+export const SSO_ISSUER = 'login.eveonline.com';
 
 /**
  * ESI is versioned by compatibility date now, not by /latest|/v1 path prefixes:
@@ -44,6 +59,17 @@ export const SCOPE_READ_FATIGUE = 'esi-characters.read_fatigue.v1';
 export const SCOPE_READ_WALLET = 'esi-wallet.read_character_wallet.v1';
 export const SCOPE_READ_STRUCTURES = 'esi-universe.read_structures.v1';
 export const SCOPE_READ_ONLINE = 'esi-location.read_online.v1';
+export const SCOPE_READ_BLUEPRINTS = 'esi-characters.read_blueprints.v1';
+
+/**
+ * Blueprints an **alt corp** holds — a corporation wholly controlled by one
+ * player, used as a shared hangar. Deliberately NOT in `ESI_SCOPES`: it is the
+ * only corporation scope MCO asks for, ESI grants it only to a character with
+ * the Director role, and asking all ~90 characters for a corp scope none of
+ * them can use is noise on the SSO consent screen. It is instead requested
+ * per character, on demand, via `startLogin` (see `OPTIONAL_ESI_SCOPES`).
+ */
+export const SCOPE_READ_CORP_BLUEPRINTS = 'esi-corporations.read_blueprints.v1';
 
 export const ESI_SCOPES = [
   'esi-skills.read_skills.v1',
@@ -56,11 +82,35 @@ export const ESI_SCOPES = [
   SCOPE_READ_WALLET,
   SCOPE_READ_STRUCTURES,
   SCOPE_READ_ONLINE,
+  SCOPE_READ_BLUEPRINTS,
 ] as const;
 
-export const APP_VERSION = '0.1.0';
+/**
+ * Scopes never requested by a plain "Add character" — a character opts into one
+ * by re-running SSO from the feature that needs it. The app registration at
+ * developers.eveonline.com must still list them, or SSO refuses the authorize
+ * request that asks for one.
+ */
+export const OPTIONAL_ESI_SCOPES = [SCOPE_READ_CORP_BLUEPRINTS] as const;
+
+/**
+ * The running build's version, read from package.json rather than written
+ * twice.
+ *
+ * That field is the one electron-builder stamps the installer (and
+ * `app.getVersion()`) with, so it is also what a release is tagged from — and
+ * the update check in `services/updateService.ts` compares a published tag
+ * against it. A second hand-maintained copy that fell behind would make MCO
+ * quietly report itself up to date forever. Read here rather than via
+ * `app.getVersion()` so this module stays free of `electron` and its pure
+ * consumers keep unit-testing without it.
+ */
+export const APP_VERSION: string = packageJson.version;
+
 export const CONTACT_EMAIL = 'anemone221@gmail.com';
 export const GITHUB_URL = 'https://github.com/Anemone221/MCO';
+/** Where a user is sent to download a newer build (see `update/github.ts`). */
+export const GITHUB_RELEASES_URL = `${GITHUB_URL}/releases`;
 export const USER_AGENT = `MCO/${APP_VERSION} (${CONTACT_EMAIL}; +${GITHUB_URL})`;
 
 export function isClientIdConfigured(): boolean {

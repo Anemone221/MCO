@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import yauzl from 'yauzl';
 import YAML from 'yaml';
 import {
+  replaceBlueprints,
   replaceCategories,
   replaceGroups,
   replaceRegions,
@@ -15,6 +16,7 @@ import {
   type SdeTypeRow,
 } from '../db/repositories/sde';
 import {
+  parseBlueprints,
   parseNamedFile,
   parseSolarSystems,
   parseTypeDogmaStream,
@@ -22,7 +24,7 @@ import {
 } from './parse';
 
 export interface SdeImportProgress {
-  phase: 'categories' | 'groups' | 'types' | 'dogma' | 'maps' | 'finalizing';
+  phase: 'categories' | 'groups' | 'types' | 'dogma' | 'blueprints' | 'maps' | 'finalizing';
   typesProcessed?: number;
 }
 
@@ -98,7 +100,20 @@ export async function importSde(
         groupId: t.groupId,
         name: t.name,
         published: t.published,
+        marketGroupId: t.marketGroupId,
+        metaGroupId: t.metaGroupId,
       }));
+    },
+    'blueprints.yaml': async (stream) => {
+      onProgress?.({ phase: 'blueprints' });
+      replaceBlueprints(
+        parseBlueprints(await bufferStream(stream)).map((b) => ({
+          blueprintTypeId: b.blueprintTypeId,
+          productTypeId: b.productTypeId,
+          activity: b.activity,
+          maxProductionLimit: b.maxProductionLimit,
+        })),
+      );
     },
     'typeDogma.yaml': async (stream) => {
       onProgress?.({ phase: 'dogma', typesProcessed: 0 });

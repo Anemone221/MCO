@@ -6,7 +6,12 @@ interface Migration {
   sql: string;
 }
 
-const MIGRATIONS: Migration[] = [
+/**
+ * Append-only: never edit an entry once it has shipped, and keep versions in
+ * ascending order — `LATEST_SCHEMA_VERSION` reads the last element, and the
+ * open-time downgrade guard is only as correct as that.
+ */
+export const MIGRATIONS: Migration[] = [
   {
     version: 1,
     name: 'init',
@@ -463,15 +468,191 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Market group and meta group per type, for the blueprint checklist.
+    // A blueprint's market group is what separates the ones that exist as
+    // originals (seeded on the market at some point — including the legacy
+    // Tech II BPOs) from the invention/drop-only types that only ever exist as
+    // copies. Null on upgraded installs until the SDE is re-imported; the
+    // checklist reads as unavailable meanwhile (`hasBlueprintData`).
+    version: 25,
+    name: 'sde_types_market_meta',
+    sql: `
+      ALTER TABLE sde_types ADD COLUMN market_group_id INTEGER;
+      ALTER TABLE sde_types ADD COLUMN meta_group_id INTEGER;
+    `,
+  },
+  {
+    // Every blueprint (and reaction formula) in the SDE, with what it makes.
+    // The product is what gives a blueprint its category — blueprint types are
+    // all in the "Blueprint" category themselves, so grouping the checklist by
+    // Ships / Modules / Charges means grouping by the *product's* group.
+    version: 26,
+    name: 'sde_blueprints',
+    sql: `
+      CREATE TABLE sde_blueprints (
+        blueprint_type_id    INTEGER PRIMARY KEY,
+        product_type_id      INTEGER,
+        activity             TEXT NOT NULL,
+        max_production_limit INTEGER
+      );
+
+      CREATE INDEX idx_sde_blueprints_product ON sde_blueprints (product_type_id);
+    `,
+  },
+  {
+    // Blueprints held in a character's own hangars (esi-characters.read_blueprints.v1).
+    // item_id is ESI's unique item id, so it is the natural key; rows are
+    // replaced wholesale per character on each sync. The companion meta table
+    // records that a character has reported at all — a character owning zero
+    // blueprints is otherwise indistinguishable from one that never synced.
+    version: 27,
+    name: 'character_blueprints',
+    sql: `
+      CREATE TABLE character_blueprints (
+        item_id             INTEGER PRIMARY KEY,
+        character_id        INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        type_id             INTEGER NOT NULL,
+        quantity            INTEGER NOT NULL,
+        runs                INTEGER NOT NULL,
+        material_efficiency INTEGER NOT NULL,
+        time_efficiency     INTEGER NOT NULL,
+        location_id         INTEGER NOT NULL,
+        location_flag       TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_character_blueprints_character ON character_blueprints (character_id);
+      CREATE INDEX idx_character_blueprints_type ON character_blueprints (type_id);
+
+      CREATE TABLE character_blueprints_meta (
+        character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+        updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `,
+  },
+  {
+    // Alt-corp blueprint hangars. A corporation is tracked only if the user
+    // explicitly adds it, by signing a character in with the opt-in
+    // esi-corporations.read_blueprints.v1 scope; that character is the corp's
+    // reader and the only token used for it, so one tracked corp costs one
+    // request per ESI cache window no matter how many characters are in it.
+    // ESI answers 403 unless the reader holds the Director role — that reason
+    // is kept in last_error so the page can explain it instead of retrying.
+    version: 28,
+    name: 'blueprint_corps',
+    sql: `
+      CREATE TABLE blueprint_corps (
+        corporation_id      INTEGER PRIMARY KEY,
+        name                TEXT,
+        ticker              TEXT,
+        reader_character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        added_at            TEXT NOT NULL DEFAULT (datetime('now')),
+        synced_at           TEXT,
+        last_error          TEXT,
+        last_error_at       TEXT
+      );
+
+      CREATE TABLE corporation_blueprints (
+        item_id             INTEGER PRIMARY KEY,
+        corporation_id      INTEGER NOT NULL REFERENCES blueprint_corps(corporation_id) ON DELETE CASCADE,
+        type_id             INTEGER NOT NULL,
+        quantity            INTEGER NOT NULL,
+        runs                INTEGER NOT NULL,
+        material_efficiency INTEGER NOT NULL,
+        time_efficiency     INTEGER NOT NULL,
+        location_id         INTEGER NOT NULL,
+        location_flag       TEXT NOT NULL
+      );
+
+      CREATE INDEX idx_corporation_blueprints_corp ON corporation_blueprints (corporation_id);
+      CREATE INDEX idx_corporation_blueprints_type ON corporation_blueprints (type_id);
+    `,
+  },
+  {
+    // X-Pages has to outlive the response that carried it: a paged read whose
+    // first page is served from a still-fresh cache entry has no headers to
+    // read the page count from, and treating that as "one page" would truncate
+    // the result — which, for blueprints, deletes the rows the missing pages
+    // would have carried. Entries cached before this column existed would read
+    // as exactly that NULL, so drop the paginated ones; the cache is disposable
+    // by design and refills on the next sync.
+    version: 29,
+    name: 'esi_cache_pages',
+    sql: `
+      ALTER TABLE esi_cache ADD COLUMN pages INTEGER;
+
+      DELETE FROM esi_cache WHERE url LIKE '%page=%';
+    `,
+  },
+  {
+    // The Wallet page grew past ratting income (corp reward payouts, tax paid,
+    // player donations), and two of those need fields the journal slice never
+    // stored:
+    //   - `tax` — tax withheld at source. A taxed bounty pays out net, with the
+    //     corp's cut in this field rather than in a journal row of its own, so
+    //     without it a null-sec ratter's biggest tax line is invisible.
+    //   - the two party ids — a donation between two tracked characters is ISK
+    //     moved between the user's own wallets, not income or spending, and
+    //     the counterparty id is the only thing that tells the two apart.
+    // Rows written before this migration keep the defaults until the next sync
+    // re-reads them (the journal reaches ~30 days back, and the upsert now
+    // backfills on conflict).
+    version: 30,
+    name: 'character_wallet_journal_parties',
+    sql: `
+      ALTER TABLE character_wallet_journal ADD COLUMN tax REAL NOT NULL DEFAULT 0;
+      ALTER TABLE character_wallet_journal ADD COLUMN first_party_id INTEGER;
+      ALTER TABLE character_wallet_journal ADD COLUMN second_party_id INTEGER;
+    `,
+  },
 ];
+
+export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
+
+/** Thrown when the profile was written by a build newer than this one. */
+export class SchemaVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SchemaVersionError';
+  }
+}
+
+/**
+ * Why a database can be too new to open, in words a user can act on — or null
+ * when this build understands it.
+ *
+ * Migrations only move forward, so a profile whose highest applied version
+ * exceeds ours was written by a later build: it may hold tables we've never
+ * heard of and columns that have since moved. Nothing in `runMigrations` would
+ * complain — `pending` simply comes back empty — and the failure would instead
+ * surface as a stray SQL error at whatever query first touched a changed table,
+ * far from the cause. Refuse at open time instead.
+ */
+export function schemaDowngradeMessage(dbVersion: number, appVersion: number): string | null {
+  if (dbVersion <= appVersion) return null;
+  return (
+    `This profile's database is at schema v${dbVersion}, but this build of MCO ` +
+    `understands only up to v${appVersion}.\n\n` +
+    `It was last opened by a newer version of MCO. Re-install that version, or move ` +
+    `mco.sqlite out of the data folder to start from a fresh profile.`
+  );
+}
+
+/** Highest migration recorded against this database; 0 for an empty profile. */
+export function appliedSchemaVersion(db: Database): number {
+  const row = db
+    .prepare('SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations')
+    .get() as { v: number };
+  return row.v;
+}
 
 export function runMigrations(db: Database): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
 
-  const appliedRow = db
-    .prepare('SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations')
-    .get() as { v: number };
-  const current = appliedRow.v;
+  const current = appliedSchemaVersion(db);
+
+  const tooNew = schemaDowngradeMessage(current, LATEST_SCHEMA_VERSION);
+  if (tooNew !== null) throw new SchemaVersionError(tooNew);
 
   const pending = MIGRATIONS.filter((m) => m.version > current).sort(
     (a, b) => a.version - b.version,
@@ -485,5 +666,3 @@ export function runMigrations(db: Database): void {
     apply();
   }
 }
-
-export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

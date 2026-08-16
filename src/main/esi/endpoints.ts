@@ -1,4 +1,5 @@
-import { esiGet } from './client';
+import { esiGet, esiGetPaged } from './client';
+import type { PagingOptions } from './paging';
 
 export interface EsiCharacterPublic {
   name: string;
@@ -137,22 +138,93 @@ export interface EsiWalletJournalEntry {
   ref_type: string;
   /** Absent for a handful of zero-value ref_types; the ones we track always carry it. */
   amount?: number;
+  /** Tax withheld at source — a taxed bounty's `amount` is already net of this. */
+  tax?: number;
+  /** Sender; for a taxed payout, absent unless there was a counterparty. */
+  first_party_id?: number;
+  /** Receiver. */
+  second_party_id?: number;
   date: string;
 }
 
 /**
- * One page (up to 1000 entries, newest first) of a character's wallet
- * journal. Requires esi-wallet.read_character_wallet.v1 (same scope as
- * /wallet itself).
+ * A character's wallet journal, newest first, 1000 entries to a page. Requires
+ * esi-wallet.read_character_wallet.v1 (same scope as /wallet itself).
+ *
+ * The paging bounds are the caller's: how far back the journal is worth reading
+ * is a question about what the data is for, not about the endpoint.
  */
 export function getCharacterWalletJournal(
   characterId: number,
-  page: number,
+  paging: PagingOptions<EsiWalletJournalEntry> = {},
 ): Promise<EsiWalletJournalEntry[]> {
-  return esiGet<EsiWalletJournalEntry[]>(
-    `/characters/${characterId}/wallet/journal?page=${page}`,
-    { characterId },
-  );
+  return esiGetPaged<EsiWalletJournalEntry>(`/characters/${characterId}/wallet/journal`, {
+    characterId,
+    ...paging,
+  });
+}
+
+export interface EsiBlueprint {
+  /** Unique id of this specific blueprint item. */
+  item_id: number;
+  type_id: number;
+  location_id: number;
+  location_flag: string;
+  /**
+   * -1 for a **blueprint original**, -2 for a copy; a positive number is a
+   * stack of copies. This is the only field that distinguishes a BPO from a BPC.
+   */
+  quantity: number;
+  /** Runs left on a copy; -1 for an original (unlimited). */
+  runs: number;
+  material_efficiency: number;
+  time_efficiency: number;
+}
+
+/**
+ * Ceiling on blueprint pages read at once — a guard against a hangar of
+ * unexpected size turning one sync into thousands of requests, not a stopping
+ * rule (`X-Pages` is that). ESI serves blueprints 1000 to a page, so this is
+ * 50k blueprints for one holder.
+ */
+const BLUEPRINT_MAX_PAGES = 50;
+
+/**
+ * Every blueprint in a character's own hangars.
+ * Requires esi-characters.read_blueprints.v1.
+ */
+export function getCharacterBlueprints(characterId: number): Promise<EsiBlueprint[]> {
+  return esiGetPaged<EsiBlueprint>(`/characters/${characterId}/blueprints`, {
+    characterId,
+    maxPages: BLUEPRINT_MAX_PAGES,
+  });
+}
+
+/**
+ * Every blueprint in a corporation's hangars, read through a member's token.
+ * Requires esi-corporations.read_blueprints.v1 **and** the Director role on
+ * that character — ESI answers 403 otherwise.
+ */
+export function getCorporationBlueprints(
+  corporationId: number,
+  characterId: number,
+): Promise<EsiBlueprint[]> {
+  return esiGetPaged<EsiBlueprint>(`/corporations/${corporationId}/blueprints`, {
+    characterId,
+    maxPages: BLUEPRINT_MAX_PAGES,
+  });
+}
+
+export interface EsiCorporationPublic {
+  name: string;
+  ticker: string;
+  member_count: number;
+  ceo_id: number;
+}
+
+/** Public corporation info (name + ticker) — no authorization required. */
+export function getCorporationPublic(corporationId: number): Promise<EsiCorporationPublic> {
+  return esiGet<EsiCorporationPublic>(`/corporations/${corporationId}`);
 }
 
 export interface EsiServerStatus {

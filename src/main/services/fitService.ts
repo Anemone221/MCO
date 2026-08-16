@@ -38,9 +38,9 @@ interface ResolvedFit {
   unresolved: string[];
 }
 
-/** Parse a stored fit and resolve every item, flagging which ones count for skills. */
-function resolveFit(fit: Fit): ResolvedFit {
-  const parsed = parseEft(fit.eftText);
+/** Parse an EFT block and resolve every item, flagging which ones count for skills. */
+function resolveEft(eftText: string): ResolvedFit {
+  const parsed = parseEft(eftText);
   const { resolved } = resolveTypeIdsByName([
     parsed.shipName,
     ...parsed.items.map((i) => i.name),
@@ -80,12 +80,25 @@ function fitDirectReqs({ shipTypeId, items }: ResolvedFit): SkillRequirement[] {
   }));
 }
 
+/**
+ * The skill requirements an EFT block implies — hull plus every item that
+ * counts — for the plan creator's "add a fit's skills" action. Exported rather
+ * than re-derived there so what counts toward flying a fit is decided once.
+ */
+export function eftSkillRequirements(eftText: string): {
+  requirements: SkillRequirement[];
+  unresolved: string[];
+} {
+  const resolved = resolveEft(eftText);
+  return { requirements: fitDirectReqs(resolved), unresolved: resolved.unresolved };
+}
+
 /** Analyse a stored fit across the whole character roster. */
 export function analyzeFitById(fitId: number): FitAnalysis {
   const fit = getFit(fitId);
   if (!fit) throw new Error(`Unknown fit ${fitId}`);
 
-  const resolvedFit = resolveFit(fit);
+  const resolvedFit = resolveEft(fit.eftText);
   const { shipTypeId, items, unresolved } = resolvedFit;
 
   const sde = getSdeStatus();
@@ -148,7 +161,7 @@ export function fitObjectiveStatus(
   const fit = getFit(fitId);
   if (!fit || !getSdeStatus().hasSkillData) return null;
 
-  const directReqs = fitDirectReqs(resolveFit(fit));
+  const directReqs = fitDirectReqs(resolveEft(fit.eftText));
   const { skillPrereqs, allSkillIds } = buildSkillPrereqMap(
     directReqs.map((r) => r.skillTypeId),
     getSkillReqsForTypes,

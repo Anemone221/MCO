@@ -11,6 +11,8 @@
  * (e.g. a pasted title) are skipped rather than rejected.
  */
 
+import { UserFacingError } from '../errors';
+
 export interface ParsedSkillPlanEntry {
   skillName: string;
   level: number;
@@ -26,7 +28,7 @@ function parseLevelToken(token: string): number | null {
 
 /** Parse pasted skill-plan text into a flat list of skill/level entries. */
 export function parseSkillPlan(text: string): ParsedSkillPlanEntry[] {
-  if (text.trim().length === 0) throw new Error('Empty plan text');
+  if (text.trim().length === 0) throw new UserFacingError('Empty plan text');
 
   const entries: ParsedSkillPlanEntry[] = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -43,7 +45,7 @@ export function parseSkillPlan(text: string): ParsedSkillPlanEntry[] {
   }
 
   if (entries.length === 0) {
-    throw new Error('No valid "skill level" lines found in plan text');
+    throw new UserFacingError('No valid "skill level" lines found in plan text');
   }
 
   return entries;

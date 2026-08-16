@@ -11,6 +11,8 @@
  *   Nanite Repair Paste x50
  */
 
+import { UserFacingError } from '../errors';
+
 export type EftItemKind = 'module' | 'charge' | 'quantity';
 
 export interface EftItem {
@@ -56,11 +58,11 @@ const QUANTITY_SUFFIX = /^(.*?)\s+x(\d+)$/;
 export function parseEft(text: string): ParsedFit {
   const lines = text.split(/\r?\n/);
   const firstIndex = lines.findIndex((line) => line.trim().length > 0);
-  if (firstIndex === -1) throw new Error('Empty fit text');
+  if (firstIndex === -1) throw new UserFacingError('Empty fit text');
 
   const headerMatch = HEADER.exec(lines[firstIndex]!.trim());
   if (!headerMatch) {
-    throw new Error('Not a valid EFT fit — the first line must be "[Ship, Fit name]"');
+    throw new UserFacingError('Not a valid EFT fit — the first line must be "[Ship, Fit name]"');
   }
   const shipName = headerMatch[1]!.trim();
   const fitName = headerMatch[2]!.trim();

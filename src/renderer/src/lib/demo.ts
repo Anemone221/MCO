@@ -2,6 +2,8 @@ import type {
   AccountBucket,
   AppInfo,
   AppNotification,
+  BlueprintBoard,
+  BlueprintHolder,
   CharacterDetail,
   CharacterGroup,
   CharacterSummary,
@@ -185,6 +187,9 @@ const stationNames = makeAssigner(
 
 const accountLabels = makeAssigner(ACCOUNT_WORDS.length, (i) => `Account ${pick(ACCOUNT_WORDS, i)}`);
 
+/** Alt-corp names reuse the station-corp pool — they read like corporations. */
+const corpNames = makeAssigner(STATION_CORPS.length, (i) => pick(STATION_CORPS, i));
+
 // ---------------------------------------------------------------------------
 // Field scrubbers
 
@@ -336,6 +341,41 @@ export function demoLocationEntry(entry: LocationEntry): LocationEntry {
     regionName: demoRegionName(entry.regionName),
     dockedName: demoLocationName(entry.dockedName),
     shipName: entry.shipName === null ? null : demoShipName(entry.characterId, entry.shipTypeName),
+  };
+}
+
+/** Fake corporation name, keyed by corporation id. */
+function demoCorpName(corporationId: number, realName: string | null): string | null {
+  if (realName === null) return null;
+  const fake = assign(corpNames, `corp:${corporationId}`);
+  remember(realName, fake);
+  return fake;
+}
+
+export function demoBlueprintBoard(board: BlueprintBoard): BlueprintBoard {
+  const holderName = (holder: BlueprintHolder): string =>
+    holder.kind === 'character'
+      ? demoCharacterName(holder.id, holder.name)
+      : (demoCorpName(holder.id, holder.name) ?? holder.name);
+
+  return {
+    ...board,
+    entries: board.entries.map((entry) => ({
+      ...entry,
+      holders: entry.holders.map((holder) => ({ ...holder, name: holderName(holder) })),
+    })),
+    characters: board.characters.map((c) => ({
+      ...c,
+      characterName: demoCharacterName(c.characterId, c.characterName),
+    })),
+    corps: board.corps.map((corp) => ({
+      ...corp,
+      name: demoCorpName(corp.corporationId, corp.name),
+      readerCharacterName:
+        corp.readerCharacterName === null
+          ? null
+          : demoCharacterName(corp.readerCharacterId, corp.readerCharacterName),
+    })),
   };
 }
 

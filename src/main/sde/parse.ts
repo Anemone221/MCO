@@ -7,6 +7,10 @@ export interface ParsedType {
   groupId: number;
   name: string;
   published: number;
+  /** Market group the type is sold under; null for types never on the market. */
+  marketGroupId: number | null;
+  /** Tech/meta tier (1 Tech I, 2 Tech II, 4 Faction, …); null when unset. */
+  metaGroupId: number | null;
 }
 
 export interface ParsedNamedEntry {
@@ -85,11 +89,13 @@ export async function parseTypesStream(
   let groupId: number | null = null;
   let published = 0;
   let name: string | null = null;
+  let marketGroupId: number | null = null;
+  let metaGroupId: number | null = null;
   let inNameBlock = false;
 
   const flush = (): void => {
     if (id !== null && groupId !== null && name !== null) {
-      rows.push({ id, groupId, name, published });
+      rows.push({ id, groupId, name, published, marketGroupId, metaGroupId });
       if (rows.length % 10_000 === 0) onProgress?.({ typesProcessed: rows.length });
     }
   };
@@ -102,6 +108,8 @@ export async function parseTypesStream(
       groupId = null;
       published = 0;
       name = null;
+      marketGroupId = null;
+      metaGroupId = null;
       inNameBlock = false;
       continue;
     }
@@ -109,6 +117,10 @@ export async function parseTypesStream(
 
     if (line.startsWith('  groupID:')) {
       groupId = Number(line.slice('  groupID:'.length).trim());
+    } else if (line.startsWith('  marketGroupID:')) {
+      marketGroupId = Number(line.slice('  marketGroupID:'.length).trim());
+    } else if (line.startsWith('  metaGroupID:')) {
+      metaGroupId = Number(line.slice('  metaGroupID:'.length).trim());
     } else if (line.startsWith('  published:')) {
       published = line.includes('true') ? 1 : 0;
     } else if (line === '  name:') {
@@ -118,6 +130,110 @@ export async function parseTypesStream(
       inNameBlock = false;
     } else if (inNameBlock && /^ {2}\S/.test(line)) {
       inNameBlock = false;
+    }
+  }
+  flush();
+  return rows;
+}
+
+export interface ParsedBlueprint {
+  blueprintTypeId: number;
+  /** What one run makes; null for a blueprint with neither activity (rare). */
+  productTypeId: number | null;
+  /** Which activity the product came from — reaction formulas are not manufactured. */
+  activity: 'manufacturing' | 'reaction' | 'other';
+  maxProductionLimit: number | null;
+}
+
+/**
+ * Parse blueprints.yaml into "what does this blueprint make".
+ *
+ * Only the **manufacturing** (or, for reaction formulas, **reaction**) product
+ * is taken. `invention` also carries a `products` list, but an invention
+ * product is the Tech II blueprint the process yields, not what the blueprint
+ * itself builds — reading it would file every Tech I blueprint under its Tech
+ * II descendant. The same line-scan approach as types.yaml: the file is
+ * machine-generated with a rigid layout, so tracking the current 4-space
+ * activity key and the 6-space `products:` block is enough, without paying to
+ * materialize 4 MB of nested YAML.
+ */
+export function parseBlueprints(text: string): ParsedBlueprint[] {
+  const rows: ParsedBlueprint[] = [];
+
+  type ProductActivity = 'manufacturing' | 'reaction';
+
+  let id: number | null = null;
+  let activityKey: string | null = null;
+  /** The activity whose `products:` list we are currently inside, if any. */
+  let productsFor: ProductActivity | null = null;
+  let productTypeId: number | null = null;
+  let productFrom: ProductActivity | null = null;
+  let hasManufacturing = false;
+  let hasReaction = false;
+  let maxProductionLimit: number | null = null;
+
+  const flush = (): void => {
+    if (id === null) return;
+    rows.push({
+      blueprintTypeId: id,
+      productTypeId,
+      activity: hasManufacturing ? 'manufacturing' : hasReaction ? 'reaction' : 'other',
+      maxProductionLimit,
+    });
+  };
+
+  for (const line of text.split(/\r?\n/)) {
+    const topLevel = /^(\d+):\s*$/.exec(line);
+    if (topLevel) {
+      flush();
+      id = Number(topLevel[1]);
+      activityKey = null;
+      productsFor = null;
+      productTypeId = null;
+      productFrom = null;
+      hasManufacturing = false;
+      hasReaction = false;
+      maxProductionLimit = null;
+      continue;
+    }
+    if (id === null) continue;
+
+    if (line.startsWith('  maxProductionLimit:')) {
+      maxProductionLimit = Number(line.slice('  maxProductionLimit:'.length).trim());
+      continue;
+    }
+
+    const activity = /^ {4}(\w+):\s*$/.exec(line);
+    if (activity) {
+      activityKey = activity[1]!;
+      productsFor = null;
+      if (activityKey === 'manufacturing') hasManufacturing = true;
+      if (activityKey === 'reaction') hasReaction = true;
+      continue;
+    }
+
+    if (/^ {6}products:\s*$/.test(line)) {
+      productsFor =
+        activityKey === 'manufacturing' || activityKey === 'reaction' ? activityKey : null;
+      continue;
+    }
+    // Any other key at the activity's own depth ends the products list.
+    if (/^ {6}\w+:/.test(line)) {
+      productsFor = null;
+      continue;
+    }
+
+    // First product of the block wins; manufacturing outranks reaction if a
+    // blueprint somehow declares both.
+    if (
+      productsFor !== null &&
+      (productFrom === null || (productFrom === 'reaction' && productsFor === 'manufacturing'))
+    ) {
+      const match = /typeID:\s*(\d+)/.exec(line);
+      if (match) {
+        productTypeId = Number(match[1]);
+        productFrom = productsFor;
+      }
     }
   }
   flush();

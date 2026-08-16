@@ -1,12 +1,29 @@
 import type { WalletSummary } from '@shared/types';
-import { sumIncomeBetween, sumIncomeByDayBetween } from '../db/repositories/characterWalletJournal';
-import { currentMonthBoundsUtc, fillMonthDays } from '../wallet/monthIncome';
+import {
+  sumWalletTotalsBetween,
+  sumWalletTotalsByDay,
+  sumWalletTotalsByMonth,
+} from '../db/repositories/characterWalletJournal';
+import {
+  currentMonthBoundsUtc,
+  fillMonthDays,
+  previousMonthsBoundsUtc,
+} from '../wallet/monthIncome';
 
-/** Ratted-income totals and per-day series for the current UTC month (Wallet page). */
+/**
+ * How far back the previous-months view looks. A year is enough to read a
+ * season off the chart while keeping the axis legible; there is nothing older
+ * to show anyway until MCO has been running that long.
+ */
+const HISTORY_MONTHS = 12;
+
+/** Current-month totals, the by-day series, and the months before it (Wallet page). */
 export function buildWalletSummary(): WalletSummary {
   const { start, end } = currentMonthBoundsUtc();
+  const history = previousMonthsBoundsUtc(HISTORY_MONTHS);
   return {
-    rattedIsk: sumIncomeBetween(start, end),
-    rattedIskByDay: fillMonthDays(sumIncomeByDayBetween(start, end)),
+    totals: sumWalletTotalsBetween(start, end),
+    byDay: fillMonthDays(sumWalletTotalsByDay(start, end)),
+    previousMonths: sumWalletTotalsByMonth(history.start, history.end),
   };
 }

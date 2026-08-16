@@ -1,0 +1,71 @@
+name: Release
+
+# Publishing a release is what the in-app update check looks for: it reads the
+# repository's *latest* release and compares its tag against the running build's
+# version (see src/main/services/updateService.ts). So the tag must match
+# package.json's version — the guard below refuses the run if it doesn't, since
+# a mismatch would either never notify anyone or notify them of nothing.
+#
+# To cut a release:
+#   1. bump "version" in package.json (and commit it)
+#   2. git tag v0.2.0 && git push origin v0.2.0
+on:
+  push:
+    tags: ['v*']
+  # Re-run against an existing tag if a build failed after the tag was pushed.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build (e.g. v0.2.0)'
+        required: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      # electron-builder needs write access to create the release and upload to it.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check the tag matches package.json
+        shell: bash
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $tag does not match package.json ($version)." >&2
+            echo "Bump the version, commit, then re-tag." >&2
+            exit 1
+          fi
+          echo "Releasing $tag."
+
+      # The same gates as CI. A release is the one build users actually install,
+      # so it does not skip them for being slower.
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Package and publish
+        # `--publish always` uploads the installer and creates the GitHub release
+        # from the tag. It lands as a draft (see electron-builder.yml), so the
+        # release notes can be written before anyone is notified — the app's
+        # check reads /releases/latest, which ignores drafts and prereleases.
+        run: npx electron-vite build && npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,7 @@
 import type { BrowserWindow } from 'electron';
 import { IpcChannel } from '@shared/ipc';
 import { syncDueCharacters } from './characterSync';
+import { syncBlueprintCorps } from './blueprintService';
 import { checkQueueDrainWarnings } from './notificationService';
 
 /** Hourly background sync; each sweep only touches characters whose cache has expired. */
@@ -33,7 +34,29 @@ export function getSchedulerStatus(): SchedulerStatus {
   return { running: intervalTimer !== null, lastSweepAt, nextSweepAt };
 }
 
-async function runSweep(getWindow: () => BrowserWindow | null): Promise<void> {
+/**
+ * The sweep currently running, if any. A sweep is not guaranteed to finish
+ * inside its interval — one request can wait out several minutes of 420/429
+ * backoff, and a full fleet is hundreds of them — so the next tick (or the
+ * tray's "Run sync now") can land on top of a sweep still in flight. Two
+ * sweeps over the same due characters would double every fetch, race the
+ * per-character refresh, and interleave their `replaceSkills` writes. Callers
+ * join the running sweep instead of starting a second one.
+ */
+let sweepInFlight: Promise<void> | null = null;
+
+function runSweep(getWindow: () => BrowserWindow | null): Promise<void> {
+  if (sweepInFlight) {
+    console.log('[scheduler] a sweep is already running; joining it instead of starting another');
+    return sweepInFlight;
+  }
+  sweepInFlight = executeSweep(getWindow).finally(() => {
+    sweepInFlight = null;
+  });
+  return sweepInFlight;
+}
+
+async function executeSweep(getWindow: () => BrowserWindow | null): Promise<void> {
   lastSweepAt = new Date().toISOString();
   try {
     const results = await syncDueCharacters();
@@ -46,6 +69,15 @@ async function runSweep(getWindow: () => BrowserWindow | null): Promise<void> {
     }
   } catch (err) {
     console.error('[scheduler] sync sweep failed:', err);
+  }
+
+  // Tracked alt corps: one request per corp per ESI cache window (the client
+  // skips the call entirely while the cached entry is fresh), so this rides
+  // along with the sweep rather than needing a cadence of its own.
+  try {
+    await syncBlueprintCorps();
+  } catch (err) {
+    console.error('[scheduler] corp blueprint sync failed:', err);
   }
 
   try {

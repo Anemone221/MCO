@@ -1,6 +1,6 @@
 import { useState, type MouseEvent, type ReactNode } from 'react';
 import type { CharacterGroup, Tag } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
 import CharacterContextMenu from './CharacterContextMenu';
 
 interface MenuState {
@@ -49,7 +49,7 @@ export function useCharacterContextMenu({
       await action();
       await onChanged();
     } catch (e) {
-      onError?.(String(e));
+      onError?.(errorMessage(e));
     } finally {
       setBusy(false);
     }

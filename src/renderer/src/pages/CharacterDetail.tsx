@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { type CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type {
   CharacterDetail as Detail,
@@ -7,6 +7,7 @@ import type {
   OrgRef,
 } from '@shared/types';
 import { mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 import {
   formatDate,
   formatIsk,
@@ -306,12 +307,22 @@ function SkillPlansCard({ detail }: { detail: Detail }) {
 }
 
 function SkillRadarCard({ detail }: { detail: Detail }) {
+  // Every group's ceiling comes from sde_skill_ranks; with none imported there is
+  // nothing to divide by, so say that rather than draw a web pinned at zero.
+  const hasGroupCeilings = detail.skillGroups.some((g) => g.maxSp > 0);
   return (
     <div className="card skill-radar-card" data-testid="detail-skill-radar">
-      <h3>Skills by group</h3>
+      <h3>Skills by group (% trained)</h3>
       {detail.skillGroups.length === 0 ? (
         <div className="card-body">
           <p className="muted">No skill data synced yet.</p>
+        </div>
+      ) : !hasGroupCeilings ? (
+        <div className="card-body">
+          <p className="muted">
+            Static data has no skill ranks yet. Re-import static data (top of the Roster page) to
+            show how far each group is trained.
+          </p>
         </div>
       ) : (
         <SkillGroupRadarChart groups={detail.skillGroups} />
@@ -360,25 +371,12 @@ export default function CharacterDetail() {
   const params = useParams<{ id: string }>();
   const characterId = Number(params.id);
 
-  const [detail, setDetail] = useState<Detail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setDetail(await mco.characters.detail(characterId));
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [characterId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const {
+    data: detail,
+    error,
+    loading,
+    reload,
+  } = useMcoData<Detail>(() => mco.characters.detail(characterId), { deps: [characterId] });
 
   return (
     <section className="page">
@@ -396,7 +394,7 @@ export default function CharacterDetail() {
         </h2>
         <div className="toolbar__actions">
           {detail && <StatusSquares detail={detail} />}
-          <button type="button" className="ghost" onClick={() => void load()} disabled={loading}>
+          <button type="button" className="ghost" onClick={() => void reload()} disabled={loading}>
             {loading ? 'Loading…' : 'Refresh'}
           </button>
         </div>

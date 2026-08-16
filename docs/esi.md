@@ -16,17 +16,25 @@ Reference material:
 | `ESI_CALLBACK_URL` | `http://localhost:8765/callback` — must match the app registration at developers.eveonline.com. |
 | `ESI_BASE_URL` | `https://esi.evetech.net` — ESI is versioned by **compatibility date**, not path prefixes. |
 | `ESI_COMPATIBILITY_DATE` | Pinned date sent as `X-Compatibility-Date` on every request; CCP guarantees response shapes as of that date. Bump deliberately (or override with `MCO_ESI_COMPAT_DATE`), re-testing response handling. |
-| `ESI_SCOPES` | skills, skillqueue, location, ship type, implants, clones, fatigue, wallet, structures, online (see below). |
+| `ESI_SCOPES` | skills, skillqueue, location, ship type, implants, clones, fatigue, wallet, structures, online, blueprints (see below). |
+| `OPTIONAL_ESI_SCOPES` | Scopes never requested by a plain "Add character" — currently only `esi-corporations.read_blueprints.v1`, opted into per character (see [Opt-in scopes](#opt-in-scopes)). Must still be listed on the app registration. |
 | `USER_AGENT` | `MCO/<version> (<contact email>; +repo URL)` — sent on every ESI/SSO/SDE request per CCP best practice. |
 
 Required scopes:
 
 ```
-esi-skills.read_skills.v1        esi-skills.read_skillqueue.v1
-esi-location.read_location.v1    esi-location.read_ship_type.v1
-esi-clones.read_implants.v1      esi-clones.read_clones.v1
-esi-characters.read_fatigue.v1   esi-wallet.read_character_wallet.v1
-esi-universe.read_structures.v1  esi-location.read_online.v1
+esi-skills.read_skills.v1          esi-skills.read_skillqueue.v1
+esi-location.read_location.v1      esi-location.read_ship_type.v1
+esi-clones.read_implants.v1        esi-clones.read_clones.v1
+esi-characters.read_fatigue.v1     esi-wallet.read_character_wallet.v1
+esi-universe.read_structures.v1    esi-location.read_online.v1
+esi-characters.read_blueprints.v1
+```
+
+Opt-in only (never in the standard grant):
+
+```
+esi-corporations.read_blueprints.v1
 ```
 
 ## Login flow — OAuth2 authorization code + PKCE (`auth/esi-oauth.ts`)
@@ -40,15 +48,70 @@ esi-universe.read_structures.v1  esi-location.read_online.v1
 4. SSO redirects to `/callback`; the listener validates `state`, shows a small
    "signed in" page, and captures the authorization code.
 5. Exchange code + verifier at the token endpoint → access token (a JWT) + refresh token.
-6. Decode the JWT payload (no signature verification yet — see TODO in `pkce.ts`; the
-   token arrives over direct TLS to login.eveonline.com): `sub` gives the character id,
-   `name` the character name, `scp` the **actually granted** scopes.
+6. **Verify** the access token (`auth/jwt.ts`, see below), then read its claims: `sub`
+   gives the character id, `name` the character name, `scp` the **actually granted** scopes.
 7. Upsert the character row, persist the refresh token + granted scopes, cache the access
    token. An initial full sync is attempted right away (failure is fine — the scheduler
    retries).
 
 There is no "log in as user" concept — each character is its own token; an account is
 just a local grouping bucket (ESI never exposes account membership).
+
+### Opt-in scopes
+
+`startLogin(extraScopes)` appends scopes to the standard `ESI_SCOPES` grant. It exists
+for scopes only one or two characters can use, where asking all ~90 for it would be
+noise on the consent screen and a pile of 403s at sync time.
+
+The one case today is **corporation blueprints** (Blueprints → "Track alt corp"). An alt
+corp — a corporation wholly controlled by one player, used as a shared hangar — holds
+blueprints no character token can see. `esi-corporations.read_blueprints.v1` is
+requested for a single character, which is then recorded as that corp's **reader**
+(`blueprint_corps.reader_character_id`) and is the only token ever used for it. ESI
+grants the route only to a character with the **Director** role and answers 403
+otherwise; that reason is stored and shown rather than retried (see
+`services/blueprintService.ts`). Deliberately none of the rest of corporation
+management comes with it — no assets, wallets, members or structures.
+
+Re-running the login for an already-added character just replaces its token family with
+a wider-scoped one. Nothing assumes the requested scopes were granted: the stored set is
+always read back off the returned JWT's `scp` claim.
+
+## Access-token verification (`auth/jwt.ts`, `auth/jwks.ts`)
+
+Access tokens are verified **at ingress** — as they come back from the token endpoint, in
+both `startLogin()` and `refreshAccessToken()`, before a character id, name or scope list
+is read out of one. Everything downstream therefore reads claims from a token whose
+signature was checked when it was stored, which is why `decodeJwtPayload` can stay
+synchronous (`grantedScopes` uses it on an already-stored token).
+
+`verifyAccessToken()` checks, in order:
+
+1. **Algorithm allowlist** — `RS256` and `ES256` only, taken from a table rather than from
+   the token. This is the check that matters most: trusting the token's own `alg` is what
+   admits `alg: none` and the RS256→HS256 swap where the *public* key becomes the HMAC
+   secret. Anything else is rejected before a key is even fetched.
+2. **Signature**, against the key the header's `kid` names in the SSO JWKS. The key's type
+   must match the algorithm family (an RSA key may not verify an `ES256` header).
+3. **Claims** — `iss` is `login.eveonline.com` (the bare-host and `https://` forms are
+   normalized so both are accepted), `aud` contains our client_id, `exp` is in the future
+   and `nbf` is not, both with 60 s of clock-skew tolerance. A valid signature only proves
+   EVE SSO minted the token; `aud` is what proves it was minted for *this* application.
+
+`refreshAccessToken()` additionally binds the token to the character it was requested for
+(`sub` must match), so a swapped response cannot overwrite one character's token family
+with another's.
+
+**JWKS caching** (`auth/jwks.ts`): the key set is fetched lazily and cached for 12 h, with
+parsed `KeyObject`s memoized per kid. With ~90 characters the scheduler can ask for a key
+dozens of times a second, so fetches are single-flighted — a burst of refreshes shares one
+HTTP request. An unknown `kid` (i.e. key rotation) triggers one refetch, rate-limited to
+once per 5 minutes so a bogus kid can't become a request per token. CCP rotates these keys
+on the order of years, so if a refetch fails while a cached set exists the cached set is
+kept and the failure logged; with no cached set the error propagates and verification
+**fails closed** — an unverifiable token is never stored. Login surfaces the reason
+(unreachable JWKS, clock skew, bad signature) as user-facing copy rather than the generic
+error message.
 
 ## Token storage & refresh (`auth/token-store.ts`, `db/repositories/tokens.ts`)
 
@@ -108,6 +171,32 @@ against ESI directly. `esiGet` provides:
   fleet-wide backoff must not fail the request.
 - **5xx / network / timeout**: linear backoff retry, up to `MAX_RETRIES` (3) total. Every
   request has a 30 s `AbortController` timeout so a stalled socket can't pin a slot.
+
+### Paginated routes (`esiGetPaged`)
+
+`esiGetPaged<T>(path, opts)` is the paginated sibling: it returns **every** page's items
+concatenated, and each page is an ordinary `esiGet` underneath — its own cache entry, its
+own ETag, the same limiter and the same retry budgets. So a 12-page hangar costs 12
+requests on the first read and only the changed pages' bodies afterwards.
+
+The loop is bounded by ESI's `X-Pages`, read from page 1 — not by guessing from a short
+page or probing for a 404. That distinction is the point: when a stopping rule doubles as
+an error handler, a throttle give-up or a 500 reads as "no more pages" and the caller
+stores a truncated list (for blueprints, that *deletes* the rows the missing pages
+carried). Here a failed page rejects the whole read, so the caller's previous data
+survives untouched until the next sync.
+
+`X-Pages` has to survive a cache hit, since a fresh entry skips the response that carried
+it — hence the `pages` column on `esi_cache`. A response with no `X-Pages` is a single
+page (non-paginated routes send none); a collection that shrinks between page 1 and page
+*n* can still 404 mid-read, which propagates like any other failure and resolves on the
+next sync.
+
+Two options let a caller read less than everything: `maxPages` (a guard against a
+collection of unexpected size, e.g. blueprints cap at 50 pages) and `stopAfter(page, n)`
+(the wallet journal stops once a page predates its lookback window). The loop itself lives
+in `esi/paging.ts` as `collectPages`, dependency-free so the stopping rules are unit-tested
+without Electron, the DB or a network.
 
 ## Rate limiting (`esi/rate-limiter.ts`)
 
@@ -179,30 +268,80 @@ Thin, typed wrappers — one function per route, no logic:
 | `getCharacterClones` | `/characters/{id}/clones` | scoped |
 | `getCharacterFatigue` | `/characters/{id}/fatigue` | scoped |
 | `getCharacterWallet` | `/characters/{id}/wallet` | scoped |
-| `getCharacterWalletJournal` | `/characters/{id}/wallet/journal` | scoped (same scope as `getCharacterWallet`) |
+| `getCharacterWalletJournal` | `/characters/{id}/wallet/journal` | scoped (same scope as `getCharacterWallet`), paginated |
 | `getCharacterOnline` | `/characters/{id}/online` | scoped |
+| `getCharacterBlueprints` | `/characters/{id}/blueprints` | scoped, paginated |
+| `getCorporationBlueprints` | `/corporations/{id}/blueprints` | scoped **+ Director role** (403 otherwise), paginated |
+| `getCorporationPublic` | `/corporations/{id}` | public |
 | `getStation` | `/universe/stations/{id}` | public |
 | `getPublicStructureIds` | `/universe/structures` | public |
 | `getStructure` | `/universe/structures/{id}` | scoped + on the structure's ACL (403 otherwise) |
 | `getServerStatus` | `/status/` | public |
 
 New endpoints follow the same shape: define the response interface, add a one-line
-wrapper, and call it from a service.
+wrapper (`esiGet`, or `esiGetPaged` if the route paginates), and call it from a service.
+
+### Finished skill-queue entries
+
+`/characters/{id}/skillqueue` does **not** drop skills once they finish. A completed
+skill keeps its slot — original `queue_position`, `finish_date` now in the past — until
+the player next edits the queue in game. Read literally, the head of the stored queue is
+a long-finished skill, which makes a busily-training character report as idle and pads
+the queue with "done" rows the in-game client does not show.
+
+`skills/queue.ts` (pure) trims them: `pendingQueue()` drops every entry whose
+`finish_date` has passed, keeping ESI's order and positions. Trimming is done **on read,
+not on sync**, so entries fall off the moment they finish rather than lingering until the
+next poll — up to an hour later, since the sweep is cache-driven.
+
+Every consumer of `getQueue()` reads through it: training status, the roster's Training /
+Time left / Queue left columns, the character sheet's queue card, the group board's queue
+summary, and queue-drain notifications. Paused queues are unaffected — EVE clears the
+dates while training is paused, and a dateless entry is not a finished one.
+
+### Blueprints
+
+Both blueprint routes are paginated at 1000 entries a page and are plain `esiGetPaged`
+wrappers, capped at `BLUEPRINT_MAX_PAGES` (50 — 50k blueprints for one holder). The
+service only maps the result into rows: a failed read throws instead of storing a short
+list, because the rows replace a holder's stored blueprints wholesale.
+
+Character blueprints ride along with the normal character sync as one more scope-gated
+best-effort task in `SYNC_TASKS`. Tracked alt corps are swept once per scheduler tick; because `esiGet`
+short-circuits on a fresh cache entry, a corp costs one actual request per ESI cache
+window. A corp whose last read failed is skipped for 6 h (`CORP_ERROR_COOLDOWN_MS`)
+unless the page's Refresh forces it — a missing Director role will not fix itself within
+the hour, and each retry spends an error-limit slot.
+
+`quantity` is the field that separates a BPO from a BPC: **-1 is an original**, -2 a
+copy, a positive number a stack of copies. Only originals tick the checklist.
 
 ### Dashboard-specific sync notes
 
 - **Online status** (`character_online`, `SCOPE_READ_ONLINE`): fetched once per
-  sync, same shape as every other scope-gated best-effort block in
+  sync, same shape as every other scope-gated best-effort task in
   `characterSync.ts`.
 - **Wallet journal** (`character_wallet_journal`): reuses `SCOPE_READ_WALLET` —
-  `/wallet/journal` needs no separate scope. Sync pages through
+  `/wallet/journal` needs no separate scope. Sync reads it through
   `getCharacterWalletJournal` (newest-first, per ESI's ordering), storing only
-  a small set of tracked `ref_type`s (see `db/repositories/characterWalletJournal.ts`).
-  Paging stops on a clearly-partial page (the usual case — most characters fit
-  on page 1), once a page's oldest entry is more than 35 days old, or after 10
-  pages; ESI 404s a page past the journal's last, so a failed fetch after page 1
-  also just ends paging. Enough to always cover "this calendar month" without
-  mirroring a character's full trading history.
+  the tracked `ref_type`s — ratting/mission income, CONCORD reward payouts,
+  player donations, running costs, and anything ending in `_tax` or `_fee`
+  (`isTrackedRefType` in `db/repositories/characterWalletJournal.ts`; those two
+  are matched by suffix rather than listed because ESI has ~17 of each and gains
+  more with every new activity).
+  Two things ESI does *not* give you, both verified against a 73-character
+  roster's full 30-day journal (2,689 entries): `corporate_reward_payout` arrives
+  **net** of the corp's cut with no matching `corporate_reward_tax` row (the
+  in-game journal shows both), and across all 2,689 entries only a single `*_tax`
+  row came back at all. Tax totals are a floor, not a reconciliation. Each row also keeps ESI's `tax` field (tax withheld at source — a
+  taxed bounty pays out net of it) and both party ids, which is what tells a
+  donation from another tracked character apart from real outside income.
+  It passes `esiGetPaged` a `stopAfter` that ends the read at the page whose
+  oldest entry is more than 35 days old, plus a 10-page cap — enough to always
+  cover "this calendar month" without mirroring a character's full trading
+  history. Most characters fit on page 1, which `X-Pages` says outright.
+  **The table is the archive**: ESI's journal reaches ~30 days back, so the
+  Wallet page's previous-months view can only show months these sweeps banked.
 - **Server status** (`getServerStatus`, no scope): called fresh on every
   Dashboard load (not cached beyond ESI's own `Expires` header) and wrapped in
   a 5-second timeout in `services/dashboardService.ts` so a network hiccup

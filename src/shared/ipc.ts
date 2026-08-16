@@ -3,6 +3,7 @@ import type {
   AppInfo,
   AppNotification,
   BackgroundModeSettings,
+  BlueprintBoard,
   CharacterDetail,
   CharacterGroup,
   CharacterSummary,
@@ -14,9 +15,12 @@ import type {
   GroupDetail,
   LocationEntry,
   PlanAnalysis,
+  PlanDraftSource,
+  PlanSkillInfo,
   RosterEntry,
   SdeProgress,
   SdeStatus,
+  ShipInfo,
   SkillPlan,
   StructureImportProgress,
   StructureSearchResult,
@@ -24,6 +28,7 @@ import type {
   SyncStatusReport,
   SystemSearchResult,
   Tag,
+  UpdateStatus,
   WalletSummary,
 } from './types';
 
@@ -72,14 +77,24 @@ export const IpcChannel = {
   fitsAnalyze: 'fits:analyze',
   plansList: 'plans:list',
   plansImport: 'plans:import',
+  plansUpdate: 'plans:update',
   plansRemove: 'plans:remove',
   plansAnalyze: 'plans:analyze',
+  plansSkillCatalog: 'plans:skillCatalog',
+  plansShipCatalog: 'plans:shipCatalog',
+  plansDraft: 'plans:draft',
+  plansDraftFromFit: 'plans:draftFromFit',
+  plansDraftFromEft: 'plans:draftFromEft',
   locationBoard: 'location:board',
   structuresImport: 'structures:import',
   structuresImportProgress: 'structures:importProgress',
   structuresSearch: 'structures:search',
   systemsSearch: 'systems:search',
   clonesBoard: 'clones:board',
+  blueprintsBoard: 'blueprints:board',
+  blueprintsRefresh: 'blueprints:refresh',
+  blueprintsAddCorp: 'blueprints:addCorp',
+  blueprintsRemoveCorp: 'blueprints:removeCorp',
   dashboardSummary: 'dashboard:summary',
   walletSummary: 'wallet:summary',
   notificationsList: 'notifications:list',
@@ -89,6 +104,9 @@ export const IpcChannel = {
   systemClientConfigured: 'system:clientConfigured',
   systemAppInfo: 'system:appInfo',
   systemConfirm: 'system:confirm',
+  systemCopyText: 'system:copyText',
+  systemCheckUpdate: 'system:checkUpdate',
+  systemDismissUpdate: 'system:dismissUpdate',
   settingsSyncStatus: 'settings:syncStatus',
   settingsEsiActivity: 'settings:esiActivity',
   settingsExportLogs: 'settings:exportLogs',
@@ -98,6 +116,22 @@ export const IpcChannel = {
   settingsSetCloseToTray: 'settings:setCloseToTray',
   settingsRunInBackground: 'settings:runInBackground',
 } as const;
+
+/** Any declared channel name — what the main/preload wrappers key on. */
+export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
+
+/**
+ * Channels the main process *pushes* on (`webContents.send`) rather than ones
+ * the renderer invokes: they are subscribed to in preload and have no handler.
+ * Listed so the wiring check can tell "no handler by design" from "no handler by
+ * mistake" — see `main/ipc/coverage.ts`.
+ */
+export const IPC_EVENT_CHANNELS: readonly IpcChannelName[] = [
+  IpcChannel.charactersChanged,
+  IpcChannel.sdeProgress,
+  IpcChannel.structuresImportProgress,
+  IpcChannel.notificationsChanged,
+];
 
 export interface SdeImportSummary {
   version: string;
@@ -186,8 +220,24 @@ export interface McoApi {
   plans: {
     list: () => Promise<SkillPlan[]>;
     import: (name: string, planText: string) => Promise<SkillPlan>;
+    /** Overwrite a plan the creator re-saved, keeping its id (and references). */
+    update: (planId: number, name: string, planText: string) => Promise<SkillPlan>;
     remove: (planId: number) => Promise<void>;
     analyze: (planId: number) => Promise<PlanAnalysis>;
+    /**
+     * Every skill in the game with its group, rank, attributes, per-level SP
+     * and prerequisites — the creator's browser, and everything it needs to
+     * expand and cost a draft locally.
+     */
+    skillCatalog: () => Promise<PlanSkillInfo[]>;
+    /** Every hull with the skills flying it needs — the ship browser. */
+    shipCatalog: () => Promise<ShipInfo[]>;
+    /** Open a stored plan in the creator, its written order intact. */
+    draft: (planId: number) => Promise<PlanDraftSource>;
+    /** The skills a stored fit requires, as draft entries. */
+    draftFromFit: (fitId: number) => Promise<PlanDraftSource>;
+    /** The skills a pasted EFT block requires, without storing the fit. */
+    draftFromEft: (eftText: string) => Promise<PlanDraftSource>;
   };
   location: {
     board: () => Promise<LocationEntry[]>;
@@ -207,6 +257,19 @@ export interface McoApi {
   };
   clones: {
     board: () => Promise<CloneBoardEntry[]>;
+  };
+  blueprints: {
+    /** The checklist: the SDE's blueprint universe with owned originals counted against it. */
+    board: () => Promise<BlueprintBoard>;
+    /** Re-read every tracked corp hangar now, ignoring the failure cooldown. */
+    refresh: () => Promise<BlueprintBoard>;
+    /**
+     * Track an alt corp: signs one character in with the opt-in corporation
+     * scope and makes it that corp's reader. Rejects with a readable reason if
+     * the character is in an NPC corp or lacks the Director role.
+     */
+    addCorp: () => Promise<BlueprintBoard>;
+    removeCorp: (corporationId: number) => Promise<void>;
   };
   dashboard: {
     summary: () => Promise<DashboardSummary>;
@@ -230,6 +293,20 @@ export interface McoApi {
      * the window is refocused.
      */
     confirm: (message: string, confirmLabel?: string) => Promise<boolean>;
+    /**
+     * Put text on the OS clipboard. Electron's own clipboard rather than
+     * `navigator.clipboard`: the renderer is sandboxed and a packaged build
+     * loads from `file://`, where the web API is not guaranteed a permission.
+     */
+    copyText: (text: string) => Promise<void>;
+    /**
+     * Whether a newer release is published on GitHub. Answers from a cache
+     * refreshed at most daily; `force` checks now regardless. Never rejects —
+     * a failed check resolves with the last known answer and a `message`.
+     */
+    checkUpdate: (force?: boolean) => Promise<UpdateStatus>;
+    /** Hide the update banner for one version; anything newer raises it again. */
+    dismissUpdate: (version: string) => Promise<UpdateStatus>;
   };
   settings: {
     /** Sync health of everything the app keeps fresh (characters, SDE, structures). */

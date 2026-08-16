@@ -6,20 +6,54 @@ export function formatSp(sp: number): string {
   return `${sp} SP`;
 }
 
-/** Format an ISK balance compactly, e.g. 1_234_000_000 -> "1.23B ISK". */
-export function formatIsk(isk: number): string {
+/**
+ * An ISK amount abbreviated but unlabelled, e.g. 1_234_000_000 -> "1.23B".
+ * For breakdown lines that sit under a figure already labelled "ISK", where
+ * repeating the unit on every term costs a line of tile height.
+ */
+export function formatIskShort(isk: number): string {
   const abs = Math.abs(isk);
   const sign = isk < 0 ? '-' : '';
-  if (abs >= 1_000_000_000_000) return `${sign}${(abs / 1_000_000_000_000).toFixed(2)}T ISK`;
-  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B ISK`;
-  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M ISK`;
-  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(0)}k ISK`;
-  return `${sign}${abs.toFixed(0)} ISK`;
+  if (abs >= 1_000_000_000_000) return `${sign}${(abs / 1_000_000_000_000).toFixed(2)}T`;
+  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(0)}k`;
+  return `${sign}${abs.toFixed(0)}`;
+}
+
+/** Format an ISK balance compactly, e.g. 1_234_000_000 -> "1.23B ISK". */
+export function formatIsk(isk: number): string {
+  return `${formatIskShort(isk)} ISK`;
 }
 
 /** Full ISK balance with thousands separators, e.g. "1,234,567,890 ISK". */
 export function formatIskExact(isk: number): string {
   return `${isk.toLocaleString(undefined, { maximumFractionDigits: 0 })} ISK`;
+}
+
+const MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/**
+ * A YYYY-MM month key as a short label, e.g. "2026-02" -> "Feb 2026". Fixed
+ * month names rather than a locale format: these label a chart axis, where
+ * width has to be predictable, and the app's own copy is English throughout.
+ */
+export function formatMonthLabel(month: string): string {
+  const name = MONTH_NAMES[Number(month.slice(5, 7)) - 1];
+  return name ? `${name} ${month.slice(0, 4)}` : month;
 }
 
 /** Roman numeral for an EVE skill level (1-5). */

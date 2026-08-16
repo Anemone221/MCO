@@ -4,6 +4,7 @@ import { getValidCachedAccessToken } from '../auth/token-store';
 import { getCached, isFresh, putCached } from '../db/repositories/esiCache';
 import { rateLimiter } from './rate-limiter';
 import { recordCacheFresh, recordEvent, recordSlow, recordStatus } from './esiLog';
+import { collectPages, type PageResult, type PagingOptions } from './paging';
 
 /** Retries for transient failures (5xx, network errors, timeouts). */
 const MAX_RETRIES = 3;
@@ -26,6 +27,23 @@ interface GetOptions {
   characterId?: number;
 }
 
+/**
+ * A 4xx ESI refused outright — the request was understood and rejected, so
+ * retrying changes nothing. Carries the status because callers act on it: a 403
+ * on a corporation route means the character lacks the required in-game role,
+ * which is a sentence to show the user rather than a failure to log.
+ */
+export class EsiHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly path: string,
+    readonly body: string,
+  ) {
+    super(`ESI GET ${path} failed: ${status} ${body}`);
+    this.name = 'EsiHttpError';
+  }
+}
+
 async function accessTokenFor(characterId: number): Promise<string> {
   return getValidCachedAccessToken(characterId) ?? (await refreshAccessToken(characterId));
 }
@@ -39,6 +57,14 @@ function expiresFromHeaders(headers: Headers): string | null {
   return null;
 }
 
+/** Total page count of a paginated route, per ESI's `X-Pages`; null on any other route. */
+function pagesFromHeaders(headers: Headers): number | null {
+  const raw = headers.get('x-pages');
+  if (raw === null) return null;
+  const pages = Number(raw);
+  return Number.isInteger(pages) && pages >= 1 ? pages : null;
+}
+
 /** fetch with an abort-based timeout so a stalled socket fails fast instead of hanging. */
 async function fetchWithTimeout(url: string, headers: Record<string, string>): Promise<Response> {
   const controller = new AbortController();
@@ -48,6 +74,12 @@ async function fetchWithTimeout(url: string, headers: Record<string, string>): P
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** A parsed ESI body plus the one response header callers need: `X-Pages`. */
+interface EsiResponse<T> {
+  data: T;
+  pages: number | null;
 }
 
 /**
@@ -61,14 +93,18 @@ async function fetchWithTimeout(url: string, headers: Record<string, string>): P
  *
  * Outcomes are instrumented into the ESI log (`./esiLog`) so the Settings
  * diagnostics export shows request health without one line per success.
+ *
+ * Response headers stay hidden from callers with the single exception of
+ * `X-Pages`, which {@link esiGetPaged} needs and which is cached alongside the
+ * body so a fresh cache hit still reports it.
  */
-export async function esiGet<T>(path: string, options: GetOptions = {}): Promise<T> {
+async function esiGetResponse<T>(path: string, options: GetOptions): Promise<EsiResponse<T>> {
   const url = `${ESI_BASE_URL}${path}`;
   const characterId = options.characterId;
   const cached = getCached(url);
   if (isFresh(cached)) {
     recordCacheFresh();
-    return JSON.parse(cached!.body) as T;
+    return { data: JSON.parse(cached!.body) as T, pages: cached!.pages };
   }
 
   let refreshed = false;
@@ -131,14 +167,30 @@ export async function esiGet<T>(path: string, options: GetOptions = {}): Promise
       recordSlow({ path, characterId, ms, status: res.status });
 
       if (res.status === 304 && cached) {
-        putCached({ url, etag: cached.etag, expiresAt: expiresFromHeaders(res.headers), body: cached.body });
-        return JSON.parse(cached.body) as T;
+        // A 304 need not repeat X-Pages; the body it revalidates is unchanged,
+        // so the page count stored with it still stands.
+        const pages = pagesFromHeaders(res.headers) ?? cached.pages;
+        putCached({
+          url,
+          etag: cached.etag,
+          expiresAt: expiresFromHeaders(res.headers),
+          body: cached.body,
+          pages,
+        });
+        return { data: JSON.parse(cached.body) as T, pages };
       }
 
       if (res.status === 200) {
         const body = await res.text();
-        putCached({ url, etag: res.headers.get('etag'), expiresAt: expiresFromHeaders(res.headers), body });
-        return JSON.parse(body) as T;
+        const pages = pagesFromHeaders(res.headers);
+        putCached({
+          url,
+          etag: res.headers.get('etag'),
+          expiresAt: expiresFromHeaders(res.headers),
+          body,
+          pages,
+        });
+        return { data: JSON.parse(body) as T, pages };
       }
 
       if (res.status === 401 && characterId !== undefined && !refreshed) {
@@ -189,9 +241,42 @@ export async function esiGet<T>(path: string, options: GetOptions = {}): Promise
         continue;
       }
 
-      throw new Error(`ESI GET ${path} failed: ${res.status} ${await res.text()}`);
+      throw new EsiHttpError(res.status, path, await res.text());
     } finally {
       rateLimiter.release();
     }
   }
+}
+
+/** Cached, rate-limit-aware GET against a single ESI route. See {@link esiGetResponse}. */
+export async function esiGet<T>(path: string, options: GetOptions = {}): Promise<T> {
+  return (await esiGetResponse<T>(path, options)).data;
+}
+
+interface PagedOptions<T> extends GetOptions, PagingOptions<T> {}
+
+/** Append `page=N` to a route that may already carry a query string. */
+const pageUrl = (path: string, page: number): string =>
+  `${path}${path.includes('?') ? '&' : '?'}page=${page}`;
+
+/**
+ * The paginated sibling of {@link esiGet}: fetch every page of a paginated
+ * route and return the concatenated items.
+ *
+ * Each page is an ordinary `esiGet` underneath — its own cache entry, its own
+ * ETag, the same rate limiter and the same retry budgets — so a fresh page costs
+ * no request at all and a stale one usually costs a bodiless 304.
+ * The page count comes from ESI's `X-Pages` rather than from a guess about
+ * short pages or a 404 probe; see {@link collectPages} for what that buys.
+ *
+ * `maxPages` and `stopAfter` let a caller read less than everything (the wallet
+ * journal only wants the current month); nothing else about the loop is a
+ * caller's business.
+ */
+export function esiGetPaged<T>(path: string, options: PagedOptions<T> = {}): Promise<T[]> {
+  const { maxPages, stopAfter, ...get } = options;
+  return collectPages<T>(
+    (page): Promise<PageResult<T>> => esiGetResponse<T[]>(pageUrl(path, page), get),
+    { maxPages, stopAfter },
+  );
 }

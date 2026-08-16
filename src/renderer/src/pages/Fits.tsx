@@ -1,23 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Fit } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 import { formatDate } from '../lib/format';
 
 export default function Fits() {
-  const [fits, setFits] = useState<Fit[]>([]);
   const [eftText, setEftText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
-  const load = useCallback(async () => {
-    setFits(await mco.fits.list());
-  }, []);
-
-  useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
-  }, [load]);
+  const { data, error, reload, setError } = useMcoData(() => mco.fits.list());
+  const fits = data ?? [];
 
   async function importFit(): Promise<void> {
     const text = eftText.trim();
@@ -27,9 +20,9 @@ export default function Fits() {
     try {
       await mco.fits.import(text);
       setEftText('');
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -40,9 +33,9 @@ export default function Fits() {
     setError(null);
     try {
       await mco.fits.remove(id);
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     }
   }
 

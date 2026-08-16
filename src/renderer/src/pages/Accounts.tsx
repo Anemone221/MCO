@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { AccountBucket, RosterEntry } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { useEffect, useMemo, useState } from 'react';
+import type { AccountBucket } from '@shared/types';
+import { errorMessage, mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 
 function AccountRow({
   account,
@@ -67,21 +68,14 @@ function AccountRow({
 }
 
 export default function Accounts() {
-  const [accounts, setAccounts] = useState<AccountBucket[]>([]);
-  const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [newAccount, setNewAccount] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const [a, r] = await Promise.all([mco.accounts.list(), mco.characters.roster()]);
-    setAccounts(a);
-    setRoster(r);
-  }, []);
-
-  useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
-  }, [load]);
+  const { data, error, reload, setError } = useMcoData(async () => {
+    const [accounts, roster] = await Promise.all([mco.accounts.list(), mco.characters.roster()]);
+    return { accounts, roster };
+  });
+  const { accounts = [], roster = [] } = data ?? {};
 
   const counts = useMemo(() => {
     const map = new Map<number, number>();
@@ -97,9 +91,9 @@ export default function Accounts() {
     setError(null);
     try {
       await action();
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -7,8 +6,9 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { Link } from 'react-router-dom';
-import type { AccountBucket, CharacterGroup, RosterEntry, Tag } from '@shared/types';
-import { mco } from '../lib/ipc';
+import type { RosterEntry } from '@shared/types';
+import { errorMessage, mco } from '../lib/ipc';
+import { useMcoData } from '../lib/useMcoData';
 import { formatDate, formatIsk, formatSp, formatTimeUntil, romanLevel } from '../lib/format';
 import {
   applyPinnedOrder,
@@ -26,6 +26,7 @@ import {
   type RosterSort,
   type RosterSortKey,
 } from '../lib/rosterView';
+import { summarizeQueue } from '../lib/groupView';
 import { ALL_TAGS, memberIdSet, tagsForCharacter, type TagFilter } from '../lib/tags';
 import CharacterAvatar from '../components/CharacterAvatar';
 import TagSelect from '../components/TagSelect';
@@ -59,6 +60,24 @@ function TimeLeftCell({ entry }: { entry: RosterEntry }) {
   return <span>{formatTimeUntil(training.finishDate).replace(/^in /, '')}</span>;
 }
 
+/** Total time left in the whole skill queue, not just the skill training now. */
+function QueueCell({ entry }: { entry: RosterEntry }) {
+  const queue = summarizeQueue(entry.queueLength, entry.queueEndDate);
+  switch (queue.state) {
+    // Nothing queued, or the queue already ran dry — the Training column
+    // already says "Idle", so no time left is a plain dash here.
+    case 'empty':
+    case 'finished':
+      return <span className="muted">—</span>;
+    // A queue with skills in it but no dates: training is paused, so the
+    // remaining time is unknowable until it resumes.
+    case 'paused':
+      return <span className="queue-paused">Paused</span>;
+    case 'active':
+      return <span>{formatTimeUntil(queue.endDate).replace(/^in /, '')}</span>;
+  }
+}
+
 function FatigueCell({ entry }: { entry: RosterEntry }) {
   // Anyone not actively fatigued (unknown, cleared, or never jumped) shows a
   // plain dash — a chip would just be noise on a mostly-clear roster.
@@ -86,14 +105,9 @@ function CloneJumpCell({ entry }: { entry: RosterEntry }) {
 }
 
 export default function Roster() {
-  const [roster, setRoster] = useState<RosterEntry[]>([]);
-  const [accounts, setAccounts] = useState<AccountBucket[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [groups, setGroups] = useState<CharacterGroup[]>([]);
   const [tagFilter, setTagFilter] = useState<TagFilter>(ALL_TAGS);
   const [tagMenu, setTagMenu] = useState<TagMenuState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<RosterFilters>(NO_ROSTER_FILTERS);
   const [sort, setSort] = useState<RosterSort>({ key: 'name', dir: 'asc' });
   const [columns, setColumns] = useState(loadColumnVisibility);
@@ -107,26 +121,20 @@ export default function Roster() {
     setPinnedOrder(null);
   }, [filters, sort, tagFilter]);
 
-  const load = useCallback(async () => {
-    const [r, a, t, g] = await Promise.all([
-      mco.characters.roster(),
-      mco.accounts.list(),
-      mco.tags.list(),
-      mco.groups.list(),
-    ]);
-    setRoster(r);
-    setAccounts(a);
-    setTags(t);
-    setGroups(g);
-  }, []);
-
-  useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
-    // Refresh the roster when a background sync sweep updates character data.
-    return mco.characters.onChanged(() => {
-      void load().catch((e: unknown) => setError(String(e)));
-    });
-  }, [load]);
+  // Refreshes on mount and when a background sync sweep updates character data.
+  const { data, error, reload, setError } = useMcoData(
+    async () => {
+      const [roster, accounts, tags, groups] = await Promise.all([
+        mco.characters.roster(),
+        mco.accounts.list(),
+        mco.tags.list(),
+        mco.groups.list(),
+      ]);
+      return { roster, accounts, tags, groups };
+    },
+    { onCharactersChanged: true },
+  );
+  const { roster = [], accounts = [], tags = [], groups = [] } = data ?? {};
 
   async function run(key: string, action: () => Promise<unknown>): Promise<void> {
     // The pin only services back-to-back account assignments; any other action
@@ -136,9 +144,9 @@ export default function Roster() {
     setError(null);
     try {
       await action();
-      await load();
+      await reload();
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -447,6 +455,11 @@ export default function Roster() {
                   {columns.timeleft && (
                     <td className="time-left">
                       <TimeLeftCell entry={entry} />
+                    </td>
+                  )}
+                  {columns.queue && (
+                    <td className="time-left">
+                      <QueueCell entry={entry} />
                     </td>
                   )}
                   {columns.fatigue && (

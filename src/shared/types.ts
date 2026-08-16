@@ -81,6 +81,10 @@ export interface RosterEntry {
   accountLabel: string | null;
   totalSp: number;
   training: TrainingStatus;
+  /** Entries in the skill queue (including the one currently training). */
+  queueLength: number;
+  /** Finish date of the last queue entry; null when the queue is empty or paused. */
+  queueEndDate: string | null;
   /** Last-known solar system name, or null if never synced / unresolved. */
   systemName: string | null;
   /** Last-known ship type name (what the character is flying), or null. */
@@ -101,15 +105,21 @@ export interface RosterEntry {
 }
 
 /**
- * Total trained skill points in one SDE skill group, summed across the whole
- * roster. Feeds the Roster skill-distribution radar (skill groups around the
- * circular axis, combined SP on the radial axis).
+ * A character's trained SP in one SDE skill group, against what that group can
+ * hold. Feeds the character-sheet skill radar, which plots `sp / maxSp` — how
+ * complete the character is in each group.
  */
 export interface SkillGroupSp {
   /** Skill-group name from the SDE (e.g. "Gunnery", "Spaceship Command"). */
   group: string;
-  /** Combined trained SP in this group across every character. */
+  /** Trained SP in this group. */
   sp: number;
+  /**
+   * SP this group holds with every published skill in it at level V — the
+   * denominator for group completion. 0 when the SDE has no skill ranks yet
+   * (`sde_skill_ranks` empty), which the UI reports instead of dividing.
+   */
+  maxSp: number;
 }
 
 export interface ImplantInfo {
@@ -210,6 +220,8 @@ export interface SdeStatus {
   hasMapData: boolean;
   /** True once per-skill training attributes (dogma 180/181) have been imported. */
   hasSkillAttributes: boolean;
+  /** True once blueprints.yaml has been imported — gates the blueprint checklist. */
+  hasBlueprintData: boolean;
 }
 
 export interface SdeProgress {
@@ -219,6 +231,7 @@ export interface SdeProgress {
     | 'groups'
     | 'types'
     | 'dogma'
+    | 'blueprints'
     | 'maps'
     | 'finalizing'
     | 'done'
@@ -366,6 +379,86 @@ export interface PlanAnalysis {
   /** Set when per-skill training attributes are missing (SDE re-import needed). */
   needsSkillAttributes: boolean;
   characters: PlanCharacterResult[];
+}
+
+/** The five neural attributes a skill trains against. */
+export type TrainingAttribute =
+  | 'charisma'
+  | 'intelligence'
+  | 'memory'
+  | 'perception'
+  | 'willpower';
+
+/** The five neural attribute values used for training-speed math. */
+export interface NeuralAttributes {
+  charisma: number;
+  intelligence: number;
+  memory: number;
+  perception: number;
+  willpower: number;
+}
+
+/**
+ * Everything the plan creator needs about one skill to show it, cost it and
+ * order it — supplied by the main process so the draft logic in the renderer
+ * needs no SDE access and no copy of the SP formula.
+ */
+export interface PlanSkillInfo {
+  skillTypeId: number;
+  name: string;
+  /** SDE skill group ("Gunnery", "Spaceship Command") — how the browser groups. */
+  groupId: number | null;
+  groupName: string | null;
+  /** skillTimeConstant; 1 when the SDE has no rank for the skill. */
+  rank: number;
+  /** Training attributes; null when the SDE lacks attribute data (pre-v21 import). */
+  primaryAttribute: TrainingAttribute | null;
+  secondaryAttribute: TrainingAttribute | null;
+  /** Total SP to hold level 1..5, index 0 = level I. */
+  spAtLevel: number[];
+  /** This skill's own prerequisites, each at the level needed to train it. */
+  prereqs: Array<{ skillTypeId: number; level: number }>;
+  /**
+   * Unpublished skills are retired ones — kept in the catalogue so a plan that
+   * still names one can be shown and costed, but left out of the browser.
+   */
+  published: boolean;
+}
+
+/**
+ * A hull as the plan creator's ship browser lists it, with the skills flying it
+ * needs. Requirements travel with the catalogue (415 ships, ~700 requirements)
+ * so picking a ship costs no round-trip.
+ */
+export interface ShipInfo {
+  shipTypeId: number;
+  name: string;
+  groupId: number | null;
+  groupName: string | null;
+  requirements: Array<{ skillTypeId: number; level: number }>;
+}
+
+/** One line of a plan draft. `skillTypeId` is null for a name the SDE doesn't know. */
+export interface PlanDraftEntry {
+  skillTypeId: number | null;
+  skillName: string;
+  level: number;
+}
+
+/**
+ * A draft's starting point — an existing plan, a fit, or pasted EFT. Only the
+ * lines: the creator holds the whole skill catalogue already, so everything
+ * needed to expand, order and cost them is on hand.
+ */
+export interface PlanDraftSource {
+  entries: PlanDraftEntry[];
+  /**
+   * Names the SDE had nothing for: plan lines that matched no skill (kept as
+   * id-less entries), or fit items whose skills couldn't be counted.
+   */
+  unresolved: string[];
+  /** The plan's or fit's own name, offered as the plan name while none is typed. */
+  suggestedName: string | null;
 }
 
 /** One character's skill progress toward a group's priority fit or plan. */
@@ -519,6 +612,90 @@ export interface CloneBoardEntry {
   medicalClone: CloneLocation | null;
 }
 
+/** Who holds a blueprint — a character's own hangar, or a tracked alt corp's. */
+export interface BlueprintHolder {
+  kind: 'character' | 'corporation';
+  id: number;
+  name: string;
+  materialEfficiency: number;
+  timeEfficiency: number;
+}
+
+/** One blueprint in the checklist: what it is, and whether it is owned. */
+export interface BlueprintCatalogEntry {
+  typeId: number;
+  name: string;
+  /** The item one run makes; null for the rare blueprint with no product. */
+  productTypeId: number | null;
+  groupName: string | null;
+  categoryName: string | null;
+  /** Product's tech tier — 1 Tech I, 2 Tech II, 4 Faction, 14 Tech III, … */
+  metaGroupId: number | null;
+  /**
+   * The blueprint has a market group, i.e. it exists as an *original*.
+   * Invention- and drop-only blueprints have none and can never be ticked off,
+   * so they sit behind the "show every blueprint" toggle.
+   */
+  marketSeeded: boolean;
+  activity: 'manufacturing' | 'reaction' | 'other';
+  /** Originals held across every character and tracked corp. */
+  originals: number;
+  /** Copies (BPCs) held — shown for context; a copy never ticks the checklist. */
+  copies: number;
+  holders: BlueprintHolder[];
+  /** Best research levels among the originals held; null when none are. */
+  bestMaterialEfficiency: number | null;
+  bestTimeEfficiency: number | null;
+}
+
+/** One character's ability to report blueprints, for the coverage strip. */
+export interface BlueprintCharacterCoverage {
+  characterId: number;
+  characterName: string;
+  status: EsiDataStatus;
+  missingScopes: string[];
+  updatedAt: string | null;
+  originals: number;
+}
+
+/** A tracked alt corp's blueprint hangar. */
+export interface BlueprintCorpStatus {
+  corporationId: number;
+  name: string | null;
+  ticker: string | null;
+  readerCharacterId: number;
+  readerCharacterName: string | null;
+  syncedAt: string | null;
+  /** Why the last read failed — almost always "reader is not a Director". */
+  lastError: string | null;
+  originals: number;
+}
+
+/**
+ * The parts of the rollup that do not depend on how the page is filtered. How
+ * many are *owned* deliberately is not here: that answer changes with the
+ * page's "Originals only" and "Include copy-only" toggles, so it is counted
+ * where those toggles live (`countOwned` in `lib/blueprintView.ts`) rather than
+ * being shipped as a number that could disagree with the table under it.
+ */
+export interface BlueprintTotals {
+  /** Blueprints that exist as originals (the checklist's real denominator). */
+  seededTotal: number;
+  /** Every published blueprint, including copy-only ones. */
+  allTotal: number;
+  /** Originals held whose type is not in the catalog (unpublished/removed types). */
+  untracked: number;
+}
+
+export interface BlueprintBoard {
+  /** blueprints.yaml has not been imported — there is no universe to check against. */
+  needsBlueprintData: boolean;
+  entries: BlueprintCatalogEntry[];
+  totals: BlueprintTotals;
+  characters: BlueprintCharacterCoverage[];
+  corps: BlueprintCorpStatus[];
+}
+
 /**
  * A clone's location: station names resolve via public ESI, structure names
  * via the shared structures table (filled by character sync).
@@ -652,6 +829,36 @@ export interface AppInfo {
   dbPath: string;
   userDataPath: string;
   githubUrl: string;
+  /** Migration version this profile is at — worth quoting in a bug report. */
+  schemaVersion: number;
+}
+
+/**
+ * Result of the GitHub release check.
+ *
+ * `unknown` covers every case where the check has no answer — never run, the
+ * network was down, the repository has no published release yet — so the UI
+ * can stay silent rather than claim the build is current.
+ */
+export type UpdateState = 'current' | 'update-available' | 'unknown';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  /** The running build. */
+  currentVersion: string;
+  /** Latest published release, once a check has succeeded and found one. */
+  latestVersion: string | null;
+  /** Release title, when it has one. */
+  releaseName: string | null;
+  /** The release page, falling back to the repository's release index. */
+  releaseUrl: string;
+  publishedAt: string | null;
+  /** When the last successful check ran; null when none has. */
+  checkedAt: string | null;
+  /** Why the check has no answer — shown in Settings, never in the banner. */
+  message: string | null;
+  /** The banner has been dismissed for `latestVersion`. */
+  dismissed: boolean;
 }
 
 /** Tranquility server status, from ESI's public /status/ endpoint. */
@@ -679,28 +886,85 @@ export interface OnlineCharacterSummary {
   totalCharacters: number;
 }
 
-/** Dashboard's "ratted ISK this month" tile; kept as separate categories so it can break out. */
-export interface RattedIskSummary {
+/**
+ * Everything a character *earned*: the Dashboard's "Income" tile and the
+ * Wallet page's income cards. Kept as separate categories so the total can
+ * still break out. Donations are deliberately not here — ISK someone handed
+ * you is a transfer, not earnings, and it has its own card.
+ */
+export interface IncomeSummary {
   /** NPC bounty prizes + ESS reserve payouts. */
   bountyIsk: number;
   /** Agent mission / incursion completion rewards. */
   missionIsk: number;
+  /**
+   * `corporate_reward_payout` — in practice CONCORD paying for a completed
+   * site ("CONCORD rewarded <name> for services performed"), not a corp
+   * project. ESI reports it **already net of corp tax**, so this is what
+   * actually landed in the wallet.
+   */
+  corpRewardIsk: number;
+  /** bounty + mission + reward payouts. */
   totalIsk: number;
 }
 
-/** One column of the Wallet page's income chart. */
-export interface RattedIskDay {
-  /** UTC calendar day, YYYY-MM-DD. */
-  day: string;
-  bountyIsk: number;
-  missionIsk: number;
+/**
+ * Every wallet category MCO tracks, summed over one window across every
+ * character. Outgoings (tax, donations sent) are **positive** numbers: the
+ * direction lives in the field name, so nothing has to guess at a sign.
+ */
+export interface WalletTotals {
+  income: IncomeSummary;
+  /**
+   * Tax paid: every `*_tax` ref_type that took ISK, plus tax withheld at
+   * source. A floor, not a total — ESI omits some tax the in-game journal
+   * shows (notably the corp's cut of a CONCORD reward payout).
+   */
+  taxIsk: number;
+  /**
+   * Running costs: `*_fee` ref_types plus skill purchases, Ansiblex tolls,
+   * repair bills and PI construction. Excludes market escrow, contracts and
+   * ISK moved between your own wallets — none of those are money spent.
+   */
+  expenseIsk: number;
+  /** Player donations received from outside the roster. */
+  donationsInIsk: number;
+  /** Player donations sent outside the roster. */
+  donationsOutIsk: number;
+  /**
+   * Donations between two tracked characters — ISK moved, not earned or spent,
+   * so it is kept out of the in/out figures and reported on its own.
+   */
+  internalTransferIsk: number;
 }
 
-/** Everything the Wallet page shows: current-month ratted income. */
+/** One calendar month of totals, for the Wallet page's previous-months view. */
+export interface WalletMonthTotals extends WalletTotals {
+  /** UTC calendar month, YYYY-MM. */
+  month: string;
+}
+
+/**
+ * One UTC day of totals — one column of the Wallet page's by-day chart. Carries
+ * every category the monthly view does, so the two charts read the same
+ * activity at two granularities.
+ */
+export interface WalletDayTotals extends WalletTotals {
+  /** UTC calendar day, YYYY-MM-DD. */
+  day: string;
+}
+
+/** Everything the Wallet page shows. */
 export interface WalletSummary {
-  rattedIsk: RattedIskSummary;
+  /** The current UTC calendar month. */
+  totals: WalletTotals;
   /** One entry per UTC day from the month's start through today (zero-filled). */
-  rattedIskByDay: RattedIskDay[];
+  byDay: WalletDayTotals[];
+  /**
+   * Completed months, oldest → newest. Only months MCO was running for: ESI's
+   * journal reaches ~30 days back, so history accrues from the first sync on.
+   */
+  previousMonths: WalletMonthTotals[];
 }
 
 /** One character in the Dashboard's SP packed-circles chart (sized by total SP). */
@@ -717,7 +981,7 @@ export interface DashboardSummary {
   online: OnlineCharacterSummary;
   charactersRegistered: number;
   totalSp: number;
-  rattedIsk: RattedIskSummary;
+  income: IncomeSummary;
   /** Every character with total SP, for the packed-circles chart (unordered). */
   characters: DashboardCharacterEntry[];
 }

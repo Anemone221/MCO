@@ -23,8 +23,18 @@ Plain sequential SQL migrations, tracked in `schema_migrations`. Each migration 
 its own transaction. Rules:
 
 - **Never edit an applied migration** — append a new one with the next version number.
+- **Keep the array in ascending order.** `LATEST_SCHEMA_VERSION` reads its last element,
+  and the downgrade guard below trusts that. Unit tests enforce it.
 - `LATEST_SCHEMA_VERSION` is derived from the array; nothing else to bump.
 - Repositories assume the latest schema; there is no down-migration.
+
+**Opening a newer profile fails at startup, by design.** There is no down-migration, so a
+database whose highest applied version exceeds this build's is unreadable — it may hold
+tables this code has never heard of. `runMigrations` would not notice on its own (nothing
+is pending), and the damage would show up as a stray SQL error at the first query against a
+changed table. Instead `schemaDowngradeMessage` compares the two versions, `runMigrations`
+throws `SchemaVersionError`, and `src/main/index.ts` turns that into a dialog and quits.
+The profile's version is shown in Settings → About.
 
 | v | Name | Adds |
 | - | --- | --- |
@@ -52,6 +62,12 @@ its own transaction. Rules:
 | 22 | character_online | `character_online` |
 | 23 | character_wallet_journal | `character_wallet_journal` |
 | 24 | app_settings | `app_settings` |
+| 25 | sde_types_market_meta | `sde_types.market_group_id/.meta_group_id` |
+| 26 | sde_blueprints | `sde_blueprints` |
+| 27 | character_blueprints | `character_blueprints`, `character_blueprints_meta` |
+| 28 | blueprint_corps | `blueprint_corps`, `corporation_blueprints` |
+| 29 | esi_cache_pages | `esi_cache.pages` (drops cached paginated entries) |
+| 30 | character_wallet_journal_parties | `character_wallet_journal.tax/.first_party_id/.second_party_id` |
 
 ## Schema reference
 
@@ -95,13 +111,43 @@ its own transaction. Rules:
   Tranquility (`online`, `last_login`, `last_logout`), scope-gated
   (`esi-location.read_online.v1`); feeds the Dashboard's "characters online" tile.
 - **`character_wallet_journal`** — *not* a full journal mirror: only rows whose
-  `ref_type` is a tracked PvE-income category (`bounty_prizes`,
-  `ess_escrow_transfer`, `agent_mission_reward`, `agent_mission_time_bonus_reward`)
-  are stored, keyed by `(character_id, journal_id)` so repeated syncs dedupe for
-  free (journal ids are immutable). Feeds the Dashboard's "ratted ISK this
-  month" tile (`sumIncomeBetween` in
-  `db/repositories/characterWalletJournal.ts`); indexed on `occurred_at` for
-  the calendar-month range scan.
+  `ref_type` is a tracked category are stored — PvE income (`bounty_prizes`,
+  `ess_escrow_transfer`, `agent_mission_reward`,
+  `agent_mission_time_bonus_reward`), `corporate_reward_payout` (CONCORD paying
+  out a completed site, not a corp project — and reported net of corp tax),
+  `player_donation`, running costs (`skill_purchase`, `structure_gate_jump`,
+  `planetary_construction`, `repair_bill`), and anything ending in `_tax` or
+  `_fee` (matched by suffix, since ESI has ~17 tax types and as many fee types —
+  though it emits tax rows far more rarely than the in-game journal shows them). Keyed by `(character_id, journal_id)` so repeated syncs
+  dedupe for free (journal ids are immutable); the upsert refreshes `tax` and the
+  party ids on conflict, which backfills rows written before migration 30.
+  `tax` is tax withheld at source (a taxed bounty's `amount` is already net of
+  it) and `first_party_id`/`second_party_id` are what tell a donation between two
+  tracked characters apart from outside income. Feeds the Dashboard's "Income"
+  tile and every Wallet card (`sumWalletTotalsBetween` /
+  `sumWalletTotalsByMonth` in `db/repositories/characterWalletJournal.ts`);
+  indexed on `occurred_at` for the calendar-month range scan. **The table is the
+  archive** — ESI's journal reaches ~30 days back, so nothing prunes it: the
+  Wallet page's previous-months view is exactly what past syncs banked.
+- **`character_blueprints`** — blueprints in a character's own hangars, keyed by
+  ESI's `item_id` (unique game-wide, so it is the natural key and a blueprint
+  handed to another character replaces its stale row rather than duplicating).
+  `quantity` is the field that matters: **-1 = original**, -2 = a copy, positive
+  = a stack of copies. Scope-gated (`esi-characters.read_blueprints.v1`).
+  **`character_blueprints_meta`** records that a character has reported at all —
+  a character owning zero blueprints is otherwise indistinguishable from one
+  that never synced.
+- **`blueprint_corps`** + **`corporation_blueprints`** — alt-corp blueprint
+  hangars. A corporation appears only if the user added it explicitly, by
+  signing a character in with the opt-in `esi-corporations.read_blueprints.v1`
+  scope; that character is stored as `reader_character_id` and is the only token
+  ever used for the corp, so one tracked corp costs one request per ESI cache
+  window however many characters are in it. `last_error`/`last_error_at` hold
+  why a read failed (almost always: the reader is not a Director) so the page
+  can explain it and sweeps can back off instead of re-spending an error-limit
+  slot every hour. Both cascade from `characters(id)` — losing the reader
+  removes the corp and its blueprints, which is honest, since nothing could read
+  it any more.
 - **`structures`** — player-owned (Upwell) structures referenced by character
   locations and clones, keyed by `structure_id`: `name`, `solar_system_id`,
   `type_id`, `owner_id` (corporation). **Shared, not per-character** — once any
@@ -145,8 +191,11 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 
 ### Caches & infrastructure
 
-- **`esi_cache`** — url → etag, expires_at, body. The heart of ESI politeness: fresh
+- **`esi_cache`** — url → etag, expires_at, body, pages. The heart of ESI politeness: fresh
   entries short-circuit HTTP entirely; expired ones revalidate with `If-None-Match`.
+  `pages` is the response's `X-Pages` (null off paginated routes), stored because a fresh
+  hit skips the request that would otherwise carry it — `esiGetPaged` reads the page count
+  from cache and from the wire alike.
 - **`notifications`** — in-app notification feed. `dedupe_key` (UNIQUE) is what makes
   "notify once per distinct occurrence" work, e.g. `queue-drain:<charId>:<finishDate>`.
 - **`sde_version`** — single row (id=1): imported SDE build number + timestamp.
@@ -160,7 +209,15 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 
 - **`sde_categories`** / **`sde_groups`** / **`sde_types`** — the item-type tree.
   `sde_types.name` is indexed for the case-insensitive name→id resolution used by
-  EFT/plan imports.
+  EFT/plan imports. `market_group_id` and `meta_group_id` (added in v25) are what
+  the blueprint checklist reads: a blueprint *with* a market group is one that
+  exists as an original, and the product's meta group gives its tech tier.
+- **`sde_blueprints`** — blueprint type → what one run makes
+  (`product_type_id`), `activity` (`manufacturing` / `reaction` / `other`) and
+  `max_production_limit`. Blueprint types all sit in the "Blueprint" category
+  themselves, so the checklist groups by the **product's** group/category.
+  Non-empty ⇒ `hasBlueprintData`; empty on upgraded installs until an SDE
+  re-import.
 - **`sde_type_skill_reqs`** — type → required skill + level (from typeDogma). Powers
   both fit analysis and plan prerequisite closure. Non-empty ⇒ `hasSkillData`.
 - **`sde_skill_ranks`** — skill → rank (skillTimeConstant), the SP-per-level multiplier.

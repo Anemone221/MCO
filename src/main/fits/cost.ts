@@ -1,22 +1,12 @@
-export type TrainingAttribute =
-  | 'charisma'
-  | 'intelligence'
-  | 'memory'
-  | 'perception'
-  | 'willpower';
+import type { NeuralAttributes, TrainingAttribute } from '@shared/types';
+import { spPerMinute } from '@shared/training';
+
+export type { NeuralAttributes, TrainingAttribute };
+export { spPerMinute };
 
 export interface SkillTrainingAttributes {
   primary: TrainingAttribute;
   secondary: TrainingAttribute;
-}
-
-/** The five neural attribute values used for training-speed math. */
-export interface NeuralAttributes {
-  charisma: number;
-  intelligence: number;
-  memory: number;
-  perception: number;
-  willpower: number;
 }
 
 /** Dogma attribute ids used as *values* of primaryAttribute/secondaryAttribute (180/181). */
@@ -68,11 +58,6 @@ export function injectorsForGap(totalSp: number, spGap: number): number {
     count += 1;
   }
   return count;
-}
-
-/** Training speed in SP per minute for one skill: primary + secondary / 2. */
-export function spPerMinute(attrs: NeuralAttributes, skill: SkillTrainingAttributes): number {
-  return attrs[skill.primary] + attrs[skill.secondary] / 2;
 }
 
 /**

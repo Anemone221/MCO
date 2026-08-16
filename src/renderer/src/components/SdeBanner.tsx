@@ -18,6 +18,8 @@ function progressText(progress: SdeProgress): string {
       return `Importing types… ${(progress.typesProcessed ?? 0).toLocaleString()}`;
     case 'dogma':
       return `Importing skill requirements… ${(progress.typesProcessed ?? 0).toLocaleString()}`;
+    case 'blueprints':
+      return 'Importing blueprints…';
     case 'maps':
       return 'Importing map data…';
     case 'finalizing':
@@ -52,13 +54,14 @@ export default function SdeBanner() {
     }
   }
 
-  // Fully imported, including skill, map and training-attribute data — quiet
-  // confirmation, no action.
+  // Fully imported, including skill, map, training-attribute and blueprint
+  // data — quiet confirmation, no action.
   const fullyImported =
     status?.installed === true &&
     status.hasSkillData &&
     status.hasMapData &&
-    status.hasSkillAttributes;
+    status.hasSkillAttributes &&
+    status.hasBlueprintData;
   if (fullyImported && !importing && progress?.stage !== 'error') {
     return (
       <div className="sde-banner sde-banner--ok" data-testid="sde-banner">
@@ -68,8 +71,12 @@ export default function SdeBanner() {
   }
 
   const idleMessage =
-    status?.installed && (!status.hasSkillData || !status.hasMapData || !status.hasSkillAttributes)
-      ? 'Static data is incomplete — re-import to enable fit testing, training-time estimates and location names.'
+    status?.installed &&
+    (!status.hasSkillData ||
+      !status.hasMapData ||
+      !status.hasSkillAttributes ||
+      !status.hasBlueprintData)
+      ? 'Static data is incomplete — re-import to enable fit testing, training-time estimates, location names and the blueprint checklist.'
       : 'Static data is not imported yet — skill, item and system names will show as IDs.';
 
   const buttonLabel = status?.installed ? 'Re-import static data' : 'Import static data';
