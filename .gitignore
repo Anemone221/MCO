@@ -8,6 +8,13 @@ release
 *.log
 # Diagnostics exports from Settings → Export logs (regenerable, never committed)
 mco-logs-*.txt
+# Crash reports (same header as the log export: userData path, character count)
+mco-crash-*.txt
+# Database snapshots from Settings → Backup database. These hold every character
+# name, ID, location, implant and wallet balance — never let one near a commit.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 .env
 .env.local
 playwright-report
