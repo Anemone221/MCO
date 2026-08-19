@@ -8,7 +8,15 @@ name: Release
 #
 # To cut a release:
 #   1. bump "version" in package.json (and commit it)
-#   2. git tag v0.2.0 && git push origin v0.2.0
+#   2. git tag v0.3.0 && git push origin v0.3.0
+#
+# Shape: every platform *builds* (publishing nothing), then one job uploads the
+# lot into a single draft release. electron-builder's own `--publish always`
+# cannot be used per-platform here — two builders racing to create the same
+# release leave two half-filled drafts, and a builder that finds a release it
+# considers incompatible logs "skipped publishing" and still exits 0. That is
+# how v0.3.0 shipped with no DMGs attached. Building and publishing separately
+# means one writer, one release, and a verification step that actually fails.
 on:
   push:
     tags: ['v*']
@@ -16,32 +24,31 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to build (e.g. v0.2.0)'
+        description: 'Existing tag to build (e.g. v0.3.0)'
         required: true
 
 jobs:
-  release:
-    name: release (${{ matrix.os }})
+  build:
+    name: build (${{ matrix.os }})
     strategy:
-      # One runner at a time. Both legs publish into the *same* draft release,
-      # and two electron-builders creating it at once leave two drafts behind —
-      # the second then holds half the assets. Windows goes first because it is
-      # the primary target; `fail-fast: false` means a failure there still lets
-      # the macOS build run (and be re-run on its own via workflow_dispatch).
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - os: windows-latest
-            # NSIS installer.
             platform: --win
+            # NSIS installer, its blockmap, and the updater's feed file.
+            artifacts: |
+              release/*.exe
+              release/*.blockmap
+              release/latest.yml
           - os: macos-latest
-            # DMG, x64 + arm64 (see electron-builder.yml).
+            # DMG for x64 + arm64 (see electron-builder.yml).
             platform: --mac
+            artifacts: |
+              release/*.dmg
+              release/*.blockmap
+              release/latest-mac.yml
     runs-on: ${{ matrix.os }}
-    permissions:
-      # electron-builder needs write access to create the release and upload to it.
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,16 +85,109 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
-      - name: Package and publish
-        # `--publish always` uploads the installer and creates the GitHub release
-        # from the tag. It lands as a draft (see electron-builder.yml), so the
-        # release notes can be written before anyone is notified — the app's
-        # check reads /releases/latest, which ignores drafts and prereleases.
-        # The second leg finds that draft and uploads alongside the first.
-        run: npx electron-vite build && npx electron-builder ${{ matrix.platform }} --publish always
+      - name: Package
+        # `--publish never`: the upload is the next job's job. The updater feed
+        # files (latest.yml / latest-mac.yml) are still written, because
+        # electron-builder generates those from the publish *config*, not from
+        # whether it uploaded anything.
+        run: npx electron-vite build && npx electron-builder ${{ matrix.platform }} --publish never
+        env:
+          # No Developer ID certificate, and none wanted: `mac.identity` pins an
+          # ad-hoc signature, so keychain discovery has nothing to find and only
+          # slows the build down with a warning.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload build to the workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: mco-${{ runner.os }}
+          path: ${{ matrix.artifacts }}
+          # A leg that produced no installer is a failed leg, not an empty one.
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish draft release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating the release and uploading assets to it.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Collect every platform's build
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Names, not counts: an arch that silently stopped building would still
+      # leave "some DMGs" behind. Runs before the upload so a short release is
+      # never created in the first place.
+      - name: Check the release is complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          missing=0
+          for file in \
+            "MCO-Setup-${version}.exe" \
+            "MCO-${version}-x64.dmg" \
+            "MCO-${version}-arm64.dmg" \
+            "latest.yml" \
+            "latest-mac.yml"
+          do
+            if [ ! -f "dist/$file" ]; then
+              echo "Missing: $file" >&2
+              missing=1
+            fi
+          done
+          echo "Built:"
+          ls -1sh dist
+          [ "$missing" -eq 0 ] || { echo "Release is incomplete — not publishing." >&2; exit 1; }
+
+      - name: Create or update the draft release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No Developer ID certificate in CI, and none wanted: `mac.identity`
-          # pins the ad-hoc signature, so keychain discovery has nothing to find
-          # and only slows the build down with a warning.
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          # A draft, so the notes can be written before anyone is told: the app's
+          # check reads /releases/latest, which ignores drafts and prereleases.
+          # **A draft release updates nobody** — publishing it is what ships.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists — uploading into it."
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --draft --title "$tag" --generate-notes
+          fi
+
+      # electron-builder used to warn and exit 0 when it could not upload. This
+      # is the check that would have caught that: ask GitHub what is actually
+      # attached to the release, and fail if the answer is short.
+      - name: Check the assets actually landed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          version="$(node -p "require('./package.json').version")"
+          attached="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
+          echo "Attached to $tag:"
+          echo "$attached" | sed 's/^/  /'
+          missing=0
+          for file in \
+            "MCO-Setup-${version}.exe" \
+            "MCO-${version}-x64.dmg" \
+            "MCO-${version}-arm64.dmg" \
+            "latest.yml" \
+            "latest-mac.yml"
+          do
+            echo "$attached" | grep -qx "$file" || { echo "Not attached: $file" >&2; missing=1; }
+          done
+          [ "$missing" -eq 0 ] || exit 1

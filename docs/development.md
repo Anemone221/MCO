@@ -94,20 +94,34 @@ launch, so the smoke test would catch it.
 
 ## Releasing (`.github/workflows/release.yml`)
 
-Pushing a `v*` tag runs typecheck → lint → unit tests → `electron-builder --publish
-always` on `windows-latest` and then `macos-latest`, which uploads the NSIS installer and
-both DMGs (x64 + arm64) and opens a **draft** GitHub release (`publish.releaseType` in
-`electron-builder.yml`). Write the notes, then publish it.
+Pushing a `v*` tag runs two stages:
 
-The two legs run one at a time (`max-parallel: 1`). They publish into the *same* draft
-release, and two electron-builders creating it at once would leave two drafts with half
-the assets each. `fail-fast: false` keeps a Windows failure from cancelling the macOS
-build; either leg can be re-run on its own with **Run workflow** and the existing tag.
+1. **build** — `windows-latest` and `macos-latest` in parallel: typecheck → lint → unit
+   tests → `electron-builder --publish never`, then each uploads what it made (the NSIS
+   installer, both DMGs, and the `latest*.yml` feed files) as a *workflow* artifact.
+   `if-no-files-found: error`, so a leg that built nothing fails instead of passing.
+2. **publish** — one job, after both: downloads every artifact, checks the expected
+   filenames are all present, and creates a single **draft** GitHub release with `gh`,
+   then re-reads the release and fails if anything did not attach.
+
+Write the notes on that draft, then publish it.
+
+**Why not `electron-builder --publish always` per platform.** That is what v0.3.0 tried,
+and it shipped with no DMGs. Two builders publishing into one release race to create it;
+worse, `getOrCreateRelease` in `electron-publish` returns null whenever the release it
+finds doesn't match the configured `releaseType` (an already-published release when
+`releaseType: draft`), after which every upload logs `skipped publishing` — **and the
+build still exits 0**. Building and publishing in separate stages gives one writer and
+one release, and the two verification steps turn a skipped upload into a red run.
+
+`publish.releaseType: draft` in `electron-builder.yml` is now only advisory (nothing calls
+electron-builder's publisher), but it stays as the record of intent; the `gh release
+create --draft` above is what actually makes the release a draft.
 
 ```
 # 1. bump "version" in package.json, commit
 # 2. tag and push
-git tag v0.2.0 && git push origin v0.2.0
+git tag v0.3.0 && git push origin v0.3.0
 # 3. write the notes on the draft release GitHub Actions created, then publish
 ```
 
