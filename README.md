@@ -258,7 +258,7 @@ Download the current build from [Releases](https://github.com/Anemone221/MCO/rel
 
 | Platform | File |
 | --- | --- |
-| Windows 10/11 | `MCO Setup <version>.exe` |
+| Windows 10/11 | `MCO-Setup-<version>.exe` |
 | macOS — Apple silicon | `MCO-<version>-arm64.dmg` |
 | macOS — Intel | `MCO-<version>-x64.dmg` |
 
