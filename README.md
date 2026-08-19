@@ -10,12 +10,10 @@ there is no server, no account, and nothing is uploaded anywhere.
 
 - **Windows / macOS / Linux** — Electron; Windows is the primary target.
 - **Free, open source (MIT)**, unofficial and not affiliated with CCP.
-- **Version 0.2.0** — usable day to day, still pre-release. Install it from
-  [Releases](https://github.com/Anemone221/MCO/releases), or build it from source (below).
-  Installed builds update themselves: MCO says when a release lands, then downloads and
-  installs it when you click. Windows warns about the unknown publisher on that first
-  install (**More info → Run anyway**) — the builds aren't code-signed — but updates after
-  it never ask again.
+- **Version 0.3.0** — usable day to day, still pre-release. A Windows installer and a
+  macOS DMG are on [Releases](https://github.com/Anemone221/MCO/releases); see
+  [Install](#install) for the first-launch step each one needs, or build it from source
+  (below).
 
 ---
 
@@ -254,9 +252,47 @@ MCO is not a corporation tool and reads nothing else corporate.
 
 ---
 
-## Getting started
+## Install
 
-There are no published binaries yet — build from source.
+Download the current build from [Releases](https://github.com/Anemone221/MCO/releases):
+
+| Platform | File |
+| --- | --- |
+| Windows 10/11 | `MCO Setup <version>.exe` |
+| macOS — Apple silicon | `MCO-<version>-arm64.dmg` |
+| macOS — Intel | `MCO-<version>-x64.dmg` |
+
+MCO is not code-signed on either platform — the project has no signing certificate yet —
+so each one wants one extra step the first time.
+
+### Windows
+
+SmartScreen warns about an unknown publisher: **More info → Run anyway**. That is the only
+time it asks. From then on MCO updates itself: it says when a release lands, downloads it
+when you click, and installs it on the next restart.
+
+### macOS
+
+The macOS build is currently unsigned. After dragging MCO to **Applications**, the first
+launch will fail with:
+
+> **"MCO" is damaged and can't be opened. You should move it to the Trash.**
+
+Nothing is damaged — that is Gatekeeper refusing a quarantined app it can't verify. Clear
+the quarantine flag from a terminal:
+
+```sh
+xattr -c /Applications/MCO.app
+```
+
+Then launch normally. (Apple requires apps be
+[signed & notarized](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution);
+this project doesn't have a signing identity yet.)
+
+For the same reason, macOS builds don't install updates in place: MCO still tells you when
+a release lands and links to it, but the new DMG is a manual download.
+
+### Build from source instead
 
 **Requirements:** Node.js ≥ 20.19 and git.
 
@@ -267,7 +303,7 @@ npm ci        # postinstall rebuilds better-sqlite3 against Electron
 npm run dev   # launch with hot reload
 ```
 
-To build a real installer instead: `npm run dist` (output in `release/`). On Windows this
+To build a real installer: `npm run dist` (output in `release/`). On Windows this
 can trip over an electron-builder toolchain symlink error — see the fix in
 [docs/development.md](docs/development.md#windows-packaging-wincodesign-symlink-error).
 

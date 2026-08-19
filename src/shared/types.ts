@@ -952,8 +952,8 @@ export interface UpdateStatus {
   /**
    * This build can install an update in place — a packaged one, where
    * electron-builder wrote the update feed alongside the app. A build running
-   * from source (or a future target without an updater) links to the release
-   * page instead.
+   * from source, or a packaged macOS one (unsigned builds can't be updated by
+   * Squirrel.Mac), links to the release page instead.
    */
   canInstall: boolean;
 }

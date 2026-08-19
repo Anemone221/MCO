@@ -80,22 +80,29 @@ On push to `main` and PRs, two jobs run in parallel:
 
 - **verify** — matrix over ubuntu / windows / macos:
   typecheck → lint → unit tests → build → e2e (under `xvfb-run` on Linux).
-- **package** — `windows-latest` only: `npm run test:packaged`, i.e. `electron-builder
-  --dir` plus the packaged smoke test, so a packaging-config regression fails a push
-  instead of waiting for someone to run `npm run dist` by hand. Electron and
-  electron-builder downloads are cached on `package-lock.json`. Pushes to `main` also
-  upload `release/win-unpacked` as an artifact (7-day retention; skipped on PRs, where
-  it'd be ~250 MB per run for no added signal).
+- **package** — matrix over `windows-latest` / `macos-latest`: `npm run test:packaged`,
+  i.e. `electron-builder --dir` plus the packaged smoke test, so a packaging-config
+  regression fails a push instead of waiting for someone to run `npm run dist` by hand.
+  Electron and electron-builder downloads are cached on `package-lock.json`. Pushes to
+  `main` also upload `release/win-unpacked` as an artifact (Windows only, 7-day retention;
+  skipped on PRs, where it'd be ~250 MB per run for no added signal).
 
-Windows is the only packaging platform in CI — it's the primary distribution target and
-packaging is slow. Add `macos-latest` / `ubuntu-latest` to that job if the DMG and
-AppImage targets start shipping.
+Those are the two platforms that ship builds. Linux's AppImage target is configured but
+not published, so it stays out of the packaging job — packaging runs are slow. The macOS
+leg doubles as a signing check: an arm64 app whose ad-hoc signature failed would not
+launch, so the smoke test would catch it.
 
 ## Releasing (`.github/workflows/release.yml`)
 
 Pushing a `v*` tag runs typecheck → lint → unit tests → `electron-builder --publish
-always`, which uploads the NSIS installer and opens a **draft** GitHub release
-(`publish.releaseType` in `electron-builder.yml`). Write the notes, then publish it.
+always` on `windows-latest` and then `macos-latest`, which uploads the NSIS installer and
+both DMGs (x64 + arm64) and opens a **draft** GitHub release (`publish.releaseType` in
+`electron-builder.yml`). Write the notes, then publish it.
+
+The two legs run one at a time (`max-parallel: 1`). They publish into the *same* draft
+release, and two electron-builders creating it at once would leave two drafts with half
+the assets each. `fail-fast: false` keeps a Windows failure from cancelling the macOS
+build; either leg can be re-run on its own with **Run workflow** and the existing tag.
 
 ```
 # 1. bump "version" in package.json, commit
@@ -150,9 +157,30 @@ Adding a certificate later is config plus CI secrets (`azureSignOptions`, or
 `win.certificateFile` / a `sign` hook) and no application code; set `win.publisherName` at
 the same time so the signature check verifies instead of skipping.
 
+**macOS never installs in place.** `isUpdaterAvailable()` returns false on darwin, so
+`canInstall` is false there and the banner offers "View release" and nothing else. Two
+reasons, either of which is enough: Squirrel.Mac only applies an update whose code
+signature matches the running app's, and MCO's mac builds are ad-hoc signed (see
+Packaging below); and the mac target is DMG-only, while the mac updater reads a ZIP. The
+*check* still runs — over the REST path, since `fetchLatest` falls back to it whenever the
+updater is unavailable — so a mac user learns about a release, then downloads it by hand.
+A Developer ID certificate would make both problems fixable: sign, notarize, add `zip` to
+`mac.target`, and drop the darwin guard.
+
 ## Packaging (`electron-builder.yml`)
 
-- Targets: NSIS (Windows), DMG (macOS), AppImage (Linux); output in `release/`.
+- Targets: NSIS (Windows), DMG for x64 **and** arm64 (macOS), AppImage (Linux); output in
+  `release/`. Both DMGs build on one arm64 runner — electron-builder rebuilds
+  better-sqlite3 per architecture — and `dmg.artifactName` keeps the arch suffix on both,
+  which electron-builder would otherwise drop for the default arch.
+- `mac.identity: '-'` — an **ad-hoc** signature. MCO has no Developer ID, and signing is
+  not optional on Apple silicon: macOS refuses to run an unsigned arm64 binary at all.
+  `identity: null` would skip signing entirely and produce an app that cannot launch, so
+  the ad-hoc identity is pinned rather than left to electron-builder's fallback. Ad-hoc
+  is not notarized, so a *downloaded* build is quarantined and its first launch reports
+  "MCO is damaged" until the user runs `xattr -c /Applications/MCO.app` (the README says
+  so). `notarize: false` and `CSC_IDENTITY_AUTO_DISCOVERY=false` in CI keep the build from
+  looking for credentials that don't exist.
 - `asarUnpack` for better-sqlite3 — the native `.node` binary can't load from inside
   the asar archive.
 - `build/installer.nsh` adds an "MCO Background Sync" Start-menu shortcut that launches

@@ -18,7 +18,8 @@ import { toTag } from '../update/mapUpdateInfo';
  * Updates are unsigned for now. The download still comes over HTTPS from GitHub
  * and is verified against the SHA-512 in `latest.yml`; what is missing is the
  * Windows Authenticode check, which electron-updater skips (with a log line) on
- * an unsigned app. See `docs/development.md`.
+ * an unsigned app. macOS is stricter and gets no in-place update at all — see
+ * `isUpdaterAvailable` below and `docs/development.md`.
  */
 
 /** How far an install the user asked for has got. */
@@ -122,8 +123,17 @@ export function initAutoUpdate(onStateChange: () => void): void {
  * packaged (no `app-update.yml` beside it to say where releases come from), so
  * a build run from source keeps linking to the release page instead of offering
  * a button that could not work.
+ *
+ * macOS is excluded on top of that. Squirrel.Mac only applies an update whose
+ * code signature matches the running app's, and MCO's mac builds carry an
+ * ad-hoc signature rather than a Developer ID one, so the install would fail
+ * *after* a ~100 MB download; the DMG-only mac target doesn't publish the ZIP
+ * the mac updater reads either. The check itself still runs (over the REST API,
+ * see `updateService.fetchLatest`), so a mac user is told a release landed and
+ * gets the "View release" link — which is the honest offer there.
  */
 export function isUpdaterAvailable(): boolean {
+  if (process.platform === 'darwin') return false;
   return initialized && autoUpdater.isUpdaterActive();
 }
 

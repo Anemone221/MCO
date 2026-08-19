@@ -21,7 +21,24 @@ on:
 
 jobs:
   release:
-    runs-on: windows-latest
+    name: release (${{ matrix.os }})
+    strategy:
+      # One runner at a time. Both legs publish into the *same* draft release,
+      # and two electron-builders creating it at once leave two drafts behind —
+      # the second then holds half the assets. Windows goes first because it is
+      # the primary target; `fail-fast: false` means a failure there still lets
+      # the macOS build run (and be re-run on its own via workflow_dispatch).
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - os: windows-latest
+            # NSIS installer.
+            platform: --win
+          - os: macos-latest
+            # DMG, x64 + arm64 (see electron-builder.yml).
+            platform: --mac
+    runs-on: ${{ matrix.os }}
     permissions:
       # electron-builder needs write access to create the release and upload to it.
       contents: write
@@ -66,6 +83,11 @@ jobs:
         # from the tag. It lands as a draft (see electron-builder.yml), so the
         # release notes can be written before anyone is notified — the app's
         # check reads /releases/latest, which ignores drafts and prereleases.
-        run: npx electron-vite build && npx electron-builder --publish always
+        # The second leg finds that draft and uploads alongside the first.
+        run: npx electron-vite build && npx electron-builder ${{ matrix.platform }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Developer ID certificate in CI, and none wanted: `mac.identity`
+          # pins the ad-hoc signature, so keychain discovery has nothing to find
+          # and only slows the build down with a warning.
+          CSC_IDENTITY_AUTO_DISCOVERY: false

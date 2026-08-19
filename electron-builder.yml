@@ -44,9 +44,30 @@ nsis:
   include: build/installer.nsh
 
 mac:
-  target:
-    - dmg
   category: public.app-category.utilities
+  target:
+    # Both architectures from one (arm64) runner: electron-builder rebuilds
+    # better-sqlite3 per arch, so Intel Macs are not left without a build.
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  # An ad-hoc signature, not a Developer ID one — MCO has no signing identity
+  # yet (see docs/development.md). It is not optional on Apple silicon: macOS
+  # refuses to run an unsigned arm64 binary at all. Set explicitly rather than
+  # left to electron-builder's fallback, because `identity: null` would skip
+  # signing entirely and produce an arm64 app that cannot launch.
+  #
+  # Ad-hoc is not notarized, so a downloaded build is still quarantined and the
+  # first launch needs `xattr -c /Applications/MCO.app` — the README says so.
+  identity: '-'
+  notarize: false
+
+dmg:
+  # Always arch-suffixed. Without a pattern electron-builder drops the suffix
+  # for the default arch, which would ship two DMGs whose names don't say which
+  # Mac they're for.
+  artifactName: ${productName}-${version}-${arch}.${ext}
 
 linux:
   target:

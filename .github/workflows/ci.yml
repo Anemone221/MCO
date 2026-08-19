@@ -43,12 +43,16 @@ jobs:
         if: runner.os != 'Linux'
         run: npx playwright test
 
-  # Exercises electron-builder on every push. Windows only: it's the primary
-  # distribution target, and packaging runs are slow enough that one platform
-  # is the right trade — add macos/ubuntu here if those builds start shipping.
+  # Exercises electron-builder on every push, on the two platforms that ship
+  # builds: the NSIS installer and the DMG. Linux's AppImage is configured but
+  # not published, so it stays out — packaging runs are slow.
   package:
-    name: package (windows-latest)
-    runs-on: windows-latest
+    name: package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -59,12 +63,16 @@ jobs:
 
       # electron-builder downloads the Electron dist and its winCodeSign
       # toolchain on first run; cached, the job is mostly just build time.
+      # Both platforms' cache locations are listed — the ones that don't exist
+      # on this runner are simply skipped.
       - name: Cache electron-builder downloads
         uses: actions/cache@v4
         with:
           path: |
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
           key: ${{ runner.os }}-electron-builder-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-electron-builder-
@@ -74,13 +82,18 @@ jobs:
 
       # `electron-builder --dir` (no installer — fast) followed by a smoke test
       # of the real binary. Packaging alone only proves the config parses; the
-      # smoke test proves the package actually runs.
+      # smoke test proves the package actually runs. On macOS that also proves
+      # the ad-hoc signature holds — an arm64 app that failed to sign would not
+      # launch at all.
       - name: Package (unpacked) and smoke-test
         run: npm run test:packaged
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      # Not on PRs: ~250 MB per run, and the smoke test above is the signal.
+      # Windows only, and not on PRs: ~250 MB per run, and the smoke test above
+      # is the signal on both platforms.
       - name: Upload unpacked build
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: mco-win-unpacked
