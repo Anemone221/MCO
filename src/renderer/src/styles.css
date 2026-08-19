@@ -485,6 +485,27 @@ code {
   text-decoration: underline;
 }
 
+/* Sits under the "Downloading…" line, so it takes the text block's full width. */
+.update-banner__progress {
+  height: 4px;
+  margin-top: 0.35rem;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  overflow: hidden;
+}
+
+.update-banner__bar {
+  height: 100%;
+  background: var(--accent);
+  /* Progress is pushed about four times a second; the ease bridges the gaps so
+     the bar reads as movement rather than as steps. */
+  transition: width 0.25s linear;
+}
+
+.update-banner__error {
+  color: var(--danger);
+}
+
 /* ---------- Page scaffolding ---------- */
 
 .page {
@@ -1341,6 +1362,37 @@ details.clone-block > p {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Location: the system a proximity ranking is measured against, sitting in the
+   filter bar where the picker's search box was. */
+.nearest-target {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.8rem;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+/* A character already in the target system — the answer, when there is one. */
+.data-table td.nearest-here {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+/* "Via" cell: the jump clone a row is ranked through, its system and its
+   cooldown on one line. */
+.nearest-via {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+/* Capability chips share a ranking cell; let them wrap rather than widen it. */
+.data-table td .chip + .chip {
+  margin-left: 0.25rem;
 }
 
 /* Pod whitelist: removable allowed-system chips + the add-system picker on

@@ -257,6 +257,65 @@ system/region names resolve only after the SDE map import. Docked characters als
 show *where*: NPC station names via public ESI, player-owned citadel names from the
 `structures` table (see below); the search box matches them.
 
+The group and **tag** filters narrow the page, which is what makes the ranking below
+answer "which of my *cyno* alts", not just "which of my characters". Right-clicking a
+character opens the usual tag/group menu.
+
+### Nearest to a system
+
+Pick a target system in the filter bar ("Nearest to system…", `TargetSystemPicker`)
+and the board is replaced by a ranked table: every character with a known location,
+nearest first. `location:nearest` → `buildNearestBoard()`
+(`services/proximityService.ts`) answers it with **one** breadth-first search outward
+from the target over the stargate graph — gate distance is symmetric, so ~90
+characters cost one traversal, not ninety.
+
+Two distances, because "closest" means two things in EVE:
+
+- **Gate jumps** — how long the character takes to *fly* there. Null (shown "—") when
+  no gate route exists at all: wormhole space has no stargates, and Pochven is its own
+  disconnected component.
+- **Light years** — straight-line distance, the unit every capital jump range is
+  quoted in: whether a capital could jump to the character *where it already sits*.
+  Two systems one light year apart can be forty gates apart, which is why the metric
+  select re-ranks rather than just re-sorting a secondary column.
+
+Rows carry the ship, docked location, account and how old the location is — a nearest
+cyno alt on the same account as the ship that needs the cyno cannot fly it, so the
+runners-up matter.
+
+The **Tags** column shows only the tag the filter is set to, and "—" while it is on
+"All tags". At 90 characters with several capabilities each, every other chip is noise
+in a column whose job is confirming "yes, this one can do the thing"; the character's
+full tag list stays one hover away as the cell's tooltip.
+
+#### Jump clones ("Jump clones" checkbox)
+
+Ticking it measures each character's **jump clones** as well as its current position,
+so a character with a clone two jumps out ranks above one that has to fly thirty.
+Opt-in because it costs work the plain ranking doesn't: ESI gives a clone a station or
+structure id, never a system, so NPC stations resolve through public
+`/universe/stations` (ESI-cached) and player structures through the `structures`
+table. Clones in a citadel MCO hasn't resolved yet are **counted, not dropped**
+(`unmeasuredClones` → the "clones unresolved" chip), because an unresolved citadel
+could be the nearest thing there is; running "Import structures" fixes it.
+
+- The service returns each character's clones alongside its own distance —
+  `entry.jumps` always means "from where this character is". Choosing between them is
+  `bestRoute()` in `renderer/src/lib/nearestView.ts`, which picks by **the metric being
+  ranked** (a clone nearer by gates is often not the one nearer in light years) and
+  keeps the character in place on a tie, since a clone jump costs it its ship and its
+  cooldown.
+- The **Via** column names the winning clone, its system, and the clone-jump cooldown
+  (`nextCloneJumpDate` from `clones/jumpCooldown.ts` — 24h less one hour per level of
+  Infomorph Synchronizing), shown as the same blue `chip--fatigue` timer the Clones
+  page uses. A clone that beats every other route is only an *answer* once that timer
+  is up; until then it is a plan, which is why the time is on the row rather than the
+  clone being hidden or silently ranked down.
+- The caveat the column header states: a clone jump **arrives in a pod**. It only
+  helps where a cyno ship is already stationed — MCO doesn't track assets, so it
+  cannot check that for you.
+
 ### Structure (citadel) import
 
 Player-owned Upwell structures only expose their name through the **authed**

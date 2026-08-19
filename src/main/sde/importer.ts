@@ -8,6 +8,7 @@ import {
   replaceRegions,
   replaceSkillAttributes,
   replaceSkillRanks,
+  replaceSystemJumps,
   replaceSystems,
   replaceTypeSkillReqs,
   replaceTypes,
@@ -19,6 +20,7 @@ import {
   parseBlueprints,
   parseNamedFile,
   parseSolarSystems,
+  parseStargates,
   parseTypeDogmaStream,
   parseTypesStream,
 } from './parse';
@@ -139,6 +141,10 @@ export async function importSde(
     'mapSolarSystems.yaml': async (stream) => {
       onProgress?.({ phase: 'maps' });
       replaceSystems(parseSolarSystems(await bufferStream(stream)));
+    },
+    'mapStargates.yaml': async (stream) => {
+      onProgress?.({ phase: 'maps' });
+      replaceSystemJumps(parseStargates(await bufferStream(stream)));
     },
   });
 

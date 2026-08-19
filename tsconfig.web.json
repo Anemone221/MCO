@@ -23,6 +23,7 @@
   "include": [
     "src/renderer/**/*",
     "src/shared/**/*",
-    "src/preload/api.d.ts"
+    "src/preload/api.d.ts",
+    "tests/unit/renderer/**/*"
   ]
 }

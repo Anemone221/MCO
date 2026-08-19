@@ -4,6 +4,7 @@ import {
   parseBlueprints,
   parseNamedFile,
   parseSolarSystems,
+  parseStargates,
   parseTypeDogmaStream,
   parseTypesStream,
   parseYamlScalar,
@@ -253,13 +254,17 @@ describe('parseTypeDogmaStream', () => {
 });
 
 describe('parseSolarSystems', () => {
-  it('extracts system id, name, region and security', () => {
+  it('extracts system id, name, region, security and position', () => {
     const yaml = [
       '30000142:',
       '  constellationID: 20000020',
       '  name:',
       '    de: Jita',
       '    en: Jita',
+      '  position:',
+      '    x: -1.2e+17',
+      '    y: 6.1e+16',
+      '    z: -1.1e+17',
       '  regionID: 10000002',
       '  securityStatus: 0.9459',
       '30002187:',
@@ -270,8 +275,67 @@ describe('parseSolarSystems', () => {
     ].join('\n');
 
     expect(parseSolarSystems(yaml)).toEqual([
-      { id: 30000142, name: 'Jita', regionId: 10000002, security: 0.9459 },
-      { id: 30002187, name: 'Amamake', regionId: 10000042, security: 0.3614 },
+      {
+        id: 30000142,
+        name: 'Jita',
+        regionId: 10000002,
+        security: 0.9459,
+        x: -1.2e17,
+        y: 6.1e16,
+        z: -1.1e17,
+      },
+      // No position block: the coordinates read as unknown rather than as the
+      // centre of New Eden.
+      {
+        id: 30002187,
+        name: 'Amamake',
+        regionId: 10000042,
+        security: 0.3614,
+        x: null,
+        y: null,
+        z: null,
+      },
     ]);
+  });
+});
+
+describe('parseStargates', () => {
+  it('reads each gate as a link from its system to its destination', () => {
+    const yaml = [
+      '50000001:',
+      '  destination:',
+      '    solarSystemID: 30000778',
+      '    stargateID: 50000482',
+      '  position:',
+      '    x: 390565601280.0',
+      '    y: 41190481920.0',
+      '    z: -893183385600.0',
+      '  solarSystemID: 30000777',
+      '  typeID: 29633',
+      '50000482:',
+      '  destination:',
+      '    solarSystemID: 30000777',
+      '    stargateID: 50000001',
+      '  solarSystemID: 30000778',
+      '  typeID: 29633',
+    ].join('\n');
+
+    expect(parseStargates(yaml)).toEqual([
+      { fromSystemId: 30000777, toSystemId: 30000778 },
+      { fromSystemId: 30000778, toSystemId: 30000777 },
+    ]);
+  });
+
+  it('drops gates that name neither end', () => {
+    const yaml = [
+      '50000001:',
+      '  solarSystemID: 30000777',
+      '50000002:',
+      '  destination:',
+      '    stargateID: 50000482',
+      '  solarSystemID: 30000777',
+    ].join('\n');
+
+    expect(parseStargates(yaml)).toEqual([]);
   });
 });

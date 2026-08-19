@@ -605,6 +605,32 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE character_wallet_journal ADD COLUMN second_party_id INTEGER;
     `,
   },
+  {
+    // The map, as a graph: which systems a stargate joins, and where each
+    // system sits. Together they answer "which of my characters is nearest to
+    // this system" in the two units EVE measures distance in — gate jumps for
+    // the character who has to fly there, light years for the capital that
+    // would jump to the cyno once it arrives.
+    //
+    // The position columns are nullable rather than zero-defaulted: a profile
+    // whose map was imported before this migration has no coordinates at all,
+    // and NULL says that, where (0,0,0) would read as a system near the centre
+    // of New Eden. `sde_system_jumps` is likewise simply empty until the next
+    // import — `getSdeStatus().hasJumpData` is what tells the UI to ask for one.
+    version: 31,
+    name: 'sde_system_jumps',
+    sql: `
+      ALTER TABLE sde_systems ADD COLUMN pos_x REAL;
+      ALTER TABLE sde_systems ADD COLUMN pos_y REAL;
+      ALTER TABLE sde_systems ADD COLUMN pos_z REAL;
+
+      CREATE TABLE sde_system_jumps (
+        from_system_id INTEGER NOT NULL,
+        to_system_id   INTEGER NOT NULL,
+        PRIMARY KEY (from_system_id, to_system_id)
+      );
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

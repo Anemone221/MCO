@@ -556,9 +556,11 @@ and `webSecurity.ts` are new and pure, which is what let all three be covered by
 
 **Still open, in suggested order:**
 
-5. **A3 (signing decision)** — from the improvement plan; unsigned NSIS means SmartScreen
-   for every user. Decide and write it down either way. *This is now the only thing
-   between the current tree and a defensible public release* — it's a decision, not code.
+5. ~~**A3 (signing decision)**~~ — decided 2026-08-17: ship unsigned. The premise above was
+   wrong in one important way: SmartScreen fires per *install*, not per user, and with
+   `electron-updater` now wired (banner → Download → Restart to install) that is a one-time
+   cost on first install rather than a recurring one. Written up under A3 in the
+   improvement plan and in `docs/development.md` § Updating.
 6. **macOS/Linux `npm run dist` smoke** — still never been built. Ship Windows-only
    explicitly if you don't test them; a README line beats a broken dmg.
 7. **C1 DB-backed tests** — the repositories/services layer remains the only untested

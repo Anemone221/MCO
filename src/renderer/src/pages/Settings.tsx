@@ -67,11 +67,32 @@ function SyncStateChip({ state }: { state: CharacterSyncState }) {
 }
 
 /**
- * One line on what the last release check found. `unknown` states say why they
- * have no answer — a never-run check, a network failure, a repository with no
- * releases yet — rather than implying the build is current.
+ * One line on what the last release check found, or on the download it started.
+ * `unknown` states say why they have no answer — a never-run check, a network
+ * failure, a repository with no releases yet — rather than implying the build is
+ * current.
+ *
+ * Installing happens from the banner, not here: this is the About section, and
+ * a "Restart now" button several screens deep from where the update was
+ * announced is a button people press by accident.
  */
 function UpdateSummary({ status }: { status: UpdateStatus }) {
+  if (status.state === 'downloading') {
+    return (
+      <span className="muted">
+        Downloading MCO {status.latestVersion}… {status.downloadPercent ?? 0}%
+      </span>
+    );
+  }
+
+  if (status.state === 'ready') {
+    return (
+      <span className="muted">
+        MCO {status.latestVersion} is downloaded — restart to install it.
+      </span>
+    );
+  }
+
   if (status.message !== null) return <span className="muted">{status.message}</span>;
 
   if (status.state === 'update-available') {
@@ -93,7 +114,6 @@ function UpdateSummary({ status }: { status: UpdateStatus }) {
     </span>
   );
 }
-
 
 export default function Settings() {
   const [syncing, setSyncing] = useState(false);

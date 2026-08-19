@@ -29,7 +29,8 @@ sde:import (IPC)
             │                         + sde_skill_attributes (streamed)
             ├─ blueprints.yaml      → sde_blueprints
             ├─ mapRegions.yaml      → sde_regions
-            └─ mapSolarSystems.yaml → sde_systems
+            ├─ mapSolarSystems.yaml → sde_systems (name, region, security, position)
+            └─ mapStargates.yaml    → sde_system_jumps
 ```
 
 Notes:
@@ -47,6 +48,11 @@ Notes:
   `invention` carries a `products` list too, but that is the *Tech II blueprint* the
   process yields, and reading it would file every Tech I blueprint under its Tech II
   descendant. Parsed by the same kind of line scan as types.yaml (`parseBlueprints`).
+- `mapSolarSystems.yaml` also carries each system's **position** (metres, `pos_x/y/z`)
+  and `mapStargates.yaml` (2.8 MB, ~14k gates) the **links between systems**. Together
+  they are the map as a graph: gate jumps by breadth-first search, light years by
+  straight-line distance (`main/map/routing.ts`). Positions are nullable — a profile
+  imported before they existed reads as "unknown", not as the centre of New Eden.
 - Each table is fully replaced inside a transaction (`replace*` in
   `db/repositories/sde.ts`) — re-importing is idempotent and how you upgrade.
 - Progress stages surfaced to the renderer (`SdeProgress` in `shared/types.ts`):
@@ -55,7 +61,7 @@ Notes:
 
 ## Status & gating (`getSdeStatus`)
 
-`SdeStatus` reports `installed`, `version`, `importedAt`, plus three capability flags
+`SdeStatus` reports `installed`, `version`, `importedAt`, plus five capability flags
 derived from actual table contents (not the version stamp):
 
 | Flag | True when | Gates |
@@ -64,6 +70,7 @@ derived from actual table contents (not the version stamp):
 | `hasMapData` | `sde_systems` is non-empty | System/region/security name resolution on Roster & Location (falls back to "—"). |
 | `hasSkillAttributes` | `sde_skill_attributes` is non-empty | The **Time** cost metric on fit/plan analysis. Without it, analyses return `needsSkillAttributes: true`, per-character `timeGapMinutes` is null, and the Time view explains why. |
 | `hasBlueprintData` | `sde_blueprints` is non-empty | The **blueprint checklist**. Without it the Blueprints page says so instead of claiming 0 of 0 owned. |
+| `hasJumpData` | `sde_system_jumps` is non-empty | **Gate distances** in the Location page's nearest-to-a-system ranking. Without it every distance is "no route", so the ranking says to re-import instead. |
 
 Name resolution helpers used everywhere: `getTypeNames(ids)`, `getSystems(ids)`,
 `resolveTypeIdsByName(names)` (case-insensitive — how pasted EFT/plan text finds type

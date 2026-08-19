@@ -1,24 +1,39 @@
-import { app } from 'electron';
-import type { UpdateStatus } from '@shared/types';
+import { app, type BrowserWindow } from 'electron';
+import { IpcChannel } from '@shared/ipc';
+import type { UpdateState, UpdateStatus } from '@shared/types';
 import { createSingleFlight } from '../auth/singleFlight';
 import { APP_VERSION, GITHUB_RELEASES_URL, GITHUB_URL, USER_AGENT } from '../config';
 import { getSetting, setSetting } from '../db/repositories/appSettings';
 import { latestReleaseApiUrl, parseRelease, type ReleaseInfo } from '../update/github';
+import { releaseFromUpdateInfo } from '../update/mapUpdateInfo';
 import { isNewerVersion } from '../update/version';
+import {
+  getEngineState,
+  initAutoUpdate,
+  installNow,
+  isUpdaterAvailable,
+  runCheck,
+  startDownload,
+} from './autoUpdate';
 
 /**
- * Noticing that a newer MCO has been released.
+ * Everything the renderer knows about updates: whether a newer MCO exists, and
+ * how far installing it has got.
  *
- * MCO is installed from a GitHub release and updated by hand, so this only ever
- * *looks*: nothing is downloaded, nothing is installed, and a user who ignores
- * the banner keeps running what they have. (In-place updating is
- * `electron-updater`'s job and would need a signed installer to be worth
- * offering.)
+ * This module owns the answer — the `app_settings` cache, the daily interval,
+ * the dismissal, and the `UpdateStatus` shape. It does not own the mechanism:
+ * `autoUpdate.ts` does the checking, downloading and installing in a packaged
+ * build, and the GitHub REST call below answers everywhere else (a build run
+ * from source is updated with `git pull`, not by reinstalling, but it should
+ * still be able to say a release happened).
  *
- * The check is unauthenticated, and GitHub allows 60 API requests an hour per
- * IP shared across every unauthenticated caller on it — so the answer is cached
- * in `app_settings` and refreshed at most daily. Settings → "Check now"
- * bypasses the interval for a user who wants an answer immediately.
+ * The REST check is unauthenticated, and GitHub allows 60 API requests an hour
+ * per IP shared across every unauthenticated caller on it — so the answer is
+ * cached in `app_settings` and refreshed at most daily either way. Settings →
+ * "Check now" bypasses the interval for a user who wants an answer immediately.
+ *
+ * Nothing downloads on its own: a check only raises the banner, and bytes move
+ * when the user clicks it.
  */
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -54,16 +69,32 @@ function readCache(): CachedCheck | null {
 }
 
 /**
- * Compose the renderer's view from the cached check plus, when the check that
- * just ran failed, why. `failure` is deliberately not persisted: it describes
- * this attempt, while the cache holds the last thing actually learned.
+ * Compose the renderer's view from the cached check, how far a download the
+ * user started has got, and — when the check that just ran failed — why.
+ *
+ * `failure` is deliberately not persisted: it describes this attempt, while the
+ * cache holds the last thing actually learned. A download in flight outranks
+ * both, because `downloading` and `ready` are things the user asked for and is
+ * waiting on.
  */
 function toStatus(cache: CachedCheck | null, failure: string | null): UpdateStatus {
-  const latestVersion = cache?.latestVersion ?? null;
+  const engine = getEngineState();
+  const latestVersion = engine.version ?? cache?.latestVersion ?? null;
   const available = latestVersion !== null && isNewerVersion(latestVersion, APP_VERSION);
 
+  const state: UpdateState =
+    engine.phase === 'ready'
+      ? 'ready'
+      : engine.phase === 'downloading'
+        ? 'downloading'
+        : latestVersion === null
+          ? 'unknown'
+          : available
+            ? 'update-available'
+            : 'current';
+
   return {
-    state: latestVersion === null ? 'unknown' : available ? 'update-available' : 'current',
+    state,
     currentVersion: APP_VERSION,
     latestVersion,
     releaseName: cache?.releaseName ?? null,
@@ -72,9 +103,35 @@ function toStatus(cache: CachedCheck | null, failure: string | null): UpdateStat
     checkedAt: cache?.checkedAt ?? null,
     message:
       failure ??
+      engine.error ??
       (cache !== null && latestVersion === null ? 'No releases have been published yet.' : null),
     dismissed: latestVersion !== null && getSetting(KEY_DISMISSED) === latestVersion,
+    downloadPercent: engine.phase === 'downloading' ? engine.percent : null,
+    canInstall: isUpdaterAvailable(),
   };
+}
+
+let getWindow: () => BrowserWindow | null = () => null;
+
+/**
+ * Push the current status to the renderer. Wired as the updater's change
+ * callback, so a download's progress reaches the banner without it polling.
+ *
+ * The whole status crosses rather than a bare percentage: the banner then has
+ * one shape to render and can hand it straight to `useMcoData`'s `setData`.
+ */
+function pushStatus(): void {
+  getWindow()?.webContents.send(IpcChannel.updateProgress, toStatus(readCache(), null));
+}
+
+/**
+ * Wire the updater at startup. Configures and subscribes only — it does not
+ * check. Detection stays where it was: the banner mounting, and Settings →
+ * "Check for updates".
+ */
+export function initUpdates(window: () => BrowserWindow | null): void {
+  getWindow = window;
+  initAutoUpdate(pushStatus);
 }
 
 /**
@@ -91,6 +148,31 @@ function toStatus(cache: CachedCheck | null, failure: string | null): UpdateStat
 function autoCheckEnabled(): boolean {
   const override = process.env['MCO_UPDATE_CHECK'];
   return override === undefined ? app.isPackaged : override === '1';
+}
+
+/**
+ * The latest release, asked of whichever source this build can act on.
+ *
+ * A packaged build asks the updater, so the release it learns about is by
+ * definition one it can install — the same `latest.yml` the download will come
+ * from. Anything else falls back to the REST API. Both return the same shape,
+ * so only the fetch differs and the cache never records which ran.
+ *
+ * Null means the check succeeded and there is no release to report.
+ */
+async function fetchLatest(): Promise<ReleaseInfo | null> {
+  if (!isUpdaterAvailable()) return fetchLatestRelease();
+
+  try {
+    const info = await runCheck();
+    return info === null ? null : releaseFromUpdateInfo(info, GITHUB_URL);
+  } catch (err) {
+    // A repository with nothing published is an answer, not a failure — the
+    // same one the REST path reads off a 404. The updater raises it instead,
+    // so translate rather than let it read as a broken check.
+    if ((err as { code?: string })?.code === 'ERR_UPDATER_NO_PUBLISHED_VERSIONS') return null;
+    throw err;
+  }
 }
 
 /** Null means the check succeeded and the repository has no published release. */
@@ -141,7 +223,7 @@ export async function checkForUpdate(force = false): Promise<UpdateStatus> {
 
   return inFlight.run('update', async () => {
     try {
-      const release = await fetchLatestRelease();
+      const release = await fetchLatest();
       const fresh: CachedCheck = {
         checkedAt: new Date().toISOString(),
         latestVersion: release?.tag ?? null,
@@ -157,6 +239,27 @@ export async function checkForUpdate(force = false): Promise<UpdateStatus> {
       return toStatus(cache, `Update check failed: ${reason}`);
     }
   });
+}
+
+/**
+ * Start downloading the pending update, and answer with the status the banner
+ * should show while it runs. The rest arrives on `updateProgress`.
+ *
+ * Never rejects, for the same reason `checkForUpdate` doesn't: a download that
+ * couldn't start is a sentence beside the banner, not an exception at a button.
+ */
+export async function downloadUpdate(): Promise<UpdateStatus> {
+  await startDownload();
+  return toStatus(readCache(), null);
+}
+
+/**
+ * Quit and install what was downloaded. Returns the status rather than nothing
+ * so a refused install (nothing downloaded yet) still tells the renderer why.
+ */
+export function installUpdate(): UpdateStatus {
+  installNow();
+  return toStatus(readCache(), null);
 }
 
 /**

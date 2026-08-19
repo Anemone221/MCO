@@ -222,6 +222,11 @@ export interface SdeStatus {
   hasSkillAttributes: boolean;
   /** True once blueprints.yaml has been imported — gates the blueprint checklist. */
   hasBlueprintData: boolean;
+  /**
+   * True once the stargate graph (mapStargates.yaml) has been imported — gates
+   * the "nearest character to a system" search on the Location page.
+   */
+  hasJumpData: boolean;
 }
 
 export interface SdeProgress {
@@ -279,6 +284,83 @@ export interface LocationEntry {
   shipName: string | null;
   shipTypeName: string | null;
   updatedAt: string | null;
+}
+
+/**
+ * One of a character's jump clones, measured against the designated system.
+ *
+ * A clone is a second position the character can occupy — arriving in a pod,
+ * so it only helps where a ship is already stationed — which is why the clones
+ * come alongside the character's own distance rather than replacing it.
+ */
+export interface NearestCloneOption {
+  jumpCloneId: number;
+  /** Player-assigned clone name, if any. */
+  name: string | null;
+  /** Station or structure the clone sits in; null while unresolved. */
+  locationName: string | null;
+  systemId: number;
+  systemName: string | null;
+  security: number | null;
+  regionName: string | null;
+  /** Gate jumps from the clone's system to the target; null when no gate route exists. */
+  jumps: number | null;
+  lightYears: number | null;
+}
+
+/**
+ * One character measured against a designated system: everything the location
+ * board already knows about it, plus how far away it is.
+ *
+ * The two distances answer different questions and neither substitutes for the
+ * other — `jumps` is how long the character takes to *get* there by gates,
+ * `lightYears` is whether a capital could jump to it where it stands.
+ */
+export interface NearestCharacterEntry extends LocationEntry {
+  /** Gate jumps to the target system; null when no gate route exists (wormhole space). */
+  jumps: number | null;
+  /** Straight-line distance in light years; null when either position is unknown. */
+  lightYears: number | null;
+  /** The character's capability tags, in name order. */
+  tagNames: string[];
+  /**
+   * The character's jump clones, nearest the target first. Empty unless the
+   * clone check was asked for (and for characters with no clones, or none whose
+   * location resolves to a system).
+   */
+  clones: NearestCloneOption[];
+  /**
+   * When this character may clone-jump next — past means ready, null means it
+   * has never jumped (also ready), and null is likewise what a board without
+   * the clone check reports. Distinguishing "ready" from "in 6 hours" is the
+   * difference between a clone being an answer and a plan.
+   */
+  cloneJumpReadyAt: string | null;
+}
+
+/** The answer to "who is nearest to this system", ranked by gate jumps. */
+export interface NearestBoard {
+  /** The system that was measured against. */
+  target: SystemSearchResult;
+  /** Every character with a known location, nearest first. */
+  entries: NearestCharacterEntry[];
+  /** Characters left out because their location has never been synced. */
+  unlocatedCount: number;
+  /**
+   * False when the stargate graph has not been imported, which makes every
+   * `jumps` null — the UI says to re-import rather than reporting "no route"
+   * for all 90 characters.
+   */
+  hasJumpData: boolean;
+  /** Whether jump clones were measured as well as current locations. */
+  includesJumpClones: boolean;
+  /**
+   * Jump clones that could not be measured because their structure has no
+   * resolved system yet (see the structure importer). Counted rather than
+   * dropped silently: a clone in an unresolved citadel could be the nearest
+   * one there is.
+   */
+  unmeasuredClones: number;
 }
 
 export interface SyncResult {
@@ -834,13 +916,16 @@ export interface AppInfo {
 }
 
 /**
- * Result of the GitHub release check.
+ * Where the update sits: what the last check found, then how far an install
+ * the user asked for has got.
  *
  * `unknown` covers every case where the check has no answer — never run, the
  * network was down, the repository has no published release yet — so the UI
- * can stay silent rather than claim the build is current.
+ * can stay silent rather than claim the build is current. `downloading` and
+ * `ready` only occur in a build that can install in place (see `canInstall`),
+ * and only after the user clicked: nothing downloads on its own.
  */
-export type UpdateState = 'current' | 'update-available' | 'unknown';
+export type UpdateState = 'current' | 'update-available' | 'downloading' | 'ready' | 'unknown';
 
 export interface UpdateStatus {
   state: UpdateState;
@@ -855,10 +940,22 @@ export interface UpdateStatus {
   publishedAt: string | null;
   /** When the last successful check ran; null when none has. */
   checkedAt: string | null;
-  /** Why the check has no answer — shown in Settings, never in the banner. */
+  /**
+   * Why the check has no answer, or why a download stopped. Shown in Settings,
+   * and in the banner too once there is a button there that can fail.
+   */
   message: string | null;
   /** The banner has been dismissed for `latestVersion`. */
   dismissed: boolean;
+  /** 0-100 while `state` is `downloading`; null in every other state. */
+  downloadPercent: number | null;
+  /**
+   * This build can install an update in place — a packaged one, where
+   * electron-builder wrote the update feed alongside the app. A build running
+   * from source (or a future target without an updater) links to the release
+   * page instead.
+   */
+  canInstall: boolean;
 }
 
 /** Tranquility server status, from ESI's public /status/ endpoint. */

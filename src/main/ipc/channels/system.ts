@@ -2,7 +2,12 @@ import { clipboard, dialog, type BrowserWindow } from 'electron';
 import { IpcChannel } from '@shared/ipc';
 import { isClientIdConfigured } from '../../config';
 import { getAppInfo } from '../../services/settingsService';
-import { checkForUpdate, dismissUpdate } from '../../services/updateService';
+import {
+  checkForUpdate,
+  dismissUpdate,
+  downloadUpdate,
+  installUpdate,
+} from '../../services/updateService';
 import { handle } from '../handle';
 
 /** App-level facts and the one native dialog the renderer is allowed to raise. */
@@ -18,6 +23,11 @@ export function registerSystemChannels(getWindow: () => BrowserWindow | null): v
     checkForUpdate(force ?? false),
   );
   handle(IpcChannel.systemDismissUpdate, (_event, version: string) => dismissUpdate(version));
+  // Both answer with the resulting status rather than void: the button that
+  // called one has a banner to redraw, and a refusal ("nothing downloaded yet")
+  // rides back in the same shape as a success.
+  handle(IpcChannel.systemDownloadUpdate, () => downloadUpdate());
+  handle(IpcChannel.systemInstallUpdate, () => installUpdate());
   handle(
     IpcChannel.systemConfirm,
     async (_event, message: string, confirmLabel: string | null) => {

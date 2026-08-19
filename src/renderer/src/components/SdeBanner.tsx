@@ -54,12 +54,13 @@ export default function SdeBanner() {
     }
   }
 
-  // Fully imported, including skill, map, training-attribute and blueprint
-  // data — quiet confirmation, no action.
+  // Fully imported, including skill, map, stargate, training-attribute and
+  // blueprint data — quiet confirmation, no action.
   const fullyImported =
     status?.installed === true &&
     status.hasSkillData &&
     status.hasMapData &&
+    status.hasJumpData &&
     status.hasSkillAttributes &&
     status.hasBlueprintData;
   if (fullyImported && !importing && progress?.stage !== 'error') {
@@ -74,9 +75,10 @@ export default function SdeBanner() {
     status?.installed &&
     (!status.hasSkillData ||
       !status.hasMapData ||
+      !status.hasJumpData ||
       !status.hasSkillAttributes ||
       !status.hasBlueprintData)
-      ? 'Static data is incomplete — re-import to enable fit testing, training-time estimates, location names and the blueprint checklist.'
+      ? 'Static data is incomplete — re-import to enable fit testing, training-time estimates, location names, jump distances and the blueprint checklist.'
       : 'Static data is not imported yet — skill, item and system names will show as IDs.';
 
   const buttonLabel = status?.installed ? 'Re-import static data' : 'Import static data';

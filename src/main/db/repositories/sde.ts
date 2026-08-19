@@ -449,6 +449,10 @@ export interface SystemRow {
   name: string;
   regionId: number;
   security: number;
+  /** Map coordinates in metres; null when the import predates them. */
+  x: number | null;
+  y: number | null;
+  z: number | null;
 }
 
 export function replaceRegions(rows: RegionRow[]): void {
@@ -463,12 +467,78 @@ export function replaceRegions(rows: RegionRow[]): void {
 export function replaceSystems(rows: SystemRow[]): void {
   const db = getDb();
   const ins = db.prepare(
-    'INSERT OR REPLACE INTO sde_systems (id, name, region_id, security) VALUES (?, ?, ?, ?)',
+    `INSERT OR REPLACE INTO sde_systems (id, name, region_id, security, pos_x, pos_y, pos_z)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   db.transaction(() => {
     db.exec('DELETE FROM sde_systems');
-    for (const r of rows) ins.run(r.id, r.name, r.regionId, r.security);
+    for (const r of rows) ins.run(r.id, r.name, r.regionId, r.security, r.x, r.y, r.z);
   })();
+}
+
+export interface SystemJumpRow {
+  fromSystemId: number;
+  toSystemId: number;
+}
+
+/**
+ * Replace the stargate graph — ~14k gates, so one transaction rather than one
+ * statement each. Stored exactly as the SDE gives it (one row per gate, in the
+ * direction it points); `buildAdjacency` is what makes it undirected. Two gates
+ * that describe the same link collapse onto the primary key rather than
+ * double-counting it.
+ */
+export function replaceSystemJumps(rows: SystemJumpRow[]): void {
+  const db = getDb();
+  const ins = db.prepare(
+    'INSERT OR IGNORE INTO sde_system_jumps (from_system_id, to_system_id) VALUES (?, ?)',
+  );
+  db.transaction(() => {
+    db.exec('DELETE FROM sde_system_jumps');
+    for (const r of rows) ins.run(r.fromSystemId, r.toSystemId);
+  })();
+}
+
+/**
+ * Every stargate link in New Eden. Read whole rather than walked one system at
+ * a time: a shortest-route search touches most of the graph anyway, and ~28k
+ * rows come back in a few milliseconds.
+ */
+export function getSystemJumps(): SystemJumpRow[] {
+  const rows = getDb()
+    .prepare('SELECT from_system_id, to_system_id FROM sde_system_jumps')
+    .all() as Array<{ from_system_id: number; to_system_id: number }>;
+  return rows.map((r) => ({ fromSystemId: r.from_system_id, toSystemId: r.to_system_id }));
+}
+
+export interface SystemPositionRow {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Map coordinates for the given systems, in metres. Systems whose position was
+ * never imported are absent from the map — the caller reports no light-year
+ * distance rather than a wrong one.
+ */
+export function getSystemPositions(systemIds: number[]): Map<number, SystemPositionRow> {
+  const result = new Map<number, SystemPositionRow>();
+  if (systemIds.length === 0) return result;
+  const placeholders = systemIds.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(
+      `SELECT id, pos_x, pos_y, pos_z FROM sde_systems
+       WHERE id IN (${placeholders}) AND pos_x IS NOT NULL`,
+    )
+    .all(...systemIds) as Array<{
+    id: number;
+    pos_x: number;
+    pos_y: number;
+    pos_z: number;
+  }>;
+  for (const r of rows) result.set(r.id, { x: r.pos_x, y: r.pos_y, z: r.pos_z });
+  return result;
 }
 
 export interface SystemInfo {
@@ -564,6 +634,9 @@ export function getSdeStatus(): SdeStatus {
   const blueprintData = getDb()
     .prepare('SELECT EXISTS(SELECT 1 FROM sde_blueprints LIMIT 1) AS present')
     .get() as { present: number };
+  const jumpData = getDb()
+    .prepare('SELECT EXISTS(SELECT 1 FROM sde_system_jumps LIMIT 1) AS present')
+    .get() as { present: number };
   return {
     installed: row !== undefined,
     version: row?.version ?? null,
@@ -572,6 +645,7 @@ export function getSdeStatus(): SdeStatus {
     hasMapData: mapData.present === 1,
     hasSkillAttributes: skillAttributes.present === 1,
     hasBlueprintData: blueprintData.present === 1,
+    hasJumpData: jumpData.present === 1,
   };
 }
 

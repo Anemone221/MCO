@@ -14,6 +14,7 @@ import type {
   FitAnalysis,
   GroupDetail,
   LocationEntry,
+  NearestBoard,
   PlanAnalysis,
   PlanDraftSource,
   PlanSkillInfo,
@@ -86,6 +87,7 @@ export const IpcChannel = {
   plansDraftFromFit: 'plans:draftFromFit',
   plansDraftFromEft: 'plans:draftFromEft',
   locationBoard: 'location:board',
+  locationNearest: 'location:nearest',
   structuresImport: 'structures:import',
   structuresImportProgress: 'structures:importProgress',
   structuresSearch: 'structures:search',
@@ -107,6 +109,9 @@ export const IpcChannel = {
   systemCopyText: 'system:copyText',
   systemCheckUpdate: 'system:checkUpdate',
   systemDismissUpdate: 'system:dismissUpdate',
+  systemDownloadUpdate: 'system:downloadUpdate',
+  systemInstallUpdate: 'system:installUpdate',
+  updateProgress: 'update:progress',
   settingsSyncStatus: 'settings:syncStatus',
   settingsEsiActivity: 'settings:esiActivity',
   settingsExportLogs: 'settings:exportLogs',
@@ -131,6 +136,7 @@ export const IPC_EVENT_CHANNELS: readonly IpcChannelName[] = [
   IpcChannel.sdeProgress,
   IpcChannel.structuresImportProgress,
   IpcChannel.notificationsChanged,
+  IpcChannel.updateProgress,
 ];
 
 export interface SdeImportSummary {
@@ -241,6 +247,18 @@ export interface McoApi {
   };
   location: {
     board: () => Promise<LocationEntry[]>;
+    /**
+     * Every character ranked by distance from one solar system — gate jumps to
+     * get there, light years for a capital to jump to them. Filtering by
+     * capability ("which of my cyno alts?") happens in the renderer, which
+     * already holds the tag lists.
+     *
+     * `includeJumpClones` measures each character's jump clones too, so a
+     * character that can *jump* to the target area outranks one that has to
+     * fly. Opt-in: resolving clone locations to systems costs ESI station
+     * lookups the plain ranking never needs.
+     */
+    nearest: (solarSystemId: number, includeJumpClones?: boolean) => Promise<NearestBoard>;
   };
   structures: {
     /** Import every public structure's name/system via ESI (needs one scoped character). */
@@ -307,6 +325,19 @@ export interface McoApi {
     checkUpdate: (force?: boolean) => Promise<UpdateStatus>;
     /** Hide the update banner for one version; anything newer raises it again. */
     dismissUpdate: (version: string) => Promise<UpdateStatus>;
+    /**
+     * Download the pending update. Resolves as soon as it has *started* — the
+     * rest arrives on `onUpdateProgress`. Only meaningful when the status says
+     * `canInstall`; never rejects, a refusal comes back in `message`.
+     */
+    downloadUpdate: () => Promise<UpdateStatus>;
+    /**
+     * Quit, install what was downloaded, and relaunch. The app goes away, so
+     * this resolves only when it declined to (nothing downloaded yet).
+     */
+    installUpdate: () => Promise<UpdateStatus>;
+    /** Subscribe to download progress and phase changes. Returns an unsubscribe function. */
+    onUpdateProgress: (callback: (status: UpdateStatus) => void) => () => void;
   };
   settings: {
     /** Sync health of everything the app keeps fresh (characters, SDE, structures). */

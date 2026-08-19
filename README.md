@@ -10,7 +10,12 @@ there is no server, no account, and nothing is uploaded anywhere.
 
 - **Windows / macOS / Linux** — Electron; Windows is the primary target.
 - **Free, open source (MIT)**, unofficial and not affiliated with CCP.
-- **Version 0.1.0** — usable day to day, still pre-release. Build it from source (below).
+- **Version 0.2.0** — usable day to day, still pre-release. Install it from
+  [Releases](https://github.com/Anemone221/MCO/releases), or build it from source (below).
+  Installed builds update themselves: MCO says when a release lands, then downloads and
+  installs it when you click. Windows warns about the unknown publisher on that first
+  install (**More info → Run anyway**) — the builds aren't code-signed — but updates after
+  it never ask again.
 
 ---
 
@@ -26,6 +31,7 @@ should take five seconds start taking twenty minutes of alt-tabbing:
 | How many of my characters can fly *this* fit — and what's missing for the rest? | Fits |
 | Who can light a cyno / fly a FAX / run boosts? | Tags |
 | Where is everyone parked, and who's in a bad system? | Location |
+| Which of my cyno alts is closest to *that* system? | Location |
 | Which clone has the +5s, and who's off jump cooldown? | Clones |
 | Do I already own that BPO, and who's holding it? | Blueprints |
 | Whose skill queue runs dry this weekend? | Notifications |
@@ -93,6 +99,18 @@ Where everyone is: system (color-coded high/low/null), region, docked status, sh
 how stale the data is. Docked characters show *where* — NPC stations resolve from public
 ESI, and player-owned citadels resolve through the structure importer, since Upwell
 structure names are only visible to characters on the structure's ACL.
+
+Name a system and the page becomes a ranking instead: every character ordered by how
+far it is from there, in **gate jumps** (how fast it can fly there) or in **light
+years** (whether a capital could jump to where it already sits). Filter by tag first
+and it answers the real question — *which of my cyno alts is closest to this system* —
+with the runners-up underneath, because the nearest one is no use if it shares an
+account with the ship that needs the cyno.
+
+Tick **Jump clones** and the ranking counts each character's jump clones too: a clone
+two jumps out beats flying thirty. Each row shows which clone it would go through and
+how long is left on that character's clone-jump cooldown — a clone jump arrives in a
+pod, so it only helps where a cyno ship is already stationed.
 
 ### Fits — *"how many of my characters can fly this?"*
 Paste an EFT fit (`[Hull, Fit name]` plus module lines; charges, `xN` quantities and

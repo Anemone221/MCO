@@ -31,5 +31,6 @@
     "playwright.packaged.config.ts",
     "vitest.config.ts",
     "tests/**/*"
-  ]
+  ],
+  "exclude": ["tests/unit/renderer/**"]
 }

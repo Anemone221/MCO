@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { latestReleaseApiUrl, parseRelease } from '@main/update/github';
+import { releaseFromUpdateInfo, toTag } from '@main/update/mapUpdateInfo';
 import { compareVersions, isNewerVersion, parseVersion } from '@main/update/version';
 
 describe('parseVersion', () => {
@@ -139,5 +140,54 @@ describe('parseRelease', () => {
     expect(parseRelease({ message: 'Not Found' })).toBeNull();
     expect(parseRelease(null)).toBeNull();
     expect(parseRelease('v0.2.0')).toBeNull();
+  });
+});
+
+describe('toTag', () => {
+  it('spells a version the way a release is tagged', () => {
+    // electron-updater reports the bare version out of latest.yml; the REST
+    // check caches the tag. Both must land in app_settings the same way.
+    expect(toTag('0.2.1')).toBe('v0.2.1');
+    expect(toTag('v0.2.1')).toBe('v0.2.1');
+  });
+});
+
+describe('releaseFromUpdateInfo', () => {
+  const repo = 'https://github.com/Anemone221/MCO';
+
+  it('produces what the REST path would have cached', () => {
+    expect(
+      releaseFromUpdateInfo(
+        { version: '0.2.1', releaseName: 'Auto-update', releaseDate: '2026-08-17T09:00:00Z' },
+        repo,
+      ),
+    ).toEqual({
+      tag: 'v0.2.1',
+      name: 'Auto-update',
+      url: 'https://github.com/Anemone221/MCO/releases/tag/v0.2.1',
+      publishedAt: '2026-08-17T09:00:00Z',
+    });
+  });
+
+  it('tolerates a release with no title or date', () => {
+    // latest.yml carries releaseName only when the release was given one.
+    expect(releaseFromUpdateInfo({ version: '0.2.1' }, repo)).toEqual({
+      tag: 'v0.2.1',
+      name: null,
+      url: 'https://github.com/Anemone221/MCO/releases/tag/v0.2.1',
+      publishedAt: null,
+    });
+    expect(releaseFromUpdateInfo({ version: '0.2.1', releaseName: null }, repo)?.name).toBeNull();
+  });
+
+  it('does not double the slash on a repository URL with a trailing one', () => {
+    expect(releaseFromUpdateInfo({ version: '0.2.1' }, `${repo}/`)?.url).toBe(
+      'https://github.com/Anemone221/MCO/releases/tag/v0.2.1',
+    );
+  });
+
+  it('rejects an update with no version to compare', () => {
+    expect(releaseFromUpdateInfo({ version: '' }, repo)).toBeNull();
+    expect(releaseFromUpdateInfo({} as { version: string }, repo)).toBeNull();
   });
 });

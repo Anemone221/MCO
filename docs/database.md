@@ -68,6 +68,7 @@ The profile's version is shown in Settings → About.
 | 28 | blueprint_corps | `blueprint_corps`, `corporation_blueprints` |
 | 29 | esi_cache_pages | `esi_cache.pages` (drops cached paginated entries) |
 | 30 | character_wallet_journal_parties | `character_wallet_journal.tax/.first_party_id/.second_party_id` |
+| 31 | sde_system_jumps | `sde_system_jumps`, `sde_systems.pos_x/.pos_y/.pos_z` |
 
 ## Schema reference
 
@@ -224,8 +225,15 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 - **`sde_skill_attributes`** — skill → primary/secondary training attribute ids (dogma
   180/181; the values are attribute ids 164–168). Powers the training-time cost metric.
   Non-empty ⇒ `hasSkillAttributes`; empty on upgraded installs until an SDE re-import.
-- **`sde_regions`** / **`sde_systems`** — map data (system name, region, security).
-  Non-empty `sde_systems` ⇒ `hasMapData`.
+- **`sde_regions`** / **`sde_systems`** — map data (system name, region, security,
+  and since v31 the system's position in metres, `pos_x/pos_y/pos_z`, which the
+  light-year distances are measured from). Non-empty `sde_systems` ⇒ `hasMapData`;
+  positions are nullable, so a map imported before v31 reads as unknown rather than
+  as coordinates (0,0,0).
+- **`sde_system_jumps`** — one row per stargate, `from_system_id` → `to_system_id`.
+  The map as a graph: read whole and made undirected in memory (`main/map/routing.ts`)
+  for the breadth-first search behind "who is nearest to this system". Non-empty ⇒
+  `hasJumpData`; empty on upgraded installs until an SDE re-import.
 
 ## Repository layer
 

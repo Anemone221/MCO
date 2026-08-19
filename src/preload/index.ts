@@ -118,6 +118,7 @@ const api: McoApi = {
   },
   location: {
     board: call(IpcChannel.locationBoard),
+    nearest: call(IpcChannel.locationNearest),
   },
   structures: {
     importPublic: call(IpcChannel.structuresImport),
@@ -155,6 +156,9 @@ const api: McoApi = {
     copyText: call(IpcChannel.systemCopyText),
     checkUpdate: call(IpcChannel.systemCheckUpdate),
     dismissUpdate: call(IpcChannel.systemDismissUpdate),
+    downloadUpdate: call(IpcChannel.systemDownloadUpdate),
+    installUpdate: call(IpcChannel.systemInstallUpdate),
+    onUpdateProgress: subscribe(IpcChannel.updateProgress),
   },
   settings: {
     syncStatus: call(IpcChannel.settingsSyncStatus),

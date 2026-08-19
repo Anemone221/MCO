@@ -48,7 +48,7 @@ Going forward this is guarded rather than trusted: A4's `package` job builds fro
 checkout on every push, and the packaged smoke test asserts the unpacked `resources/*.png`
 are present — an uncommitted build input fails CI rather than the next release.
 
-### A3 · Code signing / distribution trust (P1 — decision required)
+### A3 · Code signing / distribution trust (P1) — decided: ship unsigned
 Unsigned builds are functional but hostile to users:
 - **Windows:** SmartScreen shows "Windows protected your PC / unknown publisher." An OV/EV
   code-signing certificate removes it (EV clears reputation immediately).
@@ -56,10 +56,21 @@ Unsigned builds are functional but hostile to users:
   right-click → Open. Real distribution needs an Apple Developer ID + notarization
   (`hardenedRuntime`, `entitlements`, `afterSign` notarize step).
 
-Decide the target audience. If it's "me + a few corpmates," document the right-click-open
-/ SmartScreen "More info → Run anyway" steps in the README and ship unsigned. If it's
-public, budget for certs. Either way, make it an explicit, written decision — don't let
-the first user discover it.
+**The decision (2026-08-17): ship unsigned, and take the auto-updater anyway.** What made
+this a blocker was the assumption that every update would re-run the SmartScreen prompt.
+It doesn't: with `electron-updater` in place (see D · Auto-update below) the warning is
+paid once, on the first manual install, and every update after that is a button inside the
+app. The download is HTTPS from GitHub and SHA-512-verified against `latest.yml`; what an
+unsigned build gives up is the Authenticode check, which electron-updater skips with a log
+line rather than failing. The README says so plainly, with the "More info → Run anyway"
+steps.
+
+Revisit when the audience outgrows "me + a few corpmates". Adding a certificate is config
+plus CI secrets — Azure Trusted Signing (`azureSignOptions`, ~$10/mo, no hardware token)
+or an OV/EV cert via `win.certificateFile` / a `sign` hook — with no application code
+change; set `win.publisherName` at the same time so the signature check verifies instead
+of skipping. macOS is untouched by this: `electron-updater` refuses to update an unsigned
+mac build at all, so a DMG target means notarization is not optional.
 
 ### A4 · CI never packages (P1) — ✅ done
 Was: CI ran `build` but not `electron-builder`, so a broken packaging config (a bad
@@ -304,8 +315,12 @@ empty profile — cheap insurance for the "no data yet" states.
 
 ## D. Product / UX polish (P3)
 
-- **Auto-update**: none today. Fine for v0.1.0; when distribution stabilizes, wire
-  `electron-updater` + a release feed so users aren't manually re-downloading.
+- **Auto-update** — ✅ done. `electron-updater` reads the `latest.yml` the release workflow
+  already publishes. The banner announces a release, **Download** fetches the installer with
+  a progress bar, **Restart to install** applies it; `autoDownload` is off, so nothing moves
+  until the user clicks — a live SQLite profile and a background sweep are not things to
+  swap out unannounced. Windows/NSIS only, and unsigned (see A3). See
+  `docs/development.md` § Updating.
 - **First-run experience**: the app depends on an SDE import and an ESI `client_id`. The
   config banner + SDE banner handle this, but a one-time guided first-run (import SDE →
   add first character) would smooth onboarding.
@@ -321,8 +336,9 @@ empty profile — cheap insurance for the "no data yet" states.
    Windows is verified end-to-end from a clean checkout of `HEAD` (see A2) and re-checked
    by CI on every push. Remaining: run `npm run dist` on macOS and Linux and smoke-test
    those installers — neither has ever been built.
-2. **Trust decision:** ~~A5 (EVE terms)~~ — done. Remaining: A3 — decide signing scope
-   and write it down.
+2. **Trust decision:** ~~A5 (EVE terms)~~, ~~A3 (signing scope)~~ — both decided and
+   written down. Unsigned, with the auto-updater absorbing the cost after the first
+   install.
 3. **Hardening:** ~~B1 (IPC error boundary)~~, ~~B2 (JWT verify)~~, ~~B3 (crash
    diagnostics)~~ — done. Remaining: C1 (DB-backed tests).
 4. **Everything else** as capacity allows.

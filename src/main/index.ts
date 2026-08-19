@@ -16,6 +16,7 @@ import {
   noteWindowClosedIntoTray,
 } from './services/backgroundMode';
 import { runSweepNow, startScheduler, stopScheduler } from './services/scheduler';
+import { initUpdates } from './services/updateService';
 
 // Capture console output from the very start so "Export logs" sees everything.
 initLogCapture();
@@ -157,6 +158,10 @@ if (!app.requestSingleInstanceLock({ background: backgroundMode })) {
     });
     registerIpc(() => mainWindow); // both modes — the promoted window needs IPC
     startScheduler(() => mainWindow);
+    // Configures the updater and subscribes to it; it does not check. Detection
+    // stays renderer-driven (the banner mounting, Settings → "Check for
+    // updates"), so a tray-only launch with no window never prompts.
+    initUpdates(() => mainWindow);
     // A background launch with no tray icon (desktops without a notification
     // area) would be unreachable, so fall back to a normal window.
     if (!backgroundMode || !background.trayActive) createWindow();

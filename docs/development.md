@@ -44,7 +44,14 @@ Three layers, deliberately:
   why parsers, analysis math, filtering/sorting, scope classification, and queue-drain
   detection live in dependency-free modules. Current suites: `eft`, `fitAnalyze`,
   `skillPlanParse`, `planAnalyze`, `sdeParse`, `rateLimiter`, `pkce`, `scopeStatus`,
-  `queueDrain`, `launchMode`, `format`, `rosterView`, `groups`, `tags`, `updateCheck`.
+  `queueDrain`, `launchMode`, `format`, `rosterView`, `groups`, `tags`, `updateCheck`,
+  `routing`, `nearestView`.
+  - `tests/unit/renderer/` is the one exception: tests whose subject touches **DOM
+    globals** (`window`, and the `lib/ipc.ts` demo wrapper hanging off it). Everything
+    under `tests/` is type-checked by `tsconfig.node.json`, which has no DOM lib, so
+    that directory is excluded there and included by `tsconfig.web.json` instead.
+    vitest runs both the same way. Put a test here only when it needs the DOM types —
+    pure logic stays in `tests/unit/`.
 - **E2E (Playwright, `tests/e2e/app.spec.ts`)** — launches the **built** app
   (`out/main/index.js`) via Playwright's `_electron` against a throwaway temp
   `userData` dir per test, so tests are hermetic and don't touch your real profile.
@@ -103,21 +110,45 @@ Both feed the in-app update check: `APP_VERSION` is read from `package.json`
 latest release. A tag that disagreed with the shipped version would notify the wrong
 people, or nobody.
 
-Draft and prerelease releases are invisible to the check, which reads GitHub's
-`/releases/latest` — so a build can be uploaded and tested before anyone is told about
-it, and tagging a beta never prompts a reinstall.
+Draft and prerelease releases are invisible to both the check and the updater — so a build
+can be uploaded and tested before anyone is told about it, and tagging a beta never prompts
+a reinstall. **A draft release updates nobody**: publishing it is the step that ships.
 
-### Update checking (`src/main/services/updateService.ts`)
+### Updating (`services/updateService.ts`, `services/autoUpdate.ts`)
 
-MCO only *notices* a new release and links to it; nothing is downloaded or installed
-in-place. (That is `electron-updater`'s job, and worth adding only alongside a signed
-installer — an unsigned auto-update triggers a SmartScreen warning on every install.)
+`updateService.ts` owns the *answer* — the `app_settings` cache, the daily interval, the
+dismissal, and the `UpdateStatus` the renderer reads. `autoUpdate.ts` owns the
+*mechanism*: it wraps `electron-updater` and does the checking, downloading and
+installing. The dependency runs one way (service → updater) and a change callback carries
+progress back, so the updater never needs to know what an `UpdateStatus` is.
 
-The result is cached in `app_settings` and refreshed at most daily, because the check is
-unauthenticated and GitHub allows 60 API requests an hour per IP. Only packaged builds
-check on their own — see `MCO_UPDATE_CHECK` above — while Settings → "Check for updates"
-always asks now. A failed check keeps the last known answer and explains itself; it never
-blocks a page load.
+Nothing happens unasked. `autoDownload` is off, so a check only raises the banner;
+**Download** fetches the installer, **Restart to install** applies it. That is deliberate
+for a tool holding an open SQLite profile and a background sync sweep — the user picks the
+moment. `autoInstallOnAppQuit` is left on, so an update someone downloaded and then
+ignored still lands the next time MCO quits.
+
+Two check paths, one shape. A packaged build asks the updater, so what it learns about is
+by definition something it can install; anything else falls back to GitHub's
+`/releases/latest` REST API (`update/github.ts`), which is what `MCO_UPDATE_CHECK=1`
+exercises in dev. `update/mapUpdateInfo.ts` normalizes the updater's bare `0.2.1` to the
+`v0.2.1` the REST path caches, so `app_settings` never records which one ran. The REST
+path is cached and refreshed at most daily because it is unauthenticated and GitHub allows
+60 API requests an hour per IP. Only packaged builds check on their own — see
+`MCO_UPDATE_CHECK` above — while Settings → "Check for updates" always asks now. A failed
+check keeps the last known answer and explains itself; it never blocks a page load.
+
+Detection is renderer-driven (the banner mounting, the Settings button): `initUpdates` at
+startup configures and subscribes but does not check. A tray-only `--background` launch
+therefore never prompts, which is what it did before too.
+
+**Updates are unsigned.** The download still comes over HTTPS from GitHub and is verified
+against the SHA-512 in `latest.yml`; what is missing is the Windows Authenticode check,
+which electron-updater skips — with a log line saying so — on an unsigned app. The
+SmartScreen warning is therefore paid once, on the first manual install, and never again.
+Adding a certificate later is config plus CI secrets (`azureSignOptions`, or
+`win.certificateFile` / a `sign` hook) and no application code; set `win.publisherName` at
+the same time so the signature check verifies instead of skipping.
 
 ## Packaging (`electron-builder.yml`)
 

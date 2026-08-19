@@ -14,6 +14,7 @@ import type {
   GroupDetail,
   JumpCloneEntry,
   LocationEntry,
+  NearestBoard,
   PlanAnalysis,
   RosterEntry,
   StructureSearchResult,
@@ -332,7 +333,12 @@ export function demoGroupDetail(detail: GroupDetail): GroupDetail {
   };
 }
 
-export function demoLocationEntry(entry: LocationEntry): LocationEntry {
+/**
+ * Generic over the entry type so the proximity ranking — a location entry plus
+ * its distances — scrubs through the same function rather than a near-copy
+ * that could drift from it.
+ */
+export function demoLocationEntry<T extends LocationEntry>(entry: T): T {
   return {
     ...entry,
     characterName: demoCharacterName(entry.characterId, entry.characterName),
@@ -341,6 +347,25 @@ export function demoLocationEntry(entry: LocationEntry): LocationEntry {
     regionName: demoRegionName(entry.regionName),
     dockedName: demoLocationName(entry.dockedName),
     shipName: entry.shipName === null ? null : demoShipName(entry.characterId, entry.shipTypeName),
+  };
+}
+
+export function demoNearestBoard(board: NearestBoard): NearestBoard {
+  return {
+    ...board,
+    target: demoSystemResult(board.target),
+    entries: board.entries.map((entry) => ({
+      ...demoLocationEntry(entry),
+      // A clone's own name is player-written and its station names a place as
+      // surely as a docked location does, so both go through the same scrub.
+      clones: entry.clones.map((clone) => ({
+        ...clone,
+        name: clone.name === null ? null : (demoLocationName(clone.name) ?? clone.name),
+        locationName: demoLocationName(clone.locationName),
+        systemName: demoSystemName(clone.systemName),
+        regionName: demoRegionName(clone.regionName),
+      })),
+    })),
   };
 }
 

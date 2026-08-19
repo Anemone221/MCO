@@ -54,15 +54,24 @@ export interface ParsedSystem {
   name: string;
   regionId: number;
   security: number;
+  /**
+   * Position in the New Eden map, in metres; null for a system the SDE gives
+   * no coordinates for. Only light-year distances need it — the unit every
+   * capital jump range is quoted in.
+   */
+  x: number | null;
+  y: number | null;
+  z: number | null;
 }
 
 interface SolarSystemEntry {
   name?: { en?: string };
   regionID?: number;
   securityStatus?: number;
+  position?: { x?: number; y?: number; z?: number };
 }
 
-/** Parse mapSolarSystems.yaml into system id, name, region and security status. */
+/** Parse mapSolarSystems.yaml into system id, name, region, security and position. */
 export function parseSolarSystems(text: string): ParsedSystem[] {
   const parsed = YAML.parse(text) as Record<string, SolarSystemEntry>;
   return Object.entries(parsed).map(([key, value]) => ({
@@ -70,7 +79,39 @@ export function parseSolarSystems(text: string): ParsedSystem[] {
     name: value.name?.en ?? `System ${key}`,
     regionId: value.regionID ?? 0,
     security: value.securityStatus ?? 0,
+    x: value.position?.x ?? null,
+    y: value.position?.y ?? null,
+    z: value.position?.z ?? null,
   }));
+}
+
+export interface ParsedStargate {
+  fromSystemId: number;
+  toSystemId: number;
+}
+
+interface StargateEntry {
+  solarSystemID?: number;
+  destination?: { solarSystemID?: number };
+}
+
+/**
+ * Parse mapStargates.yaml into the system-to-system links the gate graph is
+ * built from — one row per gate, from the system it sits in to the system it
+ * leads to. Gates that name neither end (or both ends the same) are dropped;
+ * everything else about a gate (its own id, type, position) is what a route
+ * never needs to know.
+ */
+export function parseStargates(text: string): ParsedStargate[] {
+  const parsed = YAML.parse(text) as Record<string, StargateEntry>;
+  const jumps: ParsedStargate[] = [];
+  for (const gate of Object.values(parsed)) {
+    const from = gate.solarSystemID;
+    const to = gate.destination?.solarSystemID;
+    if (from === undefined || to === undefined || from === to) continue;
+    jumps.push({ fromSystemId: from, toSystemId: to });
+  }
+  return jumps;
 }
 
 /**

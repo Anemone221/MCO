@@ -11,6 +11,7 @@ import {
   demoGroup,
   demoGroupDetail,
   demoLocationEntry,
+  demoNearestBoard,
   demoNotification,
   demoPlanAnalysis,
   demoRosterEntry,
@@ -78,6 +79,11 @@ export const mco: McoApi = {
   },
   location: {
     board: () => scrubbed(real.location.board(), (b) => b.map(demoLocationEntry)),
+    // Every parameter has to be named and forwarded: a wrapper that declares
+    // fewer still satisfies `McoApi` (TypeScript allows it), so a dropped
+    // argument compiles cleanly and silently disables whatever it controls.
+    nearest: (solarSystemId, includeJumpClones) =>
+      scrubbed(real.location.nearest(solarSystemId, includeJumpClones), demoNearestBoard),
   },
   structures: {
     ...real.structures,

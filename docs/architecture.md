@@ -14,7 +14,7 @@ MCO is an Electron app with the standard three-process split, built by
 │  fits/ plans/    pure parsers + analysis math (no I/O)           │
 │  notifications/  pure queue-drain detection                      │
 │  sync/           pure character sync-state classification        │
-│  update/         pure semver compare + GitHub release parsing    │
+│  update/         pure semver compare + release parsing/mapping   │
 │  wallet/         pure current-month income windowing             │
 │  db/             better-sqlite3 handle, migrations, repositories │
 │  log.ts          console capture for the Settings log export     │
@@ -207,8 +207,13 @@ would invalidate the token family and de-auth the character. A second normal lau
 a no-op. Closing a promoted window in background mode drops back to tray-only sync.
 
 Startup order: open DB (runs migrations) → `initBackgroundMode` (reads the preference, so
-it must follow the DB open) → `registerIpc` → `startScheduler` → window or tray. On quit:
-destroy tray, stop scheduler, close DB.
+it must follow the DB open) → `registerIpc` → `startScheduler` → `initUpdates` → window or
+tray. On quit: destroy tray, stop scheduler, close DB.
+
+`initUpdates` (`services/updateService.ts`) configures `electron-updater` and subscribes
+to it; it does not check. Detection stays renderer-driven — the banner mounting, Settings
+→ "Check for updates" — so a tray-only launch with no window never prompts. See
+`docs/development.md` § Updating.
 
 `app.setAppUserModelId('com.anemone221.mco')` is required for Windows toast notifications
 under the NSIS build target (which, unlike Squirrel, does not auto-register the AUMID).
