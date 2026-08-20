@@ -96,6 +96,8 @@ const api: McoApi = {
   sde: {
     status: call(IpcChannel.sdeStatus),
     import: call(IpcChannel.sdeImport),
+    checkUpdate: call(IpcChannel.sdeCheckUpdate),
+    dismissUpdate: call(IpcChannel.sdeDismissUpdate),
     onProgress: subscribe<SdeProgress>(IpcChannel.sdeProgress),
   },
   fits: {
@@ -109,6 +111,7 @@ const api: McoApi = {
     import: call(IpcChannel.plansImport),
     update: call(IpcChannel.plansUpdate),
     remove: call(IpcChannel.plansRemove),
+    setSheetVisibility: call(IpcChannel.plansSetSheetVisibility),
     analyze: call(IpcChannel.plansAnalyze),
     skillCatalog: call(IpcChannel.plansSkillCatalog),
     shipCatalog: call(IpcChannel.plansShipCatalog),
@@ -158,6 +161,7 @@ const api: McoApi = {
     dismissUpdate: call(IpcChannel.systemDismissUpdate),
     downloadUpdate: call(IpcChannel.systemDownloadUpdate),
     installUpdate: call(IpcChannel.systemInstallUpdate),
+    setAutoCheckUpdate: call(IpcChannel.systemSetAutoCheckUpdate),
     onUpdateProgress: subscribe(IpcChannel.updateProgress),
   },
   settings: {

@@ -1,6 +1,6 @@
 import { app, type BrowserWindow } from 'electron';
 import { IpcChannel } from '@shared/ipc';
-import type { UpdateState, UpdateStatus } from '@shared/types';
+import type { UpdateAutoCheck, UpdateState, UpdateStatus } from '@shared/types';
 import { createSingleFlight } from '../auth/singleFlight';
 import { APP_VERSION, GITHUB_RELEASES_URL, GITHUB_URL, USER_AGENT } from '../config';
 import { getSetting, setSetting } from '../db/repositories/appSettings';
@@ -13,6 +13,7 @@ import {
   installNow,
   isUpdaterAvailable,
   runCheck,
+  setAutoInstallOnQuit,
   startDownload,
 } from './autoUpdate';
 
@@ -21,11 +22,11 @@ import {
  * how far installing it has got.
  *
  * This module owns the answer — the `app_settings` cache, the daily interval,
- * the dismissal, and the `UpdateStatus` shape. It does not own the mechanism:
- * `autoUpdate.ts` does the checking, downloading and installing in a packaged
- * build, and the GitHub REST call below answers everywhere else (a build run
- * from source is updated with `git pull`, not by reinstalling, but it should
- * still be able to say a release happened).
+ * the dismissal, whether MCO checks at all, and the `UpdateStatus` shape. It
+ * does not own the mechanism: `autoUpdate.ts` does the checking, downloading
+ * and installing in a packaged build, and the GitHub REST call below answers
+ * everywhere else (a build run from source is updated with `git pull`, not by
+ * reinstalling, but it should still be able to say a release happened).
  *
  * The REST check is unauthenticated, and GitHub allows 60 API requests an hour
  * per IP shared across every unauthenticated caller on it — so the answer is
@@ -33,13 +34,16 @@ import {
  * "Check now" bypasses the interval for a user who wants an answer immediately.
  *
  * Nothing downloads on its own: a check only raises the banner, and bytes move
- * when the user clicks it.
+ * when the user clicks it. Whether the check itself runs unasked is the user's
+ * call — see `getAutoCheck`, which is `unset` on a new profile and is answered
+ * once, from the banner, before any release traffic happens.
  */
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 10_000;
 
 const KEY_LAST_CHECK = 'update.lastCheck';
 const KEY_DISMISSED = 'update.dismissedVersion';
+const KEY_AUTO_CHECK = 'update.autoCheck';
 
 /** The last *successful* check. A failure never overwrites one. */
 interface CachedCheck {
@@ -108,6 +112,7 @@ function toStatus(cache: CachedCheck | null, failure: string | null): UpdateStat
     dismissed: latestVersion !== null && getSetting(KEY_DISMISSED) === latestVersion,
     downloadPercent: engine.phase === 'downloading' ? engine.percent : null,
     canInstall: isUpdaterAvailable(),
+    autoCheck: getAutoCheck(),
   };
 }
 
@@ -132,10 +137,19 @@ function pushStatus(): void {
 export function initUpdates(window: () => BrowserWindow | null): void {
   getWindow = window;
   initAutoUpdate(pushStatus);
+
+  // A profile that has already checked has been updating automatically since
+  // before there was a switch, so it is not a first launch and gets no prompt:
+  // record the consent it has been running on rather than interrupt to ask for
+  // it. A fresh profile has no cache and stays `unset` until the banner asks.
+  if (getSetting(KEY_AUTO_CHECK) === null && readCache() !== null) {
+    setSetting(KEY_AUTO_CHECK, '1');
+  }
+  setAutoInstallOnQuit(getAutoCheck() !== 'off');
 }
 
 /**
- * Whether MCO checks on its own.
+ * Whether this *build* would ever check on its own.
  *
  * A build running from source is updated with `git pull`, not by reinstalling,
  * so the automatic check is packaged-only — which also keeps `npm run dev` and
@@ -143,11 +157,56 @@ export function initUpdates(window: () => BrowserWindow | null): void {
  * rate limit. `MCO_UPDATE_CHECK=1` opts a development build in, `=0` opts a
  * packaged one out (what the packaged smoke test sets).
  *
- * "Check for updates" in Settings is an explicit request and runs regardless.
+ * This is the build's capability, not the user's answer — `getAutoCheck()`
+ * folds the two together, and false here settles it whatever the profile
+ * stored, so `MCO_UPDATE_CHECK=0` means no unasked release traffic on any
+ * profile. It does not gag the app: a forced check still answers, here as
+ * everywhere.
  */
-function autoCheckEnabled(): boolean {
+function buildChecksForUpdates(): boolean {
   const override = process.env['MCO_UPDATE_CHECK'];
   return override === undefined ? app.isPackaged : override === '1';
+}
+
+/**
+ * Whether MCO checks on its own: the build's capability and the user's answer.
+ *
+ * `unset` — never asked — deliberately does *not* check. A first launch reaches
+ * the network for character and static data because the user asked for those;
+ * looking for a new MCO is the app's own errand, so it waits for a yes. The
+ * banner raises that question once and stores the answer either way.
+ *
+ * "Check for updates" in Settings is an explicit request and runs regardless.
+ */
+export function getAutoCheck(): UpdateAutoCheck {
+  if (!buildChecksForUpdates()) return 'unavailable';
+  const stored = getSetting(KEY_AUTO_CHECK);
+  if (stored === null) return 'unset';
+  return stored === '1' ? 'on' : 'off';
+}
+
+/** Why a non-forced check declined to run. Null for `unset`: the prompt says it. */
+function autoCheckMessage(auto: UpdateAutoCheck): string | null {
+  if (auto === 'unavailable') return 'Automatic update checks are off in this build.';
+  if (auto === 'off') return 'Automatic update checks are off.';
+  return null;
+}
+
+/**
+ * Record the answer, and act on it.
+ *
+ * Turning it on checks immediately — the question was asked because there might
+ * be something to say, and a yes that left the banner blank until tomorrow
+ * would read as a broken button. Turning it off also stands down the
+ * install-on-quit, so "off" means MCO does nothing about updates unasked.
+ *
+ * Off is not silence about updates: Settings → "Check for updates" still asks
+ * GitHub, and answers.
+ */
+export async function setAutoCheckUpdate(enabled: boolean): Promise<UpdateStatus> {
+  setSetting(KEY_AUTO_CHECK, enabled ? '1' : '0');
+  setAutoInstallOnQuit(enabled);
+  return enabled ? checkForUpdate() : toStatus(readCache(), autoCheckMessage(getAutoCheck()));
 }
 
 /**
@@ -212,9 +271,8 @@ async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
  * load over.
  */
 export async function checkForUpdate(force = false): Promise<UpdateStatus> {
-  if (!force && !autoCheckEnabled()) {
-    return toStatus(readCache(), 'Automatic update checks are off in this build.');
-  }
+  const auto = getAutoCheck();
+  if (!force && auto !== 'on') return toStatus(readCache(), autoCheckMessage(auto));
 
   const cache = readCache();
   const age = cache === null ? Number.NaN : Date.now() - Date.parse(cache.checkedAt);

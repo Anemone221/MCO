@@ -10,7 +10,7 @@ export default function Plans() {
   const [busy, setBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
-  const { data, error, reload, setError } = useMcoData(() => mco.plans.list());
+  const { data, error, reload, setData, setError } = useMcoData(() => mco.plans.list());
   const plans = data ?? [];
 
   async function importPlan(): Promise<void> {
@@ -28,6 +28,27 @@ export default function Plans() {
       setError(errorMessage(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Patched in place rather than re-listed: the flag is the only thing that
+  // changed, and a full reload would flicker the table under the cursor. The
+  // patch lands before the round-trip so the checkbox tracks the click instead
+  // of snapping back to its old state until the write returns; a failed write
+  // puts it back.
+  async function setSheetVisibility(id: number, show: boolean): Promise<void> {
+    setError(null);
+    const patch = (value: boolean): void =>
+      setData(
+        (prev) => prev?.map((p) => (p.id === id ? { ...p, showOnCharacterSheet: value } : p)) ?? prev,
+      );
+    patch(show);
+    try {
+      const updated = await mco.plans.setSheetVisibility(id, show);
+      setData((prev) => prev?.map((p) => (p.id === id ? updated : p)) ?? prev);
+    } catch (e) {
+      patch(!show);
+      setError(errorMessage(e));
     }
   }
 
@@ -119,6 +140,9 @@ export default function Plans() {
             <tr>
               <th>Plan</th>
               <th>Imported</th>
+              <th title="Show this plan's progress bar on every character sheet">
+                On character sheets
+              </th>
               <th aria-label="actions" />
             </tr>
           </thead>
@@ -129,6 +153,17 @@ export default function Plans() {
                   <Link to={`/plans/${plan.id}`}>{plan.name}</Link>
                 </td>
                 <td className="muted">{formatDate(plan.importedAt)}</td>
+                <td>
+                  <label className="sheet-toggle">
+                    <input
+                      type="checkbox"
+                      checked={plan.showOnCharacterSheet}
+                      onChange={(e) => void setSheetVisibility(plan.id, e.target.checked)}
+                      data-testid={`plan-sheet-toggle-${plan.id}`}
+                    />{' '}
+                    {plan.showOnCharacterSheet ? 'Shown' : 'Hidden'}
+                  </label>
+                </td>
                 <td className="row-actions">
                   <Link
                     to={`/plans/${plan.id}/edit`}

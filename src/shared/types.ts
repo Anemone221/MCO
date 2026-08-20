@@ -229,6 +229,30 @@ export interface SdeStatus {
   hasJumpData: boolean;
 }
 
+/**
+ * Whether CCP has published a newer static data build than the one imported.
+ *
+ * Separate from `SdeStatus` because that one is a pure database read every page
+ * makes, while this one may go out to CCP's catalogue — see
+ * `main/services/sdeUpdateService.ts`.
+ */
+export interface SdeUpdateStatus {
+  /** Build stamped into the database; null when nothing is imported yet. */
+  installedBuild: string | null;
+  /** Newest build CCP publishes; null when no check has ever succeeded. */
+  latestBuild: string | null;
+  /** ISO timestamp CCP released `latestBuild`, when the catalogue said. */
+  releasedAt: string | null;
+  /** ISO timestamp of the last successful check; null when none has run. */
+  checkedAt: string | null;
+  /** True only when a newer build than the imported one is published. */
+  updateAvailable: boolean;
+  /** True when the user hid this exact build. */
+  dismissed: boolean;
+  /** Why the answer did not move, or why there is nothing to compare. */
+  message: string | null;
+}
+
 export interface SdeProgress {
   stage:
     | 'downloading'
@@ -427,6 +451,8 @@ export interface SkillPlan {
   name: string;
   planText: string;
   importedAt: string;
+  /** Whether this plan's progress bar appears on every character sheet. */
+  showOnCharacterSheet: boolean;
 }
 
 export interface PlanSkillResolved {
@@ -927,6 +953,17 @@ export interface AppInfo {
  */
 export type UpdateState = 'current' | 'update-available' | 'downloading' | 'ready' | 'unknown';
 
+/**
+ * Whether MCO looks for new releases on its own.
+ *
+ * `unset` is a profile that has never been asked — the state the first-launch
+ * prompt exists to resolve, and one in which no release check has gone to the
+ * network yet. `unavailable` is a build that would not check either way (one
+ * run from source, or `MCO_UPDATE_CHECK=0`), where the preference is moot: no
+ * prompt, no toggle, and nothing for either to change.
+ */
+export type UpdateAutoCheck = 'on' | 'off' | 'unset' | 'unavailable';
+
 export interface UpdateStatus {
   state: UpdateState;
   /** The running build. */
@@ -956,6 +993,12 @@ export interface UpdateStatus {
    * Squirrel.Mac), links to the release page instead.
    */
   canInstall: boolean;
+  /**
+   * Whether MCO checks for releases on its own — and, when `unset`, that this
+   * profile has yet to say. Nothing else about the status depends on it: a
+   * check the user asked for explicitly runs in every value, including `off`.
+   */
+  autoCheck: UpdateAutoCheck;
 }
 
 /** Tranquility server status, from ESI's public /status/ endpoint. */

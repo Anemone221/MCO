@@ -5,9 +5,11 @@ The SDE is CCP's dump of EVE's static game data. MCO needs it to turn ids into n
 without it, fit testing and plan analysis cannot run.
 
 - Docs: https://developers.eveonline.com/docs/services/static-data/
-- Download: pinned build in `SDE_URL` (`src/main/config.ts`), currently
-  `eve-online-static-data-3351823-yaml.zip`. Bump the constant (or set `MCO_SDE_URL`)
-  to move to a newer release.
+- Download: the build is **discovered at run time**, not compiled in. MCO reads CCP's
+  catalogue (`SDE_LATEST_URL` → `latest.jsonl`) and imports whatever build it names; see
+  "Staying current" below. `SDE_PINNED_BUILD` in `src/main/config.ts` is only the floor
+  used when the catalogue can't be read, and `MCO_SDE_URL` overrides both with an exact
+  zip URL.
 
 The SDE is **not bundled** with the app. On first run the renderer shows an import
 banner (`SdeBanner`); the user clicks import, and the zip (~100+ MB) is downloaded once
@@ -76,8 +78,45 @@ Name resolution helpers used everywhere: `getTypeNames(ids)`, `getSystems(ids)`,
 `resolveTypeIdsByName(names)` (case-insensitive — how pasted EFT/plan text finds type
 ids), `getCategoryForTypes(ids)` (e.g. drone vs. cargo classification in fit analysis).
 
-## Upgrading the SDE
+## Staying current
 
-1. Find the new build number on developers.eveonline.com.
-2. Update `SDE_URL` in `src/main/config.ts` (or set `MCO_SDE_URL` to test first).
-3. Run the import from the app — replace-based import means no migration is needed.
+EVE patches in ships, skills and blueprints between MCO releases, and CCP publishes a new
+SDE build for each. Because every table is replaced on import, following the game is a
+re-import — so the build number must not be something only a new MCO can change.
+
+```
+latest.jsonl  {"_key": "sde", "buildNumber": 3473160, "releaseDate": "…"}
+  └─ checkSdeUpdate  (services/sdeUpdateService.ts)   → SdeUpdateStatus
+       ├─ cached in app_settings (`sde.lastCheck`), refreshed at most daily
+       ├─ compared against sde_version by `isNewerBuild` (sde/latest.ts)
+       └─ raises the SdeBanner: "build N is available — re-import"
+```
+
+- **Parsing is defensive.** The catalogue is JSON *lines* and may list datasets that are
+  not the SDE, so the entry is picked by `_key`, not by position; an unreadable line is
+  skipped, and a body naming no build is a *failed check*, never an answer. `latest.jsonl`
+  reporting nothing would otherwise read as "you are up to date".
+- **The check never throws.** A failure keeps the last known answer on screen with a
+  sentence saying why it didn't move — the same contract as `updateService.ts`, whose
+  shape this deliberately mirrors (daily cache, per-build dismissal, `force` to ask now).
+- **Nothing downloads on its own.** A check only raises the banner; the ~100 MB zip moves
+  when the user clicks. Dismissing hides one build, so the next one prompts again.
+- **The import resolves the build fresh** (`resolveSdeDownload`), not off the daily cache:
+  someone clicking import is asking for current data, and 80 bytes of catalogue against a
+  100 MB download is free. A check that fails there falls back to `SDE_PINNED_BUILD` —
+  old data resolves almost every id, no data resolves none.
+- Surfaced in two places: the banner on every page (`SdeBanner`), and Settings → sync
+  status → **Check for new static data**, which ignores the daily interval.
+
+Checks run everywhere by default, unlike the app-update check: static data goes stale with
+*the game*, not with the build, so a dev run needs the answer too. `MCO_SDE_CHECK=0` opts
+out (what the E2E suites set to stay off the network).
+
+Only a **format** change — CCP moving a file or renaming a field — now needs a new MCO.
+
+### Importing a specific build
+
+1. Set `MCO_SDE_URL` to that build's zip URL (`sdeZipUrl` in `src/main/config.ts` spells
+   the pattern). While it is set the update check stands down rather than offer a build
+   the import won't fetch.
+2. Run the import from the app — replace-based import means no migration is needed.

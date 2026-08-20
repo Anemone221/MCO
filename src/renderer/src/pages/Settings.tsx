@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { BackgroundModeSettings, CharacterSyncState, UpdateStatus } from '@shared/types';
+import type {
+  BackgroundModeSettings,
+  CharacterSyncState,
+  SdeUpdateStatus,
+  UpdateStatus,
+} from '@shared/types';
 import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import { isDemoMode, setDemoMode } from '../lib/demo';
@@ -115,6 +120,37 @@ function UpdateSummary({ status }: { status: UpdateStatus }) {
   );
 }
 
+/**
+ * One line on the static data: which build is imported, and whether CCP has
+ * published a newer one.
+ *
+ * Worth a line of its own because nothing else in MCO would ever mention it —
+ * an SDE from before the last expansion resolves every id it knows and simply
+ * omits what the patch added, which looks like working software.
+ */
+function SdeUpdateSummary({ status }: { status: SdeUpdateStatus }) {
+  if (status.message !== null) return <span className="muted">{status.message}</span>;
+
+  if (status.updateAvailable) {
+    return (
+      <span className="muted">
+        Build {status.latestBuild} is available
+        {status.releasedAt !== null && ` · released ${formatDate(status.releasedAt)}`} — import it
+        from the banner at the top of any page.
+      </span>
+    );
+  }
+
+  if (status.latestBuild === null) return <span className="muted">Not checked yet.</span>;
+
+  return (
+    <span className="muted">
+      Build {status.latestBuild} is the current one
+      {status.checkedAt !== null && ` · checked ${formatDate(status.checkedAt)}`}
+    </span>
+  );
+}
+
 export default function Settings() {
   const [syncing, setSyncing] = useState(false);
   const [syncCollapsed, setSyncCollapsed] = useState(loadSyncCollapsed);
@@ -123,6 +159,7 @@ export default function Settings() {
   const [logStatus, setLogStatus] = useState<string | null>(null);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [checkingSde, setCheckingSde] = useState(false);
 
   const { data, error, loading, reload, setData, setError } = useMcoData(
     async () => {
@@ -144,11 +181,46 @@ export default function Settings() {
     mco.system.checkUpdate(),
   );
 
+  // Same reason as the release check: reading CCP's build catalogue is a
+  // network call, and the sync table must not wait behind it.
+  const { data: sdeUpdate, setData: setSdeUpdate } = useMcoData<SdeUpdateStatus>(() =>
+    mco.sde.checkUpdate(),
+  );
+
+  /** "Check now" — ignores the daily interval and asks CCP's catalogue. */
+  async function checkForSdeUpdate(): Promise<void> {
+    setCheckingSde(true);
+    try {
+      setSdeUpdate(await mco.sde.checkUpdate(true));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setCheckingSde(false);
+    }
+  }
+
   /** "Check for updates" — ignores the daily interval and asks GitHub now. */
   async function checkForUpdate(): Promise<void> {
     setCheckingUpdate(true);
     try {
       setUpdate(await mco.system.checkUpdate(true));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
+  /**
+   * The same switch the first-launch prompt sets. Turning it on checks straight
+   * away, so the summary beside it answers rather than staying on "Not checked
+   * yet" until tomorrow.
+   */
+  async function toggleAutoCheck(): Promise<void> {
+    if (!update) return;
+    setCheckingUpdate(true);
+    try {
+      setUpdate(await mco.system.setAutoCheckUpdate(update.autoCheck !== 'on'));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -332,6 +404,19 @@ export default function Settings() {
                   ? 'none imported'
                   : `${status.structures.resolved} of ${status.structures.total} named`}
               </div>
+            </div>
+
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => void checkForSdeUpdate()}
+                disabled={checkingSde}
+                data-testid="settings-check-sde"
+              >
+                {checkingSde ? 'Checking…' : 'Check for new static data'}
+              </button>
+              {sdeUpdate && <SdeUpdateSummary status={sdeUpdate} />}
             </div>
 
             {characters.length === 0 ? (
@@ -533,6 +618,21 @@ export default function Settings() {
           </button>
           {update && <UpdateSummary status={update} />}
         </div>
+        {/* Hidden where the build never checks on its own (one run from source,
+            or MCO_UPDATE_CHECK=0): the summary above already says so, and a
+            checkbox that changed nothing would contradict it. */}
+        {update && update.autoCheck !== 'unavailable' && (
+          <label className="muted">
+            <input
+              type="checkbox"
+              checked={update.autoCheck === 'on'}
+              disabled={checkingUpdate}
+              onChange={() => void toggleAutoCheck()}
+              data-testid="auto-update-toggle"
+            />{' '}
+            Check for new releases automatically, and say so in a banner
+          </label>
+        )}
         <div className="settings-actions">
           <a
             className="settings-link"

@@ -297,7 +297,12 @@ function SkillPlansCard({ detail }: { detail: Detail }) {
             Roster page) to enable plan analysis.
           </p>
         ) : detail.plans.length === 0 ? (
-          <p className="muted">No skill plans imported.</p>
+          // Covers both "none imported" and "every plan opted out of the sheet",
+          // so it points at the page where either is fixed.
+          <p className="muted">
+            No skill plans to show. Import one, or turn a plan on for character sheets, on the{' '}
+            <Link to="/plans">Skill Plans</Link> page.
+          </p>
         ) : (
           detail.plans.map((plan) => <PlanProgressRow key={plan.planId} plan={plan} />)
         )}

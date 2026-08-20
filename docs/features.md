@@ -397,6 +397,14 @@ Same engine, aimed at goals instead of ships.
 - Per-character plan progress on the character sheet is computed by also analyzing a
   synthetic zero-skill character: its gap is the plan's total from-zero SP cost, and
   `1 - myGap/totalCost` is the progress fraction — same math both sides, no drift.
+- **Which plans reach the character sheets is per plan.** Each plan carries an *On
+  character sheets* toggle (the Plans table column, and the plan detail toolbar); with
+  it off the plan is skipped before analysis, so it costs neither a row nor a
+  prerequisite expansion on any sheet. A roster this size collects plans that only ever
+  concern a few characters — one supercapital path, a retired doctrine — and a sheet
+  listing all of them buries the ones being trained. The plan is untouched otherwise:
+  its detail page still analyses the whole roster, and a group priority still points at
+  it. New plans default to shown.
 - Result buckets support the same right-click tag/group assignment as fits, and the
   "Plan complete" section carries the same **+ Assign tag** bulk control (`BulkTagBar`).
 
@@ -644,7 +652,10 @@ bell). Seven sections:
   opens the profile directory.
 - **About**: version/runtime facts plus GitHub repository and issue-tracker links
   (opened externally via the window-open handler), and the update check —
-  "Check for updates" plus a line on what the last check found.
+  "Check for updates" plus a line on what the last check found, and the switch for
+  whether MCO checks on its own. Turning that off silences the update banner; the
+  button here still works. It is the same switch the banner asks a new profile for on
+  first launch, and it is hidden in a build that never checks anyway.
 
 ## The skill-analysis engine (`fits/analyze.ts`)
 

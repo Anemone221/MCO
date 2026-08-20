@@ -7,6 +7,7 @@ import {
   dismissUpdate,
   downloadUpdate,
   installUpdate,
+  setAutoCheckUpdate,
 } from '../../services/updateService';
 import { handle } from '../handle';
 
@@ -28,6 +29,11 @@ export function registerSystemChannels(getWindow: () => BrowserWindow | null): v
   // rides back in the same shape as a success.
   handle(IpcChannel.systemDownloadUpdate, () => downloadUpdate());
   handle(IpcChannel.systemInstallUpdate, () => installUpdate());
+  // Answers with the resulting status too: enabling runs a check, and the
+  // banner that asked has that answer to draw the moment the click returns.
+  handle(IpcChannel.systemSetAutoCheckUpdate, (_event, enabled: boolean) =>
+    setAutoCheckUpdate(enabled),
+  );
   handle(
     IpcChannel.systemConfirm,
     async (_event, message: string, confirmLabel: string | null) => {

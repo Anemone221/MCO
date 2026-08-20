@@ -28,8 +28,9 @@
 | Variable | Effect |
 | --- | --- |
 | `MCO_ESI_CLIENT_ID` | Override the committed EVE developer app client_id (`src/main/config.ts`). |
-| `MCO_SDE_URL` | Override the pinned SDE zip URL. |
-| `MCO_UPDATE_CHECK` | `1` enables the GitHub release check in a dev build, `0` disables it in a packaged one. Default: packaged builds only. |
+| `MCO_SDE_URL` | Import this exact SDE zip instead of the build CCP's catalogue names. Also stands the SDE update check down. |
+| `MCO_SDE_CHECK` | `0` disables the check for a newer SDE build. Default: on everywhere. |
+| `MCO_UPDATE_CHECK` | `1` enables the GitHub release check in a dev build, `0` disables it in a packaged one. Default: packaged builds only. Governs the *automatic* check only — Settings → "Check for updates" is answered in every build — and sits above the user's own on/off preference. |
 | `ELECTRON_RENDERER_URL` | Set by electron-vite dev — main loads the dev server instead of the built `index.html`. |
 
 To use your own EVE application: register at https://developers.eveonline.com/ with
@@ -147,7 +148,36 @@ Nothing happens unasked. `autoDownload` is off, so a check only raises the banne
 **Download** fetches the installer, **Restart to install** applies it. That is deliberate
 for a tool holding an open SQLite profile and a background sync sweep — the user picks the
 moment. `autoInstallOnAppQuit` is left on, so an update someone downloaded and then
-ignored still lands the next time MCO quits.
+ignored still lands the next time MCO quits — unless automatic updates are off, which
+stands it down too (`setAutoInstallOnQuit`), because that is the one thing here that
+happens at a moment nobody chose.
+
+**Whether MCO checks at all is the user's answer**, kept in `app_settings` under
+`update.autoCheck` and reported as `UpdateStatus.autoCheck`:
+
+| Value | Means | Automatic check |
+| --- | --- | --- |
+| `unset` | This profile has never been asked | No — and nothing has gone to GitHub yet |
+| `on` | Yes | Daily, as below |
+| `off` | No | No, and no banner: Settings is where updates live now |
+| `unavailable` | The build never checks anyway (`MCO_UPDATE_CHECK`, or unpackaged) | No |
+
+`unset` is answered **once, from the update banner**, which offers the choice instead of a
+release on a profile that has never been asked. A banner rather than a modal at startup:
+it is the same one line in the same place as everything else the updater says, a first
+launch has more urgent things on screen, and it can be answered whenever. Settings →
+About holds the same switch afterwards, so nobody is stuck with the answer they gave.
+Turning it on checks immediately — a yes that left the banner blank until tomorrow would
+read as a broken button.
+
+`initUpdates` backfills `on` for a profile that already has a cached check, so upgrading
+does not interrupt someone to ask about the status quo. Only a genuinely new profile is
+asked. Note that a dev build reads `unavailable` and shows neither prompt nor toggle —
+`MCO_UPDATE_CHECK=1` is how you exercise them.
+
+An `off` profile is not cut off from updates: Settings → "Check for updates" still asks
+GitHub and still answers, with the release link. What `off` buys is that MCO never brings
+it up on its own.
 
 Two check paths, one shape. A packaged build asks the updater, so what it learns about is
 by definition something it can install; anything else falls back to GitHub's
@@ -156,12 +186,14 @@ exercises in dev. `update/mapUpdateInfo.ts` normalizes the updater's bare `0.2.1
 `v0.2.1` the REST path caches, so `app_settings` never records which one ran. The REST
 path is cached and refreshed at most daily because it is unauthenticated and GitHub allows
 60 API requests an hour per IP. Only packaged builds check on their own — see
-`MCO_UPDATE_CHECK` above — while Settings → "Check for updates" always asks now. A failed
+`MCO_UPDATE_CHECK` above — and only where the user said yes, while Settings → "Check for
+updates" always asks now. A failed
 check keeps the last known answer and explains itself; it never blocks a page load.
 
 Detection is renderer-driven (the banner mounting, the Settings button): `initUpdates` at
 startup configures and subscribes but does not check. A tray-only `--background` launch
-therefore never prompts, which is what it did before too.
+therefore never prompts, which is what it did before too — and never raises the consent
+question either, since that is the banner's to ask when a window exists.
 
 **Updates are unsigned.** The download still comes over HTTPS from GitHub and is verified
 against the SHA-512 in `latest.yml`; what is missing is the Windows Authenticode check,

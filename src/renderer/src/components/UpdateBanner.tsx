@@ -14,9 +14,16 @@ import { DownloadIcon } from './icons';
  * from under someone. A build that can't install in place (one run from source)
  * keeps only the link to the release page.
  *
+ * On a profile that has never been asked, it asks first: `autoCheck` comes back
+ * `unset` and the banner offers the choice instead of a release, because until
+ * it is answered no check has run. That question gets the banner slot rather
+ * than a modal at startup — it is the same one line in the same place, it can
+ * be answered whenever, and a first launch has more urgent things on screen.
+ *
  * Renders nothing unless there is genuinely something to say: a check that has
- * never run, failed, or found the running build current is silent. Dismissing
- * hides one version, so the next release raises the banner again.
+ * never run, failed, or found the running build current is silent, and so is a
+ * profile that answered no. Dismissing hides one version, so the next release
+ * raises the banner again.
  */
 export default function UpdateBanner() {
   const { data: status, setData } = useMcoData<UpdateStatus>(() => mco.system.checkUpdate());
@@ -33,15 +40,10 @@ export default function UpdateBanner() {
   // so is stable, which keeps this subscribed once for the life of the app.
   useEffect(() => mco.system.onUpdateProgress(setData), [setData]);
 
-  if (status === null || hidden || status.latestVersion === null) return null;
+  if (status === null || hidden) return null;
 
-  // Declared after the guard so they are narrowed for the closures below.
-  const version = status.latestVersion;
+  // Declared after the guard so it is narrowed for the closures below.
   const state = status.state;
-
-  if (state !== 'downloading' && state !== 'ready') {
-    if (state !== 'update-available' || status.dismissed) return null;
-  }
 
   /** Run one of the update actions, keeping whatever status it answers with. */
   async function run(action: () => Promise<UpdateStatus>): Promise<void> {
@@ -54,6 +56,49 @@ export default function UpdateBanner() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Asked before anything is announced, because nothing has been checked yet.
+  // Either button is an answer and stores one, so this is asked once per
+  // profile; Settings → About holds the same switch afterwards.
+  if (status.autoCheck === 'unset') {
+    return (
+      <div className="update-banner" data-testid="update-consent">
+        <DownloadIcon size={15} />
+        <div className="update-banner__text">
+          Check for new MCO releases automatically? MCO would ask GitHub once a day and say so
+          here — it never downloads or installs anything unless you click.
+          {failure && <span className="update-banner__error"> {failure}</span>}
+        </div>
+        <button
+          type="button"
+          data-testid="update-consent-yes"
+          onClick={() => void run(() => mco.system.setAutoCheckUpdate(true))}
+          disabled={busy}
+        >
+          Check automatically
+        </button>
+        <button
+          type="button"
+          className="ghost"
+          data-testid="update-consent-no"
+          onClick={() => void run(() => mco.system.setAutoCheckUpdate(false))}
+          disabled={busy}
+        >
+          No, I'll check myself
+        </button>
+      </div>
+    );
+  }
+
+  if (status.latestVersion === null) return null;
+  const version = status.latestVersion;
+
+  if (state !== 'downloading' && state !== 'ready') {
+    // `off` silences the announcement but not a download already in flight: the
+    // switch governs what MCO does unasked, and those two were asked for.
+    if (state !== 'update-available' || status.dismissed) return null;
+    if (status.autoCheck === 'off') return null;
   }
 
   if (state === 'downloading') {

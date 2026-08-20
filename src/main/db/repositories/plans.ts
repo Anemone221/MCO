@@ -6,6 +6,7 @@ interface SkillPlanRow {
   name: string;
   plan_text: string;
   imported_at: string;
+  show_on_character_sheet: number;
 }
 
 function toSkillPlan(row: SkillPlanRow): SkillPlan {
@@ -14,10 +15,11 @@ function toSkillPlan(row: SkillPlanRow): SkillPlan {
     name: row.name,
     planText: row.plan_text,
     importedAt: row.imported_at,
+    showOnCharacterSheet: row.show_on_character_sheet === 1,
   };
 }
 
-const COLUMNS = 'id, name, plan_text, imported_at';
+const COLUMNS = 'id, name, plan_text, imported_at, show_on_character_sheet';
 
 export function listPlans(): SkillPlan[] {
   const rows = getDb()
@@ -49,6 +51,18 @@ export function updatePlan(id: number, input: { name: string; planText: string }
   getDb()
     .prepare('UPDATE skill_plans SET name = @name, plan_text = @planText WHERE id = @id')
     .run({ ...input, id });
+  return getPlan(id);
+}
+
+/**
+ * Show or hide a plan on the character sheets' "Skill plans" card. Nothing
+ * else reads the flag: the plan keeps its detail page, its group priority and
+ * its place in the plan list either way.
+ */
+export function setPlanSheetVisibility(id: number, show: boolean): SkillPlan | null {
+  getDb()
+    .prepare('UPDATE skill_plans SET show_on_character_sheet = @show WHERE id = @id')
+    .run({ id, show: show ? 1 : 0 });
   return getPlan(id);
 }
 

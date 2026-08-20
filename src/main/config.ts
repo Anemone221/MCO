@@ -43,12 +43,45 @@ export const ESI_BASE_URL = 'https://esi.evetech.net';
 export const ESI_COMPATIBILITY_DATE = process.env['MCO_ESI_COMPAT_DATE'] ?? '2026-06-09';
 
 /**
- * EVE Static Data Export (YAML) download URL. The build number in the path is
- * pinned; bump it (or set MCO_SDE_URL) to import a newer SDE release.
+ * Where CCP publishes the EVE Static Data Export. Every build lives under this
+ * prefix under a name that carries its build number, alongside a catalogue of
+ * the current one (`latest.jsonl`).
  */
-export const SDE_URL =
-  process.env['MCO_SDE_URL'] ??
-  'https://developers.eveonline.com/static-data/tranquility/eve-online-static-data-3351823-yaml.zip';
+export const SDE_BASE_URL = 'https://developers.eveonline.com/static-data/tranquility';
+
+/**
+ * The catalogue MCO reads to learn whether a newer SDE build exists — one JSON
+ * line, `{"_key": "sde", "buildNumber": …, "releaseDate": …}`.
+ *
+ * This is what keeps new skills, ships and blueprints reachable without an app
+ * release: the build number is discovered at runtime rather than compiled in,
+ * so a game patch is a re-import (see `services/sdeUpdateService.ts`) and only
+ * a *format* change needs a new MCO.
+ */
+export const SDE_LATEST_URL = `${SDE_BASE_URL}/latest.jsonl`;
+
+/** The SDE zip for one build number. */
+export function sdeZipUrl(build: string): string {
+  return `${SDE_BASE_URL}/eve-online-static-data-${build}-yaml.zip`;
+}
+
+/**
+ * The build imported when the catalogue can't be read (no network, CCP moved
+ * the endpoint). Old data beats no data: every id still resolves to a name,
+ * only the last few patches' items are missing. Bumping it is no longer how
+ * users get a newer SDE — it is only the floor.
+ */
+export const SDE_PINNED_BUILD = '3351823';
+
+/**
+ * An exact zip URL to import instead of whatever the catalogue reports. Set
+ * `MCO_SDE_URL` to test an unreleased or local build; while it is set the
+ * update check stands down rather than offer a build the import won't fetch.
+ */
+export const SDE_URL_OVERRIDE: string | null = process.env['MCO_SDE_URL'] ?? null;
+
+/** The fallback download: the override if there is one, else the pinned build. */
+export const SDE_URL = SDE_URL_OVERRIDE ?? sdeZipUrl(SDE_PINNED_BUILD);
 
 /** EVE category id for the "Skill" item category. */
 export const SKILL_CATEGORY_ID = 16;

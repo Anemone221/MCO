@@ -82,9 +82,10 @@ export function initAutoUpdate(onStateChange: () => void): void {
 
   // The one line the whole "notify, then let the user decide" design rests on.
   autoUpdater.autoDownload = false;
-  // Left at its default deliberately. Once someone has clicked Download,
-  // applying it the next time MCO quits is the same intent — and without it a
-  // tray-resident profile could sit on a downloaded update for weeks.
+  // Left at its default here. Once someone has clicked Download, applying it
+  // the next time MCO quits is the same intent — and without it a tray-resident
+  // profile could sit on a downloaded update for weeks. A user who turns
+  // updates off gets it turned back off; see `setAutoInstallOnQuit`.
   autoUpdater.autoInstallOnAppQuit = true;
 
   // Routed through console so `initLogCapture()` picks it up and Settings →
@@ -114,6 +115,20 @@ export function initAutoUpdate(onStateChange: () => void): void {
   autoUpdater.on('update-downloaded', (info: UpdateInfo) => {
     setState({ phase: 'ready', percent: 100, version: toTag(info.version), error: null });
   });
+}
+
+/**
+ * Whether an installer already on disk is applied at the next quit.
+ *
+ * The one thing the updater does without being asked at the moment it happens,
+ * so it is the one thing "turn automatic updates off" has to reach. Without
+ * this, a profile that downloaded an update and *then* opted out would still be
+ * swapped out at the next quit — which is precisely what opting out means to
+ * say no to. The downloaded bytes are left alone: turning updates back on makes
+ * them live again without a second download.
+ */
+export function setAutoInstallOnQuit(enabled: boolean): void {
+  autoUpdater.autoInstallOnAppQuit = enabled;
 }
 
 /**

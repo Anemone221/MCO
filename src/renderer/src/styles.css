@@ -453,6 +453,13 @@ code {
   font-size: 0.72rem;
 }
 
+/* A newer game patch's data is news, not a fault — the same accent tint the
+   app-update banner uses, so both "something new exists" rows read alike. */
+.sde-banner--update {
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 .sde-banner__text {
   flex: 1;
 }
@@ -832,9 +839,16 @@ tr:focus-within .row-actions button {
 }
 
 /* Omega checkbox on the Accounts table. */
-.omega-toggle {
+.omega-toggle,
+.sheet-toggle {
   white-space: nowrap;
   font-size: 0.85rem;
+}
+
+/* Reads as a setting, not a row selection: the label carries the state. */
+.sheet-toggle {
+  color: var(--muted);
+  cursor: pointer;
 }
 
 .status-pill {
@@ -2310,6 +2324,13 @@ details.clone-block > p {
   flex-wrap: wrap;
   gap: 0.6rem;
   font-size: 0.85rem;
+}
+
+/* A preference sitting between two action rows (About's update switch): both
+   rows are marginless, so without this the checkbox touches the links below. */
+.settings-actions + label {
+  display: block;
+  margin: 0.45rem 0 0.55rem;
 }
 
 .settings-scope-note {

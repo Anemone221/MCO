@@ -1,6 +1,11 @@
 import { IpcChannel } from '@shared/ipc';
 import { listPlans, removePlan } from '../../db/repositories/plans';
-import { analyzePlanById, importPlan, updatePlanById } from '../../services/planService';
+import {
+  analyzePlanById,
+  importPlan,
+  setPlanSheetVisibilityById,
+  updatePlanById,
+} from '../../services/planService';
 import {
   eftDraft,
   fitDraft,
@@ -19,6 +24,9 @@ export function registerPlanChannels(): void {
     updatePlanById(planId, name, planText),
   );
   handle(IpcChannel.plansRemove, (_event, planId: number) => removePlan(planId));
+  handle(IpcChannel.plansSetSheetVisibility, (_event, planId: number, show: boolean) =>
+    setPlanSheetVisibilityById(planId, show),
+  );
   handle(IpcChannel.plansAnalyze, (_event, planId: number) => analyzePlanById(planId));
 
   // The creator's own channels: the skill catalogue it browses, and the three

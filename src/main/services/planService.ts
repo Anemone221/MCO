@@ -14,7 +14,13 @@ import {
   type AnalysisCharacter,
   type SkillRequirement,
 } from '../fits/analyze';
-import { createPlan, getPlan, listPlans, updatePlan } from '../db/repositories/plans';
+import {
+  createPlan,
+  getPlan,
+  listPlans,
+  setPlanSheetVisibility,
+  updatePlan,
+} from '../db/repositories/plans';
 import {
   getSdeStatus,
   getSkillRanks,
@@ -39,6 +45,13 @@ export function importPlan(name: string, planText: string): SkillPlan {
 export function updatePlanById(planId: number, name: string, planText: string): SkillPlan {
   parseSkillPlan(planText);
   const updated = updatePlan(planId, { name, planText });
+  if (!updated) throw new UserFacingError('That skill plan no longer exists.');
+  return updated;
+}
+
+/** Show or hide a plan on the character sheets' plans card. */
+export function setPlanSheetVisibilityById(planId: number, show: boolean): SkillPlan {
+  const updated = setPlanSheetVisibility(planId, show);
   if (!updated) throw new UserFacingError('That skill plan no longer exists.');
   return updated;
 }
@@ -109,7 +122,10 @@ export function listPlanProgressForCharacter(characterId: number): {
   needsSkillData: boolean;
   plans: CharacterPlanProgress[];
 } {
-  const plans = listPlans();
+  // Plans opted out of the sheet are dropped before any analysis runs: on a
+  // 90-character roster each sheet costs one plan analysis per listed plan, so
+  // hiding a plan saves the work as well as the row.
+  const plans = listPlans().filter((p) => p.showOnCharacterSheet);
   if (plans.length === 0) return { needsSkillData: false, plans: [] };
   if (!getSdeStatus().hasSkillData) return { needsSkillData: true, plans: [] };
 

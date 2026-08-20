@@ -212,7 +212,9 @@ tray. On quit: destroy tray, stop scheduler, close DB.
 
 `initUpdates` (`services/updateService.ts`) configures `electron-updater` and subscribes
 to it; it does not check. Detection stays renderer-driven — the banner mounting, Settings
-→ "Check for updates" — so a tray-only launch with no window never prompts. See
+→ "Check for updates" — so a tray-only launch with no window never prompts. Whether the
+automatic check runs at all is a per-profile preference (`update.autoCheck`) that a new
+profile has not answered yet; the banner asks once, before any release traffic. See
 `docs/development.md` § Updating.
 
 `app.setAppUserModelId('com.anemone221.mco')` is required for Windows toast notifications

@@ -68,6 +68,11 @@ Key invariants:
   cache entry has expired (ESI's own `Expires` header), swept hourly by the scheduler.
 - **Schema changes are new migrations** appended to `src/main/db/migrations.ts` — never
   edit an existing migration.
+- **The SDE build is discovered at run time, not pinned.** MCO reads CCP's
+  `latest.jsonl` catalogue (`sde/latest.ts`, `services/sdeUpdateService.ts`) and imports
+  whatever build it names, so a game patch that adds ships or skills is a re-import the
+  user runs — not a release here. `SDE_PINNED_BUILD` is only the offline floor; don't
+  turn it back into the source of truth.
 - **MCO is not a corporation tool.** The one corporation scope it takes
   (`esi-corporations.read_blueprints.v1`) exists because BPO collections live in an
   **alt corp** — a corporation wholly controlled by one player, used as a shared
@@ -118,5 +123,7 @@ Schema: `tags` + `character_tags` (character↔capability) and `character_groups
 - ESI rate limiting: https://developers.eveonline.com/docs/services/esi/rate-limiting/
 - ESI best practices: https://developers.eveonline.com/docs/services/esi/best-practices/
 - SDE docs: https://developers.eveonline.com/docs/services/static-data/
-- SDE zip (pinned build, see `SDE_URL` in `src/main/config.ts`):
-  https://developers.eveonline.com/static-data/tranquility/eve-online-static-data-3351823-yaml.zip
+- SDE build catalogue (`SDE_LATEST_URL` in `src/main/config.ts`, read on every check):
+  https://developers.eveonline.com/static-data/tranquility/latest.jsonl
+- SDE zip for one build (`sdeZipUrl`):
+  https://developers.eveonline.com/static-data/tranquility/eve-online-static-data-<build>-yaml.zip

@@ -631,6 +631,19 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Whether a plan appears on every character sheet's "Skill plans" card.
+    // With 90+ characters a roster accumulates plans that only ever concern a
+    // handful of them (one supercapital pilot's path, a retired doctrine), and
+    // every sheet listing every plan buries the ones that matter. Defaults to
+    // 1 so existing plans keep showing exactly as before; the flag only ever
+    // hides the card's rows, never the plan itself or its own detail page.
+    version: 32,
+    name: 'plan_sheet_visibility',
+    sql: `
+      ALTER TABLE skill_plans ADD COLUMN show_on_character_sheet INTEGER NOT NULL DEFAULT 1;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

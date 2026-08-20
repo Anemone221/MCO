@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { PlanCharacterResult } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import { formatSp, romanLevel } from '../lib/format';
 import { filterByGroup, memberIdSet, type GroupFilter } from '../lib/groups';
@@ -98,6 +98,36 @@ export default function PlanDetail() {
     setData((prev) => (prev ? { ...prev, groups, tags } : prev));
   }, [setData]);
 
+  // Only the plan record changes, so the (expensive) analysis is patched rather
+  // than re-run — optimistically, so the checkbox tracks the click rather than
+  // snapping back until the write returns; a failed write puts it back.
+  const setSheetVisibility = useCallback(
+    async (show: boolean) => {
+      setError(null);
+      const patch = (value: boolean): void =>
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                analysis: {
+                  ...prev.analysis,
+                  plan: { ...prev.analysis.plan, showOnCharacterSheet: value },
+                },
+              }
+            : prev,
+        );
+      patch(show);
+      try {
+        const plan = await mco.plans.setSheetVisibility(planId, show);
+        setData((prev) => (prev ? { ...prev, analysis: { ...prev.analysis, plan } } : prev));
+      } catch (e) {
+        patch(!show);
+        setError(errorMessage(e));
+      }
+    },
+    [planId, setData, setError],
+  );
+
   const { openMenu, menuElement } = useCharacterContextMenu({
     tags,
     groups,
@@ -134,6 +164,20 @@ export default function PlanDetail() {
           {analysis ? ` · ${analysis.plan.name}` : ''}
         </h2>
         <div className="toolbar__actions">
+          {analysis && (
+            <label
+              className="sheet-toggle"
+              title="Show this plan's progress bar on every character sheet"
+            >
+              <input
+                type="checkbox"
+                checked={analysis.plan.showOnCharacterSheet}
+                onChange={(e) => void setSheetVisibility(e.target.checked)}
+                data-testid="plan-sheet-toggle"
+              />{' '}
+              On character sheets
+            </label>
+          )}
           <Link to={`/plans/${planId}/edit`} className="link-btn" data-testid="edit-plan">
             Edit plan
           </Link>

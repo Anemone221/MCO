@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { SdeProgress, SdeStatus } from '@shared/types';
+import type { SdeProgress, SdeStatus, SdeUpdateStatus } from '@shared/types';
 import { mco } from '../lib/ipc';
-import { formatBytes } from '../lib/format';
+import { formatBytes, formatDate } from '../lib/format';
 
 function progressText(progress: SdeProgress): string {
   switch (progress.stage) {
@@ -31,14 +31,42 @@ function progressText(progress: SdeProgress): string {
   }
 }
 
+/**
+ * How often the banner re-asks whether a newer build exists.
+ *
+ * MCO is built to sit in the tray for days, and this banner mounts once per
+ * launch — without a timer, "CCP patched yesterday" would need a restart to
+ * reach anyone. The main process caches the answer for a day, so every call but
+ * the first of each day costs nothing.
+ */
+const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 export default function SdeBanner() {
   const [status, setStatus] = useState<SdeStatus | null>(null);
+  const [update, setUpdate] = useState<SdeUpdateStatus | null>(null);
   const [progress, setProgress] = useState<SdeProgress | null>(null);
   const [importing, setImporting] = useState(false);
 
+  /**
+   * Asked separately from `status`, and allowed to fail quietly: the check may
+   * go out to CCP's catalogue, and whether static data is *imported* must
+   * render without waiting on a network round trip. The main side never
+   * rejects, so the failure arm only covers IPC itself — which leaves the last
+   * answer standing rather than replacing it with a wrong one.
+   */
+  function refreshUpdate(): void {
+    void mco.sde.checkUpdate().then(setUpdate, () => undefined);
+  }
+
   useEffect(() => {
     void mco.sde.status().then(setStatus);
-    return mco.sde.onProgress(setProgress);
+    refreshUpdate();
+    const timer = setInterval(refreshUpdate, RECHECK_INTERVAL_MS);
+    const unsubscribe = mco.sde.onProgress(setProgress);
+    return () => {
+      clearInterval(timer);
+      unsubscribe();
+    };
   }, []);
 
   async function runImport(): Promise<void> {
@@ -47,6 +75,9 @@ export default function SdeBanner() {
     try {
       await mco.sde.import();
       setStatus(await mco.sde.status());
+      // The import just fetched the newest build, so this reads back as "up to
+      // date" — cached, no second round trip.
+      setUpdate(await mco.sde.checkUpdate());
     } catch {
       // the onProgress stream delivers the error stage for display
     } finally {
@@ -64,6 +95,34 @@ export default function SdeBanner() {
     status.hasSkillAttributes &&
     status.hasBlueprintData;
   if (fullyImported && !importing && progress?.stage !== 'error') {
+    // EVE patches in ships, skills and blueprints between MCO releases; CCP
+    // publishes a new SDE build for each. Say so, because the imported data is
+    // otherwise silently missing them and nothing else would ever mention it.
+    if (update !== null && update.updateAvailable && !update.dismissed) {
+      const build = update.latestBuild ?? '';
+      return (
+        <div className="sde-banner sde-banner--update" data-testid="sde-banner">
+          <div className="sde-banner__text">
+            Static data build {build} is available — you imported {update.installedBuild}. Re-import
+            to pick up skills, ships and blueprints added since.
+            {update.releasedAt !== null && (
+              <span className="muted"> Released {formatDate(update.releasedAt)}.</span>
+            )}
+          </div>
+          <button type="button" onClick={() => void runImport()} data-testid="sde-import">
+            Update static data
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => void mco.sde.dismissUpdate(build).then(setUpdate)}
+          >
+            Dismiss
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div className="sde-banner sde-banner--ok" data-testid="sde-banner">
         Static data ready — build {status?.version}

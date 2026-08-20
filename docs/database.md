@@ -69,6 +69,7 @@ The profile's version is shown in Settings → About.
 | 29 | esi_cache_pages | `esi_cache.pages` (drops cached paginated entries) |
 | 30 | character_wallet_journal_parties | `character_wallet_journal.tax/.first_party_id/.second_party_id` |
 | 31 | sde_system_jumps | `sde_system_jumps`, `sde_systems.pos_x/.pos_y/.pos_z` |
+| 32 | plan_sheet_visibility | `skill_plans.show_on_character_sheet` |
 
 ## Schema reference
 
@@ -189,6 +190,10 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 - **`fits`** — EFT text blobs plus parsed ship name and (when the SDE resolves it)
   `ship_type_id`. Fits are re-parsed on every analysis; the DB stores the source text.
 - **`skill_plans`** — plan name + raw plan text; also re-parsed on demand.
+  `show_on_character_sheet` (default 1) is the only per-plan setting: with it off the
+  plan is skipped by `listPlanProgressForCharacter`, so it neither costs an analysis
+  nor takes a row on any character sheet. Nothing else reads it — the plan keeps its
+  detail page, its list row and any group priority pointing at it.
 
 ### Caches & infrastructure
 
@@ -202,8 +207,12 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 - **`sde_version`** — single row (id=1): imported SDE build number + timestamp.
 - **`app_settings`** — key/value store for preferences the *main* process owns, i.e. ones
   it must read with no renderer around (`close_to_tray`, `tray_notice_shown` — see
-  [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts)). Booleans are
+  [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts)) plus the
+  update and SDE check state (`update.lastCheck`, `update.dismissedVersion`,
+  `update.autoCheck`, `sde.lastCheck`, `sde.dismissedBuild`). Booleans are
   `'1'`/`'0'`; a missing key reads as the caller's fallback, so nothing needs seeding.
+  `update.autoCheck` leans on that: absent means "this profile has never been asked
+  whether to check for releases", which is a third state and not a default.
   Renderer-only view state (theme, demo mode, collapsed sections) stays in localStorage.
 
 ### SDE tables (filled by the import pipeline, see [sde.md](sde.md))

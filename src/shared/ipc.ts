@@ -21,6 +21,7 @@ import type {
   RosterEntry,
   SdeProgress,
   SdeStatus,
+  SdeUpdateStatus,
   ShipInfo,
   SkillPlan,
   StructureImportProgress,
@@ -71,6 +72,8 @@ export const IpcChannel = {
   tagsRemoveMember: 'tags:removeMember',
   sdeStatus: 'sde:status',
   sdeImport: 'sde:import',
+  sdeCheckUpdate: 'sde:checkUpdate',
+  sdeDismissUpdate: 'sde:dismissUpdate',
   sdeProgress: 'sde:progress',
   fitsList: 'fits:list',
   fitsImport: 'fits:import',
@@ -80,6 +83,7 @@ export const IpcChannel = {
   plansImport: 'plans:import',
   plansUpdate: 'plans:update',
   plansRemove: 'plans:remove',
+  plansSetSheetVisibility: 'plans:setSheetVisibility',
   plansAnalyze: 'plans:analyze',
   plansSkillCatalog: 'plans:skillCatalog',
   plansShipCatalog: 'plans:shipCatalog',
@@ -111,6 +115,7 @@ export const IpcChannel = {
   systemDismissUpdate: 'system:dismissUpdate',
   systemDownloadUpdate: 'system:downloadUpdate',
   systemInstallUpdate: 'system:installUpdate',
+  systemSetAutoCheckUpdate: 'system:setAutoCheckUpdate',
   updateProgress: 'update:progress',
   settingsSyncStatus: 'settings:syncStatus',
   settingsEsiActivity: 'settings:esiActivity',
@@ -214,7 +219,15 @@ export interface McoApi {
   };
   sde: {
     status: () => Promise<SdeStatus>;
+    /** Imports whatever build CCP currently publishes, replacing what is there. */
     import: () => Promise<SdeImportSummary>;
+    /**
+     * Whether a newer static data build exists. Cached for a day; `force`
+     * asks CCP now.
+     */
+    checkUpdate: (force?: boolean) => Promise<SdeUpdateStatus>;
+    /** Hide the new-build banner for one build. */
+    dismissUpdate: (build: string) => Promise<SdeUpdateStatus>;
     onProgress: (callback: (progress: SdeProgress) => void) => () => void;
   };
   fits: {
@@ -229,6 +242,8 @@ export interface McoApi {
     /** Overwrite a plan the creator re-saved, keeping its id (and references). */
     update: (planId: number, name: string, planText: string) => Promise<SkillPlan>;
     remove: (planId: number) => Promise<void>;
+    /** Show or hide this plan on every character sheet's "Skill plans" card. */
+    setSheetVisibility: (planId: number, show: boolean) => Promise<SkillPlan>;
     analyze: (planId: number) => Promise<PlanAnalysis>;
     /**
      * Every skill in the game with its group, rank, attributes, per-level SP
@@ -336,6 +351,12 @@ export interface McoApi {
      * this resolves only when it declined to (nothing downloaded yet).
      */
     installUpdate: () => Promise<UpdateStatus>;
+    /**
+     * Turn the automatic release check on or off, answering the first-launch
+     * prompt or the Settings toggle. Turning it on checks straight away, so the
+     * status that comes back is a fresh one.
+     */
+    setAutoCheckUpdate: (enabled: boolean) => Promise<UpdateStatus>;
     /** Subscribe to download progress and phase changes. Returns an unsubscribe function. */
     onUpdateProgress: (callback: (status: UpdateStatus) => void) => () => void;
   };

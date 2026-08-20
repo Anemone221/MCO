@@ -211,8 +211,10 @@ is due. That keeps 90 characters polite to CCP's servers by construction. A tray
 Start-menu shortcut).
 
 **The SDE** (Static Data Export) supplies static game data — item types, skills and their
-prerequisites, solar systems. MCO downloads and imports a pinned build once on first run;
-a banner prompts you. Fit and plan analysis need it.
+prerequisites, solar systems. MCO downloads and imports it once on first run; a banner
+prompts you. Fit and plan analysis need it. It also **checks for newer builds**: EVE
+patches in ships and skills between MCO releases, and the banner offers the re-import that
+picks them up — no app update required.
 
 ---
 
@@ -343,8 +345,8 @@ MCO ships with its own developer client_id. To use yours, register an app at
 [developers.eveonline.com](https://developers.eveonline.com/) with callback
 `http://localhost:8765/callback` and the scopes listed in `ESI_SCOPES`
 ([`src/main/config.ts`](src/main/config.ts)) — plus `esi-corporations.read_blueprints.v1`
-if you want the alt-corp feature — then set `MCO_ESI_CLIENT_ID`. `MCO_SDE_URL` overrides
-the pinned SDE build the same way.
+if you want the alt-corp feature — then set `MCO_ESI_CLIENT_ID`. `MCO_SDE_URL` pins an
+exact SDE zip the same way, instead of the build CCP's catalogue names.
 
 ---
 

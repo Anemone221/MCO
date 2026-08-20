@@ -4,11 +4,19 @@ import { join } from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { appEnv } from '../support/electronEnv';
 
-/** Launch the built app against an isolated, throwaway userData directory. */
-async function launchApp(userDataDir: string): Promise<ElectronApplication> {
+/**
+ * Launch the built app against an isolated, throwaway userData directory.
+ *
+ * `env` overlays `appEnv()`, whose whole job is keeping the run off the network
+ * — override a key only for a test that stays off it by other means.
+ */
+async function launchApp(
+  userDataDir: string,
+  env: Record<string, string> = {},
+): Promise<ElectronApplication> {
   return electron.launch({
     args: ['out/main/index.js', '--no-sandbox', `--user-data-dir=${userDataDir}`],
-    env: appEnv(),
+    env: { ...appEnv(), ...env },
   });
 }
 
@@ -182,6 +190,39 @@ test('imports a skill plan and shows it on the Plans page', async () => {
   await expect(window.getByTestId('plans-table')).toContainText('E2E Test Plan');
 
   await app.close();
+});
+
+test('hides a plan from the character sheets and remembers it across restarts', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+
+  const first = await launchApp(userDataDir);
+  const firstWindow = await first.firstWindow();
+  await firstWindow.getByRole('link', { name: 'Skill Plans' }).click();
+  await firstWindow.getByTestId('plan-name-input').fill('Sheet Toggle Plan');
+  await firstWindow.getByTestId('plan-text-input').fill('Gunnery V');
+  await firstWindow.getByTestId('import-plan').click();
+
+  // A new plan shows on the sheets; the toggle is what takes it off them.
+  const listToggle = firstWindow.getByTestId('plan-sheet-toggle-1');
+  await expect(listToggle).toBeChecked();
+  await listToggle.uncheck();
+  await expect(firstWindow.getByTestId('plan-row-1')).toContainText('Hidden');
+  await first.close();
+
+  const second = await launchApp(userDataDir);
+  const secondWindow = await second.firstWindow();
+  await secondWindow.getByRole('link', { name: 'Skill Plans' }).click();
+  await expect(secondWindow.getByTestId('plan-sheet-toggle-1')).not.toBeChecked();
+
+  // The plan detail page shows the same flag, and setting it back there sticks.
+  await secondWindow.getByRole('link', { name: 'Sheet Toggle Plan' }).click();
+  const detailToggle = secondWindow.getByTestId('plan-sheet-toggle');
+  await expect(detailToggle).not.toBeChecked();
+  await detailToggle.check();
+  await secondWindow.getByRole('link', { name: '← Skill Plans' }).click();
+  await expect(secondWindow.getByTestId('plan-sheet-toggle-1')).toBeChecked();
+
+  await second.close();
 });
 
 test('edits a plan in the creator, reorders it and saves it back', async () => {
@@ -413,4 +454,31 @@ test('shows an empty notification bell on a fresh profile', async () => {
   );
 
   await app.close();
+});
+
+test('asks once whether to check for updates, and remembers no', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  // The suite pins MCO_UPDATE_CHECK=0, which is a build that never checks and
+  // so never asks either. This test is the question itself, so it opts the
+  // build back in — and stays off the network regardless, because an
+  // unanswered profile checks nothing and answering "no" checks nothing.
+  const updatable = { MCO_UPDATE_CHECK: '1' };
+
+  const first = await launchApp(userDataDir, updatable);
+  const firstWindow = await first.firstWindow();
+  await expect(firstWindow.getByTestId('update-consent')).toBeVisible();
+
+  await firstWindow.getByTestId('update-consent-no').click();
+  await expect(firstWindow.getByTestId('update-consent')).not.toBeVisible();
+  // Settings agrees, and offers the same switch to change one's mind.
+  await firstWindow.getByTestId('settings-gear').click();
+  await expect(firstWindow.getByTestId('auto-update-toggle')).not.toBeChecked();
+  await first.close();
+
+  const second = await launchApp(userDataDir, updatable);
+  const secondWindow = await second.firstWindow();
+  // Answered once, ever: a profile that said no is not asked again at launch.
+  await expect(secondWindow.getByTestId('settings-gear')).toBeVisible();
+  await expect(secondWindow.getByTestId('update-consent')).not.toBeVisible();
+  await second.close();
 });
