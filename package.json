@@ -1,6 +1,6 @@
 {
   "name": "mco",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Massive Character Organization tool for EVE Online",
   "main": "out/main/index.js",
   "author": "Anemone221 <anemone221@gmail.com>",
