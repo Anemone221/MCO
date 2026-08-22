@@ -4,7 +4,7 @@ MCO is a desktop tool for EVE Online players with a **high character count (10+,
 around ~90+)**. It organizes characters outside the game: training/skill data, account
 mapping, fit testing ("how many of my characters can fly this?"), skill plan tracking,
 grouping, capability tags, location tracking, jump-clone/implant tracking, jump fatigue,
-a blueprint (BPO) checklist, and skill-queue notifications.
+a blueprint (BPO) checklist, a mining ledger, and skill-queue notifications.
 
 Deeper documentation lives in [`docs/`](docs/README.md):
 
