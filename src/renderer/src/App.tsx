@@ -16,6 +16,7 @@ import PlanCreator from './pages/PlanCreator';
 import Clones from './pages/Clones';
 import Blueprints from './pages/Blueprints';
 import Wallet from './pages/Wallet';
+import Mining from './pages/Mining';
 import Settings from './pages/Settings';
 import SdeBanner from './components/SdeBanner';
 import UpdateBanner from './components/UpdateBanner';
@@ -28,6 +29,7 @@ import {
   GraduationCapIcon,
   LayersIcon,
   MapPinIcon,
+  PickaxeIcon,
   RocketIcon,
   SettingsIcon,
   TagIcon,
@@ -48,6 +50,7 @@ const NAV = [
   { to: '/clones', label: 'Clones', icon: CopyIcon },
   { to: '/blueprints', label: 'Blueprints', icon: BlueprintIcon },
   { to: '/wallet', label: 'Wallet', icon: WalletIcon },
+  { to: '/mining', label: 'Mining', icon: PickaxeIcon },
 ];
 
 export default function App() {
@@ -123,6 +126,7 @@ export default function App() {
           <Route path="/clones" element={<Clones />} />
           <Route path="/blueprints" element={<Blueprints />} />
           <Route path="/wallet" element={<Wallet />} />
+          <Route path="/mining" element={<Mining />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

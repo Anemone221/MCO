@@ -40,6 +40,7 @@ function fakePreload(): McoApi {
     blueprints: {},
     dashboard: {},
     wallet: {},
+    mining: { summary: record('mining.summary', { byCharacter: [], bySystem: [], coverage: [] }) },
     notifications: {},
     system: {},
     settings: {},
@@ -77,6 +78,16 @@ describe('the demo-mode wrapper', () => {
     expect(calls[0]?.args).toEqual([30002537, false]);
   });
 
+  it('forwards a null mining window rather than dropping it', async () => {
+    const mco = await loadApi();
+
+    // null is "everything recorded" — a wrapper that swallowed it would
+    // silently answer with the default window instead.
+    await mco.mining.summary(null);
+
+    expect(calls[0]?.args).toEqual([null]);
+  });
+
   it('forwards the arguments of every other wrapped method', async () => {
     const mco = await loadApi();
 
@@ -86,6 +97,7 @@ describe('the demo-mode wrapper', () => {
     await mco.plans.analyze(12);
     await mco.structures.search('keepstar');
     await mco.systems.search('Amamake');
+    await mco.mining.summary(30);
 
     expect(calls).toEqual([
       { path: 'characters.detail', args: [90000001] },
@@ -94,6 +106,7 @@ describe('the demo-mode wrapper', () => {
       { path: 'plans.analyze', args: [12] },
       { path: 'structures.search', args: ['keepstar'] },
       { path: 'systems.search', args: ['Amamake'] },
+      { path: 'mining.summary', args: [30] },
     ]);
   });
 });

@@ -644,6 +644,46 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE skill_plans ADD COLUMN show_on_character_sheet INTEGER NOT NULL DEFAULT 1;
     `,
   },
+  {
+    // The mining ledger, stored exactly as ESI aggregates it: units mined per
+    // (character, UTC day, solar system, ore type). That grain is ESI's, not a
+    // choice made here — the endpoint never reports individual cycles — and it
+    // is what makes the primary key an upsert target: today's bucket keeps
+    // growing until the day closes, and every later sweep re-reports it.
+    //
+    // ESI's ledger reaches ~30 days back; rows stay here after they roll off
+    // it, so the page's longer windows are answered from what past sweeps
+    // banked (same arrangement as the wallet journal).
+    version: 33,
+    name: 'character_mining_ledger',
+    sql: `
+      CREATE TABLE character_mining_ledger (
+        character_id    INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        day             TEXT NOT NULL,
+        solar_system_id INTEGER NOT NULL,
+        type_id         INTEGER NOT NULL,
+        quantity        INTEGER NOT NULL,
+        PRIMARY KEY (character_id, day, solar_system_id, type_id)
+      );
+
+      CREATE INDEX idx_character_mining_ledger_day ON character_mining_ledger (day);
+    `,
+  },
+  {
+    // Per-unit volume in m³, for every type. Mining is measured in m³ — ESI's
+    // ledger counts units, and a unit of Veldspar and a unit of ice are three
+    // orders of magnitude apart — so without this the Mining page can only
+    // report unit counts that sum into a meaningless number.
+    //
+    // Null on installs that imported the SDE before this column existed; the
+    // Mining page reports how many mined types lack a volume and says the fix
+    // is a re-import, rather than quietly under-reporting m³.
+    version: 34,
+    name: 'sde_types_volume',
+    sql: `
+      ALTER TABLE sde_types ADD COLUMN volume REAL;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatBytes,
+  formatDayLabel,
   formatDuration,
   formatIsk,
   formatIskShort,
   formatMonthLabel,
   formatSp,
   formatTimeUntil,
+  formatVolume,
+  formatVolumeExact,
   romanLevel,
 } from '@renderer/lib/format';
 
@@ -56,6 +59,42 @@ describe('formatMonthLabel', () => {
 
   it('falls back to the raw key rather than inventing a month', () => {
     expect(formatMonthLabel('2026-13')).toBe('2026-13');
+  });
+});
+
+describe('formatDayLabel', () => {
+  it('turns a YYYY-MM-DD key into a short day label', () => {
+    expect(formatDayLabel('2026-08-20')).toBe('20 Aug');
+    expect(formatDayLabel('2026-01-01')).toBe('1 Jan');
+  });
+
+  it('falls back to the raw key rather than inventing a month', () => {
+    expect(formatDayLabel('2026-13-01')).toBe('2026-13-01');
+  });
+});
+
+describe('formatVolume', () => {
+  it('abbreviates a mining haul the way ISK is abbreviated', () => {
+    expect(formatVolume(799_642)).toBe('799.6k m³');
+    expect(formatVolume(12_400_000)).toBe('12.4M m³');
+    expect(formatVolume(3_210_000_000)).toBe('3.21B m³');
+  });
+
+  it('shows small volumes whole — a Venture trip is not "0.4k"', () => {
+    expect(formatVolume(420)).toBe('420 m³');
+    expect(formatVolume(0)).toBe('0 m³');
+  });
+});
+
+describe('formatVolumeExact', () => {
+  it('keeps the full figure for cells compared row to row', () => {
+    expect(formatVolumeExact(799_642)).toBe('799,642 m³');
+  });
+
+  it('rounds away the fractions ore volumes produce', () => {
+    // 0.1 m³ per unit × an odd unit count lands on a fraction no one wants
+    // in a table cell.
+    expect(formatVolumeExact(1_234.56)).toBe('1,235 m³');
   });
 });
 

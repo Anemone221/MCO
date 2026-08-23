@@ -146,6 +146,9 @@ const api: McoApi = {
   wallet: {
     summary: call(IpcChannel.walletSummary),
   },
+  mining: {
+    summary: call(IpcChannel.miningSummary),
+  },
   notifications: {
     list: call(IpcChannel.notificationsList),
     markRead: call(IpcChannel.notificationsMarkRead),

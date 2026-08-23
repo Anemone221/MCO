@@ -11,6 +11,12 @@ export interface ParsedType {
   marketGroupId: number | null;
   /** Tech/meta tier (1 Tech I, 2 Tech II, 4 Faction, …); null when unset. */
   metaGroupId: number | null;
+  /**
+   * Volume of one unit in m³; null when the type carries no `volume` (a few
+   * abstract types don't). This is what turns the mining ledger's unit counts
+   * into the m³ a miner actually thinks in.
+   */
+  volume: number | null;
 }
 
 export interface ParsedNamedEntry {
@@ -132,11 +138,12 @@ export async function parseTypesStream(
   let name: string | null = null;
   let marketGroupId: number | null = null;
   let metaGroupId: number | null = null;
+  let volume: number | null = null;
   let inNameBlock = false;
 
   const flush = (): void => {
     if (id !== null && groupId !== null && name !== null) {
-      rows.push({ id, groupId, name, published, marketGroupId, metaGroupId });
+      rows.push({ id, groupId, name, published, marketGroupId, metaGroupId, volume });
       if (rows.length % 10_000 === 0) onProgress?.({ typesProcessed: rows.length });
     }
   };
@@ -151,6 +158,7 @@ export async function parseTypesStream(
       name = null;
       marketGroupId = null;
       metaGroupId = null;
+      volume = null;
       inNameBlock = false;
       continue;
     }
@@ -158,6 +166,9 @@ export async function parseTypesStream(
 
     if (line.startsWith('  groupID:')) {
       groupId = Number(line.slice('  groupID:'.length).trim());
+    } else if (line.startsWith('  volume:')) {
+      const parsed = Number(line.slice('  volume:'.length).trim());
+      volume = Number.isFinite(parsed) ? parsed : null;
     } else if (line.startsWith('  marketGroupID:')) {
       marketGroupId = Number(line.slice('  marketGroupID:'.length).trim());
     } else if (line.startsWith('  metaGroupID:')) {

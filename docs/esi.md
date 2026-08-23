@@ -16,7 +16,7 @@ Reference material:
 | `ESI_CALLBACK_URL` | `http://localhost:8765/callback` — must match the app registration at developers.eveonline.com. |
 | `ESI_BASE_URL` | `https://esi.evetech.net` — ESI is versioned by **compatibility date**, not path prefixes. |
 | `ESI_COMPATIBILITY_DATE` | Pinned date sent as `X-Compatibility-Date` on every request; CCP guarantees response shapes as of that date. Bump deliberately (or override with `MCO_ESI_COMPAT_DATE`), re-testing response handling. |
-| `ESI_SCOPES` | skills, skillqueue, location, ship type, implants, clones, fatigue, wallet, structures, online, blueprints (see below). |
+| `ESI_SCOPES` | skills, skillqueue, location, ship type, implants, clones, fatigue, wallet, structures, online, blueprints, mining (see below). |
 | `OPTIONAL_ESI_SCOPES` | Scopes never requested by a plain "Add character" — currently only `esi-corporations.read_blueprints.v1`, opted into per character (see [Opt-in scopes](#opt-in-scopes)). Must still be listed on the app registration. |
 | `USER_AGENT` | `MCO/<version> (<contact email>; +repo URL)` — sent on every ESI/SSO/SDE request per CCP best practice. |
 
@@ -28,7 +28,7 @@ esi-location.read_location.v1      esi-location.read_ship_type.v1
 esi-clones.read_implants.v1        esi-clones.read_clones.v1
 esi-characters.read_fatigue.v1     esi-wallet.read_character_wallet.v1
 esi-universe.read_structures.v1    esi-location.read_online.v1
-esi-characters.read_blueprints.v1
+esi-characters.read_blueprints.v1  esi-industry.read_character_mining.v1
 ```
 
 Opt-in only (never in the standard grant):
@@ -271,6 +271,7 @@ Thin, typed wrappers — one function per route, no logic:
 | `getCharacterWalletJournal` | `/characters/{id}/wallet/journal` | scoped (same scope as `getCharacterWallet`), paginated |
 | `getCharacterOnline` | `/characters/{id}/online` | scoped |
 | `getCharacterBlueprints` | `/characters/{id}/blueprints` | scoped, paginated |
+| `getCharacterMiningLedger` | `/characters/{id}/mining` | scoped (`esi-industry.read_character_mining.v1`), paginated |
 | `getCorporationBlueprints` | `/corporations/{id}/blueprints` | scoped **+ Director role** (403 otherwise), paginated |
 | `getCorporationPublic` | `/corporations/{id}` | public |
 | `getStation` | `/universe/stations/{id}` | public |
@@ -342,6 +343,17 @@ copy, a positive number a stack of copies. Only originals tick the checklist.
   history. Most characters fit on page 1, which `X-Pages` says outright.
   **The table is the archive**: ESI's journal reaches ~30 days back, so the
   Wallet page's previous-months view can only show months these sweeps banked.
+- **Mining ledger** (`character_mining_ledger`, `SCOPE_READ_MINING`): one more
+  scope-gated best-effort task. ESI returns the ledger **already aggregated per
+  UTC day, solar system and ore type** and reaching ~30 days back, so unlike the
+  wallet journal there is nothing to filter and no "far enough back" to stop at
+  — `getCharacterMiningLedger` reads every page (5-page cap; a row is one
+  day/system/type bucket, so even a dedicated miner fits in one) and the upsert
+  replaces each bucket's quantity, because today's bucket keeps growing and
+  every sweep re-reads it. Adding instead of replacing would multiply a day's
+  mining by the number of sweeps that saw it.
+  **The table is the archive** here too: rows stay after they age out of ESI's
+  30-day window, which is what the Mining page's "All" period reads.
 - **Server status** (`getServerStatus`, no scope): called fresh on every
   Dashboard load (not cached beyond ESI's own `Expires` header) and wrapped in
   a 5-second timeout in `services/dashboardService.ts` so a network hiccup

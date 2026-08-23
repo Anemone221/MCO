@@ -1125,3 +1125,100 @@ export interface DashboardSummary {
   /** Every character with total SP, for the packed-circles chart (unordered). */
   characters: DashboardCharacterEntry[];
 }
+
+/**
+ * Volume mined, in the two units a miner counts in: `units` is what the ore
+ * hold fills with (and what ESI reports), `volumeM3` is what the hauler has to
+ * move. The m³ figure is `units × the SDE's per-unit volume`, so it is short by
+ * whatever the imported SDE build has no volume for — see
+ * `typesMissingVolume` on {@link MiningSummary}.
+ */
+export interface MiningTotals {
+  units: number;
+  volumeM3: number;
+}
+
+/** One character's mining over the window (the "who is actually mining" view). */
+export interface MiningCharacterRow extends MiningTotals {
+  characterId: number;
+  characterName: string;
+  accountLabel: string | null;
+  /** Distinct ore/ice/gas types mined. */
+  oreTypes: number;
+  /** Distinct solar systems mined in. */
+  systems: number;
+  /** Most recent UTC day with a ledger row. */
+  lastMinedDay: string | null;
+}
+
+/** One ore/ice/gas type over the window. */
+export interface MiningOreRow extends MiningTotals {
+  typeId: number;
+  typeName: string | null;
+  /** SDE group — "Veldspar", "Ice", "Gas Clouds" — for grouping the long tail. */
+  groupName: string | null;
+  /** m³ per unit from the SDE; null when this profile's SDE predates the volume column. */
+  unitVolumeM3: number | null;
+  /** How many characters mined it. */
+  characters: number;
+}
+
+/** One solar system over the window. */
+export interface MiningSystemRow extends MiningTotals {
+  solarSystemId: number;
+  systemName: string | null;
+  security: number | null;
+  regionName: string | null;
+  /** How many characters mined there. */
+  characters: number;
+}
+
+/** One UTC day of mining — one column of the Mining page's chart. */
+export interface MiningDayTotals extends MiningTotals {
+  /** UTC calendar day, YYYY-MM-DD. */
+  day: string;
+}
+
+/** Why a character contributes nothing to the ledger, for the coverage strip. */
+export interface MiningCoverageEntry {
+  characterId: number;
+  characterName: string;
+  status: EsiDataStatus;
+  missingScopes: string[];
+}
+
+/**
+ * Everything the Mining page shows: the window's totals plus the same activity
+ * cut three ways (who mined, what, where) and a per-day series.
+ *
+ * ESI's ledger reaches ~30 days back and is already aggregated per day, system
+ * and type — MCO banks each sweep's rows, so a window longer than 30 days is
+ * answered from what has been stored since the first sync.
+ */
+export interface MiningSummary {
+  /** The window queried, as inclusive UTC day keys; `days` is null for "everything recorded". */
+  window: { startDay: string; endDay: string; days: number | null };
+  totals: MiningTotals & {
+    /** Distinct ore types, characters and systems in the window. */
+    oreTypes: number;
+    characters: number;
+    systems: number;
+  };
+  /** Oldest → newest, zero-filled for bounded windows so the chart has no gaps. */
+  byDay: MiningDayTotals[];
+  byCharacter: MiningCharacterRow[];
+  byOre: MiningOreRow[];
+  bySystem: MiningSystemRow[];
+  /**
+   * Mined types the SDE has no volume for. Non-zero means every m³ figure is a
+   * floor and the fix is a static-data re-import — the volume column arrived
+   * after the first SDE imports did.
+   */
+  typesMissingVolume: number;
+  /** Characters that cannot report mining (scope missing, or login expired). */
+  coverage: MiningCoverageEntry[];
+  /** Characters whose token can report mining. */
+  reportingCharacters: number;
+  /** Oldest day banked, so the page can say how far "All" actually reaches. */
+  firstRecordedDay: string | null;
+}

@@ -31,6 +31,26 @@ export function formatIskExact(isk: number): string {
   return `${isk.toLocaleString(undefined, { maximumFractionDigits: 0 })} ISK`;
 }
 
+/**
+ * A volume in m³, abbreviated — for tiles, chart tooltips and anything else
+ * read at a glance. Mining runs from a few hundred m³ (one Venture trip) to
+ * hundreds of millions across a fleet, so the same k/M/B ladder ISK uses
+ * applies here.
+ */
+export function formatVolume(m3: number): string {
+  const abs = Math.abs(m3);
+  const sign = m3 < 0 ? '-' : '';
+  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B m³`;
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M m³`;
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}k m³`;
+  return `${sign}${Math.round(abs).toLocaleString()} m³`;
+}
+
+/** Full m³ with thousands separators, for table cells that get compared row to row. */
+export function formatVolumeExact(m3: number): string {
+  return `${m3.toLocaleString(undefined, { maximumFractionDigits: 0 })} m³`;
+}
+
 const MONTH_NAMES = [
   'Jan',
   'Feb',
@@ -54,6 +74,16 @@ const MONTH_NAMES = [
 export function formatMonthLabel(month: string): string {
   const name = MONTH_NAMES[Number(month.slice(5, 7)) - 1];
   return name ? `${name} ${month.slice(0, 4)}` : month;
+}
+
+/**
+ * A YYYY-MM-DD day key as a short label, e.g. "2026-08-20" -> "20 Aug". Same
+ * fixed month names as {@link formatMonthLabel}, for the same reason: these
+ * label a chart axis, where the width has to be predictable.
+ */
+export function formatDayLabel(day: string): string {
+  const name = MONTH_NAMES[Number(day.slice(5, 7)) - 1];
+  return name ? `${Number(day.slice(8, 10))} ${name}` : day;
 }
 
 /** Roman numeral for an EVE skill level (1-5). */

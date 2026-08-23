@@ -93,6 +93,13 @@ export const SCOPE_READ_WALLET = 'esi-wallet.read_character_wallet.v1';
 export const SCOPE_READ_STRUCTURES = 'esi-universe.read_structures.v1';
 export const SCOPE_READ_ONLINE = 'esi-location.read_online.v1';
 export const SCOPE_READ_BLUEPRINTS = 'esi-characters.read_blueprints.v1';
+/**
+ * The character mining ledger. An `esi-industry` scope, but the only industry
+ * data MCO reads: the ledger is the one endpoint that answers "who has been
+ * mining, what, and where" across a roster this size. It grants nothing about
+ * industry *jobs* — that would be its own scope, and its own decision.
+ */
+export const SCOPE_READ_MINING = 'esi-industry.read_character_mining.v1';
 
 /**
  * Blueprints an **alt corp** holds — a corporation wholly controlled by one
@@ -116,6 +123,7 @@ export const ESI_SCOPES = [
   SCOPE_READ_STRUCTURES,
   SCOPE_READ_ONLINE,
   SCOPE_READ_BLUEPRINTS,
+  SCOPE_READ_MINING,
 ] as const;
 
 /**

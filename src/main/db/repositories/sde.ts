@@ -15,6 +15,8 @@ export interface SdeTypeRow extends SdeNamedRow {
   groupId: number;
   marketGroupId: number | null;
   metaGroupId: number | null;
+  /** Volume of one unit in m³; null when the SDE gives the type none. */
+  volume: number | null;
 }
 
 export function replaceCategories(rows: SdeNamedRow[]): void {
@@ -40,13 +42,14 @@ export function replaceGroups(rows: SdeGroupRow[]): void {
 export function replaceTypes(rows: SdeTypeRow[]): void {
   const db = getDb();
   const ins = db.prepare(
-    `INSERT OR REPLACE INTO sde_types (id, group_id, name, published, market_group_id, meta_group_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO sde_types
+       (id, group_id, name, published, market_group_id, meta_group_id, volume)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   db.transaction(() => {
     db.exec('DELETE FROM sde_types');
     for (const r of rows) {
-      ins.run(r.id, r.groupId, r.name, r.published, r.marketGroupId, r.metaGroupId);
+      ins.run(r.id, r.groupId, r.name, r.published, r.marketGroupId, r.metaGroupId, r.volume);
     }
   })();
 }

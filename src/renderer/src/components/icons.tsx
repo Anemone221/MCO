@@ -153,6 +153,20 @@ export function BlueprintIcon(props: IconProps) {
   );
 }
 
+/**
+ * Mining — a pickaxe: the handle on the diagonal, its head curving across the
+ * top. Drawn here in the same 24×24 stroke style as the icons above rather
+ * than lifted from a set, because it is two strokes.
+ */
+export function PickaxeIcon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M4 20 13 11" />
+      <path d="M8 6a10 10 0 0 1 10 10" />
+    </StrokeIcon>
+  );
+}
+
 /** Settings gear. */
 export function SettingsIcon(props: IconProps) {
   return (

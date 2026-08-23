@@ -1,5 +1,3 @@
-import type { Readable } from 'node:stream';
-import yauzl from 'yauzl';
 import YAML from 'yaml';
 import {
   replaceBlueprints,
@@ -24,43 +22,11 @@ import {
   parseTypeDogmaStream,
   parseTypesStream,
 } from './parse';
+import { bufferStream, processZip } from './zip';
 
 export interface SdeImportProgress {
   phase: 'categories' | 'groups' | 'types' | 'dogma' | 'blueprints' | 'maps' | 'finalizing';
   typesProcessed?: number;
-}
-
-type EntryHandler = (stream: Readable) => Promise<void>;
-
-async function bufferStream(stream: Readable): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-function processZip(zipPath: string, handlers: Record<string, EntryHandler>): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    yauzl.open(zipPath, { lazyEntries: true }, (err, zip) => {
-      if (err || !zip) return reject(err ?? new Error('Could not open SDE zip'));
-
-      zip.on('error', reject);
-      zip.on('end', resolve);
-      zip.on('entry', (entry: yauzl.Entry) => {
-        const handler = handlers[entry.fileName];
-        if (!handler) {
-          zip.readEntry();
-          return;
-        }
-        zip.openReadStream(entry, (streamErr, stream) => {
-          if (streamErr || !stream) return reject(streamErr ?? new Error('Could not read entry'));
-          handler(stream)
-            .then(() => zip.readEntry())
-            .catch(reject);
-        });
-      });
-      zip.readEntry();
-    });
-  });
 }
 
 /** Import the SDE zip into SQLite: categories, groups, types, and the version stamp. */
@@ -104,6 +70,7 @@ export async function importSde(
         published: t.published,
         marketGroupId: t.marketGroupId,
         metaGroupId: t.metaGroupId,
+        volume: t.volume,
       }));
     },
     'blueprints.yaml': async (stream) => {

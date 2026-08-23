@@ -271,3 +271,36 @@ export interface EsiStructure {
 export function getStructure(structureId: number, characterId: number): Promise<EsiStructure> {
   return esiGet<EsiStructure>(`/universe/structures/${structureId}`, { characterId });
 }
+
+export interface EsiMiningEntry {
+  /** UTC calendar day, YYYY-MM-DD — ESI aggregates the ledger per day. */
+  date: string;
+  /** Units mined that day, in that system, of that type. */
+  quantity: number;
+  solar_system_id: number;
+  type_id: number;
+}
+
+/**
+ * Ceiling on mining-ledger pages read at once. ESI serves 1000 rows to a page
+ * and a row is one (day, system, type) bucket, so even a character mining a
+ * dozen ore types across a dozen systems every day for the ledger's whole
+ * 30-day reach stays inside one page — this is the guard, not the stopping
+ * rule (`X-Pages` is that).
+ */
+const MINING_LEDGER_MAX_PAGES = 5;
+
+/**
+ * A character's mining ledger — the last ~30 days, already aggregated by day,
+ * solar system and ore type. Requires esi-industry.read_character_mining.v1.
+ *
+ * Unlike the wallet journal there is no "far enough back" to stop at: the
+ * endpoint's own window is the limit, and every page of it is worth banking
+ * (MCO's history reaches further back than ESI's does).
+ */
+export function getCharacterMiningLedger(characterId: number): Promise<EsiMiningEntry[]> {
+  return esiGetPaged<EsiMiningEntry>(`/characters/${characterId}/mining`, {
+    characterId,
+    maxPages: MINING_LEDGER_MAX_PAGES,
+  });
+}

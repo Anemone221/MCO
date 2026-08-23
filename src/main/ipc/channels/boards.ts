@@ -4,6 +4,7 @@ import { buildNearestBoard } from '../../services/proximityService';
 import { buildCloneBoard } from '../../services/cloneService';
 import { buildDashboardSummary } from '../../services/dashboardService';
 import { buildWalletSummary } from '../../services/walletService';
+import { buildMiningSummary } from '../../services/miningService';
 import { handle } from '../handle';
 
 /**
@@ -22,4 +23,5 @@ export function registerBoardChannels(): void {
   handle(IpcChannel.clonesBoard, () => buildCloneBoard());
   handle(IpcChannel.dashboardSummary, () => buildDashboardSummary());
   handle(IpcChannel.walletSummary, () => buildWalletSummary());
+  handle(IpcChannel.miningSummary, (_event, days: number | null) => buildMiningSummary(days));
 }

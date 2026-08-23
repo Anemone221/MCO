@@ -128,6 +128,53 @@ its own `--warn` (its accent *was* the default `--warn`, the same hex) and `holo
 remaining known deviation is lightness band — the tokens are the app's status
 colors first and chart series second, so they are not re-stepped for charting.
 
+## Mining (`/mining`, `pages/Mining.tsx`)
+
+Who has been mining, what, and where — the ledger for a roster where "is anyone
+actually using the Rorqual" is a question about ninety characters, not one.
+Assembled by `buildMiningSummary(days)` (`services/miningService.ts`) from four
+GROUP BYs over `character_mining_ledger` (`db/repositories/characterMining.ts`).
+
+- **Period** — Today / 7 days / 30 days / All, as an inline tab bar, remembered
+  in localStorage under `mco-mining-period`. Day-grained because the ledger is:
+  ESI reports mining aggregated per UTC day, so anything finer would be
+  invented. **All** reaches past ESI's own ~30-day horizon into what past sweeps
+  banked — same arrangement as the Wallet page's previous months.
+- **m³, not units.** ESI counts units, and a unit of Veldspar (0.1 m³) against a
+  unit of ice (1,000 m³) makes a unit total meaningless, so every figure is
+  `units × sde_types.volume`. Both are shown: volume leads, units sit beside it.
+  When the imported SDE predates the volume column (v34) the page falls back to
+  reading in units rather than showing a column of zeros (`miningMetric` in
+  `lib/miningView.ts`), and says which types are missing and that a re-import
+  fixes it.
+- **Tiles**: volume mined, ore types, characters mining, systems — the window's
+  shape in one sweep, via the shared `StatTile`.
+- **Mined by day** (`components/charts/MiningByDayChart.tsx`): one column per
+  UTC day, zero-filled through today (`fillMiningDays` in `main/mining/window.ts`).
+  One series, not a stack: splitting by ore type would put a dozen classes on a
+  30-column chart, well past where adjacent colours blur, and the ore split is
+  one click away in the table under it. Hidden for a single-day window and for
+  an empty ledger, so amCharts never initializes on a profile with nothing to
+  draw.
+- **One table, three breakdowns** — Character / Ore type / System, switched by a
+  tab bar. They are the same aggregate cut three ways, so they share one row
+  shape and one sortable table (`miningRows`, `miningColumns` in
+  `lib/miningView.ts`) rather than three near-identical tables; volume and units
+  stay in the same columns across all three, so switching doesn't move the
+  numbers the eye is tracking. Character rows link to the sheet and take the
+  right-click tag/group menu like every other character list; ore rows carry the
+  type icon, system rows the security tier colour.
+- **The bar is in the cell.** A 90-character roster would need 90 chart bars to
+  rank at a glance, which no chart carries — so each row's share of the largest
+  row is drawn *behind* its volume figure (`.mining-bar`, aria-hidden). The
+  number stays exact and sortable; the bar is what the eye reads first.
+- **Coverage notices** say why a total is a floor: characters missing
+  `esi-industry.read_character_mining.v1` (a scope added after they were, so
+  each needs one re-add), characters whose login expired, and ore types the SDE
+  has no volume for. `pending` is deliberately *not* treated as a gap — with 90+
+  characters most have simply never mined, and a synced character that stored no
+  rows looks exactly like one that spent the window ratting.
+
 ## Roster (`/roster`, `pages/Roster.tsx`)
 
 The home table: every character with account, capability tags, last-known location and

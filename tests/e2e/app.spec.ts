@@ -300,6 +300,28 @@ test('opens the Wallet page with the income chart placeholder', async () => {
   await app.close();
 });
 
+test('opens the Mining page with an empty ledger', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Mining' }).click();
+  await expect(window.locator('h2')).toContainText('Mining');
+  await expect(window.getByTestId('mining-tiles')).toBeVisible();
+  // Nothing mined → the table says so and the by-day chart never renders, so
+  // amCharts does not initialize on an empty profile.
+  await expect(window.getByTestId('mining-table')).toContainText('No mining recorded');
+  await expect(window.getByTestId('mining-chart')).toHaveCount(0);
+
+  // The breakdown tabs swap the table's columns in place.
+  await window.getByTestId('mining-breakdown-ore').click();
+  await expect(window.getByTestId('mining-table')).toContainText('m³ / unit');
+  await window.getByTestId('mining-breakdown-system').click();
+  await expect(window.getByTestId('mining-table')).toContainText('Region');
+
+  await app.close();
+});
+
 test('opens the Clones page', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
   const app = await launchApp(userDataDir);

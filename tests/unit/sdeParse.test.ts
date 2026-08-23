@@ -64,9 +64,49 @@ describe('parseTypesStream', () => {
 
     const rows = await parseTypesStream(Readable.from(yaml));
     expect(rows).toEqual([
-      { id: 587, groupId: 25, name: 'Rifter', published: 1, marketGroupId: null, metaGroupId: null },
-      { id: 34, groupId: 18, name: 'Tritanium', published: 1, marketGroupId: null, metaGroupId: null },
+      {
+        id: 587,
+        groupId: 25,
+        name: 'Rifter',
+        published: 1,
+        marketGroupId: null,
+        metaGroupId: null,
+        volume: null,
+      },
+      {
+        id: 34,
+        groupId: 18,
+        name: 'Tritanium',
+        published: 1,
+        marketGroupId: null,
+        metaGroupId: null,
+        volume: null,
+      },
     ]);
+  });
+
+  it('extracts the per-unit volume the mining ledger measures ore in', async () => {
+    const yaml = [
+      '1230:',
+      '  groupID: 462',
+      '  name:',
+      '    en: Veldspar',
+      '  published: true',
+      '  volume: 0.1',
+      '17976:',
+      '  groupID: 465',
+      '  name:',
+      '    en: Clear Icicle',
+      '  published: true',
+      '  volume: 1000.0',
+      '',
+    ].join('\n');
+
+    const rows = await parseTypesStream(Readable.from(yaml));
+
+    // Three orders of magnitude between a unit of ore and a unit of ice: the
+    // reason the page reports m³ rather than ESI's unit counts.
+    expect(rows).toMatchObject([{ volume: 0.1 }, { volume: 1000 }]);
   });
 
   it('extracts market and meta group, which decide what the blueprint checklist counts', async () => {

@@ -11,6 +11,7 @@ import {
   demoGroup,
   demoGroupDetail,
   demoLocationEntry,
+  demoMiningSummary,
   demoNearestBoard,
   demoNotification,
   demoPlanAnalysis,
@@ -103,6 +104,9 @@ export const mco: McoApi = {
   },
   dashboard: {
     summary: () => scrubbed(real.dashboard.summary(), demoDashboardSummary),
+  },
+  mining: {
+    summary: (days) => scrubbed(real.mining.summary(days), demoMiningSummary),
   },
   notifications: {
     ...real.notifications,

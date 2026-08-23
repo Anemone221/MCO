@@ -14,6 +14,7 @@ import type {
   GroupDetail,
   JumpCloneEntry,
   LocationEntry,
+  MiningSummary,
   NearestBoard,
   PlanAnalysis,
   RosterEntry,
@@ -418,6 +419,31 @@ export function demoDashboardSummary(summary: DashboardSummary): DashboardSummar
   return {
     ...summary,
     characters: summary.characters.map((entry) => ({
+      ...entry,
+      characterName: demoCharacterName(entry.characterId, entry.characterName),
+    })),
+  };
+}
+
+/**
+ * Ore names are game data and stay as they are; who mined it and where are not.
+ * The system rows carry the user's actual mining systems, which name a home as
+ * surely as a docked station does.
+ */
+export function demoMiningSummary(summary: MiningSummary): MiningSummary {
+  return {
+    ...summary,
+    byCharacter: summary.byCharacter.map((row) => ({
+      ...row,
+      characterName: demoCharacterName(row.characterId, row.characterName),
+      accountLabel: demoAccountLabel(row.accountLabel),
+    })),
+    bySystem: summary.bySystem.map((row) => ({
+      ...row,
+      systemName: demoSystemName(row.systemName),
+      regionName: demoRegionName(row.regionName),
+    })),
+    coverage: summary.coverage.map((entry) => ({
       ...entry,
       characterName: demoCharacterName(entry.characterId, entry.characterName),
     })),

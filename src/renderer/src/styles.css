@@ -2565,3 +2565,27 @@ details.clone-block > p {
   font-weight: 400;
   margin-left: 0.15rem;
 }
+
+/* Mining: the volume cell doubles as its own bar chart. A roster of 90+ miners
+   would need 90 chart bars to rank at a glance, which no chart can carry — so
+   the bar is drawn *behind* the figure in the cell it belongs to, sized against
+   the biggest row. The number stays exact and sortable; the bar is decoration
+   the eye reads first (aria-hidden, so a screen reader hears only the figure). */
+.mining-bar-cell {
+  position: relative;
+  isolation: isolate;
+}
+
+.mining-bar {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  right: 0;
+  z-index: -1;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 3px;
+}
+
+.mining-bar__value {
+  position: relative;
+}

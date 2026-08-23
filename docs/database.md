@@ -70,6 +70,8 @@ The profile's version is shown in Settings → About.
 | 30 | character_wallet_journal_parties | `character_wallet_journal.tax/.first_party_id/.second_party_id` |
 | 31 | sde_system_jumps | `sde_system_jumps`, `sde_systems.pos_x/.pos_y/.pos_z` |
 | 32 | plan_sheet_visibility | `skill_plans.show_on_character_sheet` |
+| 33 | character_mining_ledger | `character_mining_ledger` |
+| 34 | sde_types_volume | `sde_types.volume` |
 
 ## Schema reference
 
@@ -131,6 +133,17 @@ The profile's version is shown in Settings → About.
   indexed on `occurred_at` for the calendar-month range scan. **The table is the
   archive** — ESI's journal reaches ~30 days back, so nothing prunes it: the
   Wallet page's previous-months view is exactly what past syncs banked.
+- **`character_mining_ledger`** — the mining ledger exactly as ESI aggregates
+  it: units mined per `(character_id, day, solar_system_id, type_id)`, which is
+  also the primary key. That grain is ESI's, not a choice — the endpoint never
+  reports individual cycles. The upsert **replaces** the quantity on conflict
+  (ESI reports each bucket's running total, so today's row grows through the day
+  and every sweep re-reads it; adding would multiply a day's mining by the number
+  of sweeps). Rows stay after they age out of ESI's ~30-day window, so the Mining
+  page's longer periods read history the sweeps banked. Volume in m³ comes from
+  joining `sde_types.volume` — a type the imported SDE has no volume for is
+  counted in units and reported as missing, never silently zeroed
+  (`db/repositories/characterMining.ts`).
 - **`character_blueprints`** — blueprints in a character's own hangars, keyed by
   ESI's `item_id` (unique game-wide, so it is the natural key and a blueprint
   handed to another character replaces its stale row rather than duplicating).
@@ -222,6 +235,10 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
   EFT/plan imports. `market_group_id` and `meta_group_id` (added in v25) are what
   the blueprint checklist reads: a blueprint *with* a market group is one that
   exists as an original, and the product's meta group gives its tech tier.
+  `volume` (added in v34) is one unit's m³ — what turns the mining ledger's unit
+  counts into the volume a miner actually measures in. Null on installs that
+  imported before v34, which the Mining page reports as "re-import the SDE"
+  rather than as 0 m³.
 - **`sde_blueprints`** — blueprint type → what one run makes
   (`product_type_id`), `activity` (`manufacturing` / `reaction` / `other`) and
   `max_production_limit`. Blueprint types all sit in the "Blueprint" category

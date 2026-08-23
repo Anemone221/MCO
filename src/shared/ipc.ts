@@ -14,6 +14,7 @@ import type {
   FitAnalysis,
   GroupDetail,
   LocationEntry,
+  MiningSummary,
   NearestBoard,
   PlanAnalysis,
   PlanDraftSource,
@@ -103,6 +104,7 @@ export const IpcChannel = {
   blueprintsRemoveCorp: 'blueprints:removeCorp',
   dashboardSummary: 'dashboard:summary',
   walletSummary: 'wallet:summary',
+  miningSummary: 'mining:summary',
   notificationsList: 'notifications:list',
   notificationsMarkRead: 'notifications:markRead',
   notificationsMarkAllRead: 'notifications:markAllRead',
@@ -309,6 +311,14 @@ export interface McoApi {
   };
   wallet: {
     summary: () => Promise<WalletSummary>;
+  };
+  mining: {
+    /**
+     * The mining ledger over the last `days` UTC days (1 = today), or
+     * everything banked when `days` is null. ESI only reaches ~30 days back,
+     * so longer windows are answered from what past sweeps stored.
+     */
+    summary: (days: number | null) => Promise<MiningSummary>;
   };
   notifications: {
     list: () => Promise<AppNotification[]>;

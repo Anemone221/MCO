@@ -11,6 +11,7 @@ import {
   SCOPE_READ_CLONES,
   SCOPE_READ_FATIGUE,
   SCOPE_READ_IMPLANTS,
+  SCOPE_READ_MINING,
   SCOPE_READ_ONLINE,
   SCOPE_READ_WALLET,
 } from '../config';
@@ -27,6 +28,7 @@ import {
   getCharacterShip,
   getCharacterSkillQueue,
   getCharacterSkills,
+  getCharacterMiningLedger,
   getCharacterWallet,
   getCharacterWalletJournal,
 } from '../esi/endpoints';
@@ -55,6 +57,7 @@ import { upsertCharacterAttributes } from '../db/repositories/characterAttribute
 import { listCharacterWallets, upsertCharacterWallet } from '../db/repositories/characterWallet';
 import { upsertCharacterOnline } from '../db/repositories/characterOnline';
 import { isTrackedRefType, upsertJournalEntries } from '../db/repositories/characterWalletJournal';
+import { upsertMiningEntries } from '../db/repositories/characterMining';
 import { getCached, isFresh } from '../db/repositories/esiCache';
 import {
   getActiveSkillLevels,
@@ -238,6 +241,11 @@ const SYNC_TASKS: SyncTask[] = [
     run: ({ characterId }) => syncWalletJournal(characterId),
   },
   {
+    name: 'Mining ledger',
+    scope: SCOPE_READ_MINING,
+    run: ({ characterId }) => syncMiningLedger(characterId),
+  },
+  {
     // Only a character's *own* hangars — an alt corp's blueprints are read
     // once per corp through its designated reader (services/blueprintService.ts).
     name: 'Blueprint',
@@ -360,6 +368,29 @@ async function syncWalletJournal(characterId: number): Promise<void> {
       firstPartyId: e.first_party_id ?? null,
       secondPartyId: e.second_party_id ?? null,
       occurredAt: e.date,
+    })),
+  );
+}
+
+/**
+ * Read a character's mining ledger and bank every row of it.
+ *
+ * ESI already aggregates the ledger per (day, solar system, ore type) and only
+ * reaches ~30 days back, so there is nothing to filter and no "far enough
+ * back" to stop at — the whole response is the last month of mining, and the
+ * upsert refreshes today's still-growing buckets in place. Rows stay in the
+ * table once they age out of ESI's window, which is what lets the Mining page
+ * look further back than ESI can.
+ */
+async function syncMiningLedger(characterId: number): Promise<void> {
+  const entries = await getCharacterMiningLedger(characterId);
+  upsertMiningEntries(
+    characterId,
+    entries.map((e) => ({
+      day: e.date,
+      solarSystemId: e.solar_system_id,
+      typeId: e.type_id,
+      quantity: e.quantity,
     })),
   );
 }

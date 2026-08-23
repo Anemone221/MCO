@@ -40,6 +40,12 @@ Notes:
 - The zip is processed entry-by-entry with `yauzl` (lazy entries); the two huge files
   (`types.yaml`, `typeDogma.yaml`) are parsed via streaming parsers in `sde/parse.ts`
   that emit progress counts, so the UI can show "N types processed" instead of freezing.
+- `types.yaml` also supplies each type's **volume** (m³ per unit), which is what
+  turns the mining ledger's unit counts into the volume miners measure in — a
+  unit of Veldspar is 0.1 m³ and a unit of ice 1,000, so summing units would
+  produce a number that means nothing. Nullable: a profile imported before the
+  column existed reads as "no volume for this type", and the Mining page says so
+  instead of reporting 0 m³.
 - `typeDogma.yaml` supplies three things per type: its **required skills + levels**
   (dogma attributes), and, for skills themselves, the **rank** (skillTimeConstant) used
   by the SP formula plus the **primary/secondary training attributes** (dogma 180/181,

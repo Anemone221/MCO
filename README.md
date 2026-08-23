@@ -177,6 +177,15 @@ chart of up to a year of completed months (earnings above the line, tax and dona
 sent below it) over a table of the exact figures. History accrues from the first sync
 onward — ESI's journal only reaches ~30 days back.
 
+### Mining
+The mining ledger across every character, over today, 7 days, 30 days or everything
+recorded. Volume in m³ rather than ESI's unit counts (a unit of Veldspar is 0.1 m³ and a
+unit of ice 1,000), with the totals cut three ways in one sortable table — by character,
+by ore type, by system — and a by-day chart above it. Each row's share of the biggest row
+is drawn behind its figure, so ninety miners rank at a glance without ninety chart bars.
+ESI's ledger reaches ~30 days back; MCO keeps what it reads, so history builds up from
+the first sync onward.
+
 ### Notifications
 An OS toast and an in-app bell when a character's skill queue is about to run dry —
 nothing queued behind the training skill, finishing within 3 days. Deduped per character
@@ -246,6 +255,7 @@ Scopes requested when you add a character:
 | `esi-wallet.read_character_wallet.v1` | Wallet balance and the Wallet page's journal categories |
 | `esi-universe.read_structures.v1` | Resolving player-owned citadel names |
 | `esi-characters.read_blueprints.v1` | The blueprint checklist |
+| `esi-industry.read_character_mining.v1` | The mining ledger |
 
 **Not** in that grant: `esi-corporations.read_blueprints.v1`. It's the one corporation
 scope MCO takes, it's requested per character on demand from the Blueprints page, and it
