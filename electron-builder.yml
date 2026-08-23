@@ -42,6 +42,15 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   include: build/installer.nsh
+  # Pinned, like the DMG's below. electron-builder's default is
+  # `${productName} Setup ${version}.${ext}` — a name with spaces in it — and
+  # up to v0.3.0 nothing here noticed, because `--publish always` let
+  # electron-builder's own GitHub uploader rewrite the spaces to hyphens in the
+  # asset *and* in latest.yml. The release workflow now builds with
+  # `--publish never` and uploads with `gh`, so nothing rewrites anything: the
+  # name this produces is the name that ships, the name latest.yml points
+  # electron-updater at, and the name README.md documents. Leave it explicit.
+  artifactName: ${productName}-Setup-${version}.${ext}
 
 mac:
   category: public.app-category.utilities
