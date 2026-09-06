@@ -322,6 +322,24 @@ test('opens the Mining page with an empty ledger', async () => {
   await app.close();
 });
 
+test('opens the Mercenary Dens page with no dens on record', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Mercenary Dens' }).click();
+  await expect(window.locator('h2')).toContainText('Mercenary Dens');
+  await expect(window.getByTestId('mercenary-tiles')).toBeVisible();
+  // A fresh profile has no characters, so it cannot even ask ESI about dens —
+  // the empty state has to say that rather than imply the roster owns none.
+  await expect(window.getByTestId('mercenary-empty')).toContainText(
+    'No character has granted the scopes',
+  );
+  await expect(window.getByTestId('mercenary-table')).toHaveCount(0);
+
+  await app.close();
+});
+
 test('opens the Clones page', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
   const app = await launchApp(userDataDir);

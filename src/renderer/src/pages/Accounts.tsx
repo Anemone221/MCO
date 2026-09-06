@@ -1,23 +1,45 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { AccountBucket } from '@shared/types';
 import { errorMessage, mco } from '../lib/ipc';
+import { buildAccountRows, idleOmegaAccounts, type AccountRowView } from '../lib/accountsView';
 import { useMcoData } from '../lib/useMcoData';
 
+/**
+ * What the account's characters are doing. Omega training nobody is the one
+ * alarming case — the subscription is paying for a training slot standing
+ * empty — so it is the only warn-coloured chip here; an idle Alpha is routine.
+ */
+function TrainingCell({ row }: { row: AccountRowView }) {
+  if (row.characterCount === 0) return <span className="muted">—</span>;
+  if (row.idleOmega) {
+    return (
+      <span className="chip chip--warn" data-testid={`account-idle-${row.account.id}`}>
+        Nobody training
+      </span>
+    );
+  }
+  if (row.trainingCount === 0) return <span className="chip chip--idle">Idle</span>;
+  return (
+    <span className="chip chip--ok">
+      Training{row.trainingCount > 1 ? ` ×${row.trainingCount}` : ''}
+    </span>
+  );
+}
+
 function AccountRow({
-  account,
-  characterCount,
+  row,
   busy,
   onRename,
   onSetOmega,
   onRemove,
 }: {
-  account: AccountBucket;
-  characterCount: number;
+  row: AccountRowView;
   busy: boolean;
   onRename: (label: string) => void;
   onSetOmega: (isOmega: boolean) => void;
   onRemove: () => void;
 }) {
+  const { account, characterCount } = row;
   const [name, setName] = useState(account.label);
 
   useEffect(() => {
@@ -46,6 +68,9 @@ function AccountRow({
         />
       </td>
       <td>{characterCount}</td>
+      <td>
+        <TrainingCell row={row} />
+      </td>
       <td>
         <label className="omega-toggle">
           <input
@@ -77,14 +102,8 @@ export default function Accounts() {
   });
   const { accounts = [], roster = [] } = data ?? {};
 
-  const counts = useMemo(() => {
-    const map = new Map<number, number>();
-    for (const entry of roster) {
-      const id = entry.character.accountId;
-      if (id !== null) map.set(id, (map.get(id) ?? 0) + 1);
-    }
-    return map;
-  }, [roster]);
+  const rows = useMemo(() => buildAccountRows(accounts, roster), [accounts, roster]);
+  const idle = useMemo(() => idleOmegaAccounts(rows), [rows]);
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -106,8 +125,7 @@ export default function Accounts() {
     await run(() => mco.accounts.create(label));
   }
 
-  async function removeAccount(account: AccountBucket): Promise<void> {
-    const count = counts.get(account.id) ?? 0;
+  async function removeAccount(account: AccountBucket, count: number): Promise<void> {
     if (
       count > 0 &&
       !(await mco.system.confirm(
@@ -147,6 +165,13 @@ export default function Accounts() {
 
       {error && <div className="error-box" data-testid="accounts-error">{error}</div>}
 
+      {idle.length > 0 && (
+        <div className="warn-box" data-testid="omega-idle-alert">
+          <strong>Omega training time going to waste</strong> — nobody is training on{' '}
+          {idle.map((row) => row.account.label).join(', ')}.
+        </div>
+      )}
+
       {accounts.length === 0 ? (
         <div className="empty-state">
           <h3>No accounts yet</h3>
@@ -158,20 +183,22 @@ export default function Accounts() {
             <tr>
               <th>Account name</th>
               <th>Characters</th>
+              <th>Training</th>
               <th>Status</th>
               <th aria-label="actions" />
             </tr>
           </thead>
           <tbody>
-            {accounts.map((account) => (
+            {rows.map((row) => (
               <AccountRow
-                key={account.id}
-                account={account}
-                characterCount={counts.get(account.id) ?? 0}
+                key={row.account.id}
+                row={row}
                 busy={busy}
-                onRename={(label) => void run(() => mco.accounts.rename(account.id, label))}
-                onSetOmega={(isOmega) => void run(() => mco.accounts.setOmega(account.id, isOmega))}
-                onRemove={() => void removeAccount(account)}
+                onRename={(label) => void run(() => mco.accounts.rename(row.account.id, label))}
+                onSetOmega={(isOmega) =>
+                  void run(() => mco.accounts.setOmega(row.account.id, isOmega))
+                }
+                onRemove={() => void removeAccount(row.account, row.characterCount)}
               />
             ))}
           </tbody>

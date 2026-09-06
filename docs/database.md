@@ -72,6 +72,8 @@ The profile's version is shown in Settings → About.
 | 32 | plan_sheet_visibility | `skill_plans.show_on_character_sheet` |
 | 33 | character_mining_ledger | `character_mining_ledger` |
 | 34 | sde_types_volume | `sde_types.volume` |
+| 35 | mercenary_dens | `mercenary_dens`, `mercenary_operations`, `mercenary_den_sync` |
+| 36 | planets | `planets` |
 
 ## Schema reference
 
@@ -175,6 +177,27 @@ The profile's version is shown in Settings → About.
 Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 `replaceQueue`, `replaceJumpClones`, …) — simple and idempotent.
 
+- **`mercenary_dens`** — one row per Mercenary Den, keyed by the den's own item
+  id (unique game-wide). The listing endpoint establishes the row with only
+  `(den_id, character_id, planet_id)`; every other column is filled by the
+  per-den detail read and is therefore **nullable** — a den whose detail request
+  failed is still a den the character holds, and a null `state` means "seen, not
+  yet described". `replaceMercenaryDens` deletes the character's dens that the
+  latest listing omits (they were unanchored) but leaves detail columns alone on
+  the ones it keeps, so a sweep whose detail reads fail shows last sweep's
+  readings rather than blanking the board. `skyhook_corporation_name` is
+  denormalized instead of given a corporation-names table: it is one display
+  string on a row replaced wholesale each sweep, and the few distinct sov
+  holders resolve through the ESI response cache for free.
+- **`mercenary_operations`** — one row per Mercenary Tactical Operation offer,
+  keyed by ESI's UUID (the only string id in the schema). Joined to a den on
+  `mercenary_den_id`, which ESI puts on the *operation*, so an offer can be
+  stored before its den's detail lands. Replaced per character each sweep for a
+  sharper reason than the dens: an offer that rolled over is not stale, it is
+  gone.
+- **`mercenary_den_sync`** — per character, when its den and operation listings
+  last succeeded. This is what separates "holds no dens" from "never looked",
+  which is the difference between an empty board and a `pending` coverage row.
 ### User organization
 
 - **`character_groups`** + **`character_group_members`** — optional, many-to-many
@@ -215,6 +238,13 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
   `pages` is the response's `X-Pages` (null off paginated routes), stored because a fresh
   hit skips the request that would otherwise carry it — `esiGetPaged` reads the page count
   from cache and from the wire alike.
+- **`planets`** — planet id → name, system, type, resolved from ESI's public
+  `/universe/planets` route because the SDE import carries no planets and a den's
+  only address is a planet id. Its own table rather than an `sde_` one: it is
+  filled by ESI at sync time, not by the importer, and must survive an SDE
+  re-import (which replaces the `sde_` tables). No refresh policy — a planet is
+  never renamed or moved, so a resolved row is resolved forever; only `failed_at`
+  is worth re-reading.
 - **`notifications`** — in-app notification feed. `dedupe_key` (UNIQUE) is what makes
   "notify once per distinct occurrence" work, e.g. `queue-drain:<charId>:<finishDate>`.
 - **`sde_version`** — single row (id=1): imported SDE build number + timestamp.

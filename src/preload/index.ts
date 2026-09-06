@@ -149,6 +149,9 @@ const api: McoApi = {
   mining: {
     summary: call(IpcChannel.miningSummary),
   },
+  mercenary: {
+    board: call(IpcChannel.mercenaryBoard),
+  },
   notifications: {
     list: call(IpcChannel.notificationsList),
     markRead: call(IpcChannel.notificationsMarkRead),

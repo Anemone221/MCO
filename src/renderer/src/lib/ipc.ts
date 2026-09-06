@@ -11,6 +11,7 @@ import {
   demoGroup,
   demoGroupDetail,
   demoLocationEntry,
+  demoMercenaryBoard,
   demoMiningSummary,
   demoNearestBoard,
   demoNotification,
@@ -107,6 +108,9 @@ export const mco: McoApi = {
   },
   mining: {
     summary: (days) => scrubbed(real.mining.summary(days), demoMiningSummary),
+  },
+  mercenary: {
+    board: () => scrubbed(real.mercenary.board(), demoMercenaryBoard),
   },
   notifications: {
     ...real.notifications,

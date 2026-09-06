@@ -10,7 +10,7 @@ there is no server, no account, and nothing is uploaded anywhere.
 
 - **Windows / macOS / Linux** — Electron; Windows is the primary target.
 - **Free, open source (MIT)**, unofficial and not affiliated with CCP.
-- **Version 0.3.0** — usable day to day, still pre-release. A Windows installer and a
+- **Version 0.5.0** — usable day to day, still pre-release. A Windows installer and a
   macOS DMG are on [Releases](https://github.com/Anemone221/MCO/releases); see
   [Install](#install) for the first-launch step each one needs, or build it from source
   (below).
@@ -25,13 +25,14 @@ should take five seconds start taking twenty minutes of alt-tabbing:
 
 | The question | Where MCO answers it |
 | --- | --- |
-| Which of my accounts are wasting training time right now? | Roster / Accounts |
+| Which of my accounts are wasting training time right now? | Roster / Accounts / Notifications |
 | How many of my characters can fly *this* fit — and what's missing for the rest? | Fits |
 | Who can light a cyno / fly a FAX / run boosts? | Tags |
 | Where is everyone parked, and who's in a bad system? | Location |
 | Which of my cyno alts is closest to *that* system? | Location |
 | Which clone has the +5s, and who's off jump cooldown? | Clones |
 | Do I already own that BPO, and who's holding it? | Blueprints |
+| Which of my Mercenary Dens needs me — reinforced, sliding into anarchy, or sitting on an unclaimed operation? | Mercenary Dens |
 | Whose skill queue runs dry this weekend? | Notifications |
 
 The design bias throughout is **density**: compact sortable tables and filters, not
@@ -73,7 +74,11 @@ page.
 Account buckets and character→account assignment. ESI never reveals which account a
 character belongs to, so this mapping is yours to maintain — and it's what turns
 "character X is idle" into "**this account** is burning training time". Each account
-carries an Omega checkbox (also invisible to ESI) that drives the idle warning.
+carries an Omega checkbox (also invisible to ESI) that drives the idle warnings: a
+**Training** column saying what each bucket is actually doing — training (with `×n` when
+MCT has more than one going), idle, or an amber **Nobody training** when an Omega
+account's characters are all idle — plus a call-out above the table and a warning
+through the notification bell.
 
 ### Groups
 User-defined organizational units — "WH defense", a specific supercapital fleet. A
@@ -186,10 +191,36 @@ is drawn behind its figure, so ninety miners rank at a glance without ninety cha
 ESI's ledger reaches ~30 days back; MCO keeps what it reads, so history builds up from
 the first sync onward.
 
+### Mercenary Dens
+Every Mercenary Den on the roster, one row per **den** rather than per character: a
+character can hold five, and every question this page answers is asked of a den, not of
+whoever anchored it. Characters holding none never appear, so the page stays short on a
+roster where most have never anchored one.
+
+Rows lead with what needs doing — reinforced first, then disabled, then anarchy at level
+2 or past it, then a den sitting on an unclaimed operation. A den quietly working scores
+nothing and sinks. Development and anarchy read as `L2 · 45%`, because the level is what
+has effect in game and the percentage is how close the next one is, and each den's
+tactical operations nest underneath it as sub-rows — an offer that lapsed since the last
+sync reads as expired rather than as work you could still take.
+
+Reinforcement is worked out, not reported: ESI calls a reinforced den *Paused*, the same
+word it uses for one sitting idle, so the timer is what separates them.
+
+Read-only, of necessity — ESI offers no route to start an operation, so the game is
+still where you run one.
+
 ### Notifications
 An OS toast and an in-app bell when a character's skill queue is about to run dry —
 nothing queued behind the training skill, finishing within 3 days. Deduped per character
 and finish date, so re-queueing earns a fresh warning and a repeated sweep doesn't.
+
+The same bell warns when an **Omega account has nobody training** — every character in
+the bucket idle while the subscription pays for a training slot standing empty. Alpha
+accounts are skipped, since an idle Alpha costs nothing, and so is a bucket with no
+characters assigned to it yet. Idleness has no finish date to dedupe against the way a
+queue does, so it warns once per account per day for as long as it lasts, rather than
+once an hourly sweep.
 
 ### Settings
 Sync status (per-character freshness, next due, scheduler state, "Sync all now"),
@@ -256,6 +287,12 @@ Scopes requested when you add a character:
 | `esi-universe.read_structures.v1` | Resolving player-owned citadel names |
 | `esi-characters.read_blueprints.v1` | The blueprint checklist |
 | `esi-industry.read_character_mining.v1` | The mining ledger |
+| `esi-structures.read_character.v1` | Mercenary Dens a character has anchored |
+| `esi-activities.read_character.v1` | The tactical operations standing at those dens |
+
+The last two are new in 0.5.0. A character added before it keeps working exactly as it
+did, but needs re-adding once to grant them — until then the Mercenary Dens page names
+it as missing coverage rather than quietly showing no dens.
 
 **Not** in that grant: `esi-corporations.read_blueprints.v1`. It's the one corporation
 scope MCO takes, it's requested per character on demand from the Blueprints page, and it

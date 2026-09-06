@@ -14,6 +14,7 @@ import type {
   FitAnalysis,
   GroupDetail,
   LocationEntry,
+  MercenaryBoard,
   MiningSummary,
   NearestBoard,
   PlanAnalysis,
@@ -105,6 +106,7 @@ export const IpcChannel = {
   dashboardSummary: 'dashboard:summary',
   walletSummary: 'wallet:summary',
   miningSummary: 'mining:summary',
+  mercenaryBoard: 'mercenary:board',
   notificationsList: 'notifications:list',
   notificationsMarkRead: 'notifications:markRead',
   notificationsMarkAllRead: 'notifications:markAllRead',
@@ -319,6 +321,15 @@ export interface McoApi {
      * so longer windows are answered from what past sweeps stored.
      */
     summary: (days: number | null) => Promise<MiningSummary>;
+  };
+  mercenary: {
+    /**
+     * Every Mercenary Den the roster holds, with its state, evolution meters
+     * and the tactical operations standing at it. Read-only: MCO reports what
+     * a den is doing, it cannot start an operation — ESI offers no write route
+     * for that, and the game is where you run one.
+     */
+    board: () => Promise<MercenaryBoard>;
   };
   notifications: {
     list: () => Promise<AppNotification[]>;

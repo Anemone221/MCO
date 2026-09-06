@@ -684,6 +684,96 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE sde_types ADD COLUMN volume REAL;
     `,
   },
+  {
+    // Mercenary Dens and the tactical operations they offer.
+    //
+    // Two tables because ESI reports them as two things: a den is a structure
+    // that persists, an operation is an offer that expires. They are joined on
+    // `mercenary_den_id` — which ESI puts on the operation, so an operation
+    // can be stored before its den's detail read lands.
+    //
+    // Both are *replaced* per character each sweep rather than upserted: a den
+    // that was unanchored and an operation that rolled over both disappear
+    // from ESI's listing silently, and a row kept past that point would show a
+    // den the character no longer owns. That is the opposite of the mining
+    // ledger, where history is the point.
+    //
+    // Every detail column is nullable: the listing gives only (id, planet_id),
+    // and a den whose detail request failed is still a den the character has.
+    // A row with a null `state` means "seen, not yet described".
+    version: 35,
+    name: 'mercenary_dens',
+    sql: `
+      CREATE TABLE mercenary_dens (
+        den_id                 INTEGER PRIMARY KEY,
+        character_id           INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        planet_id              INTEGER NOT NULL,
+        type_id                INTEGER,
+        state                  TEXT,
+        skyhook_id             INTEGER,
+        skyhook_corporation_id INTEGER,
+        -- Denormalized rather than given a corporation-names table of its own:
+        -- it is one display string on a row that is replaced wholesale every
+        -- sweep anyway, and the handful of distinct sov holders across a
+        -- roster resolve through the ESI response cache for free.
+        skyhook_corporation_name TEXT,
+        infomorphs             INTEGER,
+        development_amount     INTEGER,
+        development_level      INTEGER,
+        anarchy_amount         INTEGER,
+        anarchy_level          INTEGER,
+        reinforcement_end      TEXT,
+        detail_synced_at       TEXT,
+        updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_mercenary_dens_character ON mercenary_dens (character_id);
+
+      CREATE TABLE mercenary_operations (
+        operation_id     TEXT PRIMARY KEY,
+        character_id     INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        mercenary_den_id INTEGER NOT NULL,
+        state            TEXT,
+        dungeon_type_id  INTEGER,
+        expires          TEXT,
+        updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX idx_mercenary_operations_character ON mercenary_operations (character_id);
+      CREATE INDEX idx_mercenary_operations_den ON mercenary_operations (mercenary_den_id);
+
+      CREATE TABLE mercenary_den_sync (
+        character_id INTEGER PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE,
+        dens_synced_at       TEXT,
+        operations_synced_at TEXT
+      );
+    `,
+  },
+  {
+    // Planet names, resolved from ESI's public /universe/planets route.
+    //
+    // The SDE import carries systems and regions but not planets, and a
+    // Mercenary Den's only address is a planet id — so without this the board
+    // can only say "den 1046... on 40255188". Its own table rather than an
+    // sde_ one because it is filled by ESI at sync time, not by the importer,
+    // and must survive an SDE re-import (which replaces the sde_ tables).
+    //
+    // There is no refresh policy on purpose: a planet's name and system are
+    // fixed for the life of the universe, so a resolved row is resolved
+    // forever. `failed_at` is the one thing worth re-reading.
+    version: 36,
+    name: 'planets',
+    sql: `
+      CREATE TABLE planets (
+        planet_id       INTEGER PRIMARY KEY,
+        name            TEXT,
+        solar_system_id INTEGER,
+        type_id         INTEGER,
+        resolved_at     TEXT,
+        failed_at       TEXT
+      );
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

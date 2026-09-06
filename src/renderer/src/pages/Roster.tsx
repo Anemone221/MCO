@@ -215,7 +215,7 @@ export default function Roster() {
     if (pinnedOrder) return applyPinnedOrder(roster, pinnedOrder);
     const tagIds = memberIdSet(tags, tagFilter);
     const base = tagIds === null ? roster : roster.filter((e) => tagIds.has(e.character.id));
-    return sortRoster(filterRoster(base, filters), sort, tagNames);
+    return sortRoster(filterRoster(base, filters, tagNames), sort, tagNames);
   }, [roster, tags, tagFilter, filters, sort, tagNames, pinnedOrder]);
   const filtered = visible.length !== roster.length;
   // Character column + visible optional columns + the actions column.
@@ -270,7 +270,7 @@ export default function Roster() {
         <div className="filter-bar">
           <input
             type="search"
-            placeholder="Search name, account, or skill…"
+            placeholder="Search name, account, skill, or tag…"
             value={filters.search}
             onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
             data-testid="roster-search"

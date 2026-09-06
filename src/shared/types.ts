@@ -1222,3 +1222,124 @@ export interface MiningSummary {
   /** Oldest day banked, so the page can say how far "All" actually reaches. */
   firstRecordedDay: string | null;
 }
+
+/**
+ * What is going on at a Mercenary Den, as the board words it.
+ *
+ * Not ESI's `state` verbatim: `reinforced` is split out of what ESI calls
+ * `Paused` (the two are told apart by a reinforcement timer), and `unknown`
+ * covers both `Unspecified` and a den whose detail read hasn't landed yet.
+ * See `main/mercenary/den.ts`.
+ */
+export type MercenaryDenStatus =
+  | 'running'
+  | 'reinforced'
+  | 'paused'
+  | 'disabled'
+  | 'unknown';
+
+/** What a Mercenary Tactical Operation offer amounts to, expiry already applied. */
+export type MercenaryOperationStatus =
+  | 'available'
+  | 'started'
+  | 'completed'
+  | 'expired'
+  | 'removed'
+  | 'unknown';
+
+/** One evolution meter (development or anarchy) as the UI needs it. */
+export interface MercenaryMeter {
+  /** Cumulative progress toward the next level, 0-100. Null until detail syncs. */
+  amount: number | null;
+  /** 0-4; null when ESI said `Unspecified` or detail hasn't synced. */
+  level: number | null;
+}
+
+/** One operation offered at a den. */
+export interface MercenaryOperationEntry {
+  /** A UUID — operations are the one thing here ESI keys by string. */
+  operationId: string;
+  denId: number;
+  status: MercenaryOperationStatus;
+  /** Dungeon type name from the SDE; null when the id isn't in the imported build. */
+  dungeonName: string | null;
+  dungeonTypeId: number | null;
+  expires: string | null;
+}
+
+/** One den, with everything known about it and the offers standing at it. */
+export interface MercenaryDenEntry {
+  denId: number;
+  characterId: number;
+  characterName: string;
+  accountLabel: string | null;
+  planetId: number;
+  /** Resolved planet name ("F-YH5B VI"); null until the planet lookup lands. */
+  planetName: string | null;
+  solarSystemId: number | null;
+  systemName: string | null;
+  regionName: string | null;
+  /** Null for wormhole/unknown space, as elsewhere on the roster. */
+  security: number | null;
+  status: MercenaryDenStatus;
+  /** Den hull name from the SDE; null when the id isn't in the imported build. */
+  typeName: string | null;
+  typeId: number | null;
+  /** Owner of the skyhook the den hangs off — the sov holder, not the den's owner. */
+  skyhookCorporationId: number | null;
+  skyhookCorporationName: string | null;
+  development: MercenaryMeter;
+  anarchy: MercenaryMeter;
+  /** Infomorphs banked at the den. Null until detail syncs. */
+  infomorphs: number | null;
+  /** When the reinforcement ends; null unless the den is reinforced right now. */
+  reinforcementEnd: string | null;
+  /** Offers at this den, open ones first. */
+  operations: MercenaryOperationEntry[];
+  /** Offers still worth running (available or started). */
+  openOperations: number;
+  /**
+   * How loudly this den wants attention, 0-4. The board's default sort, so the
+   * handful that need something rise above the ones quietly working.
+   */
+  attention: number;
+  /** Null until the den's detail request has succeeded at least once. */
+  detailSyncedAt: string | null;
+  updatedAt: string | null;
+}
+
+/** A character that cannot report dens or operations, and why. */
+export interface MercenaryCoverageEntry {
+  characterId: number;
+  characterName: string;
+  status: EsiDataStatus;
+  missingScopes: string[];
+}
+
+/**
+ * Everything the Mercenary Dens page shows.
+ *
+ * Dens are the unit, not characters: one character can hold up to five (one
+ * per level of Mercenary Den Management), and the question the page answers —
+ * "which den needs me" — is asked of dens.
+ */
+export interface MercenaryBoard {
+  dens: MercenaryDenEntry[];
+  totals: {
+    dens: number;
+    /** Characters holding at least one den. */
+    holders: number;
+    reinforced: number;
+    disabled: number;
+    /** Dens at or past the anarchy alert level. */
+    highAnarchy: number;
+    /** Offers standing across every den. */
+    openOperations: number;
+  };
+  /** Characters whose token can't report dens/operations (scope missing, login expired). */
+  coverage: MercenaryCoverageEntry[];
+  /** Characters whose token can report them. */
+  reportingCharacters: number;
+  /** Planet ids still unresolved, so the page can say why an address reads "—". */
+  unresolvedPlanets: number;
+}

@@ -121,6 +121,21 @@ describe('filterRoster', () => {
     expect(filterRoster(roster, { ...NO_ROSTER_FILTERS, search: 'ibis' })).toEqual([bob]);
   });
 
+  it('matches capability tags when given the tag-name lookup', () => {
+    const tagNames = new Map([
+      [alice.character.id, 'Cyno, Hyper HIC'],
+      [bob.character.id, 'Fax'],
+    ]);
+    expect(filterRoster(roster, { ...NO_ROSTER_FILTERS, search: 'cyno' }, tagNames)).toEqual([
+      alice,
+    ]);
+    expect(filterRoster(roster, { ...NO_ROSTER_FILTERS, search: 'hic' }, tagNames)).toEqual([alice]);
+    // Untagged characters simply never match a tag needle.
+    expect(filterRoster(roster, { ...NO_ROSTER_FILTERS, search: 'fax' }, tagNames)).toEqual([bob]);
+    // Without the lookup, tags are not searchable.
+    expect(filterRoster(roster, { ...NO_ROSTER_FILTERS, search: 'cyno' })).toEqual([]);
+  });
+
   it('filters idle and training characters', () => {
     expect(filterRoster(roster, { ...NO_ROSTER_FILTERS, training: 'idle' })).toEqual([bob]);
     expect(filterRoster(roster, { ...NO_ROSTER_FILTERS, training: 'training' })).toEqual([

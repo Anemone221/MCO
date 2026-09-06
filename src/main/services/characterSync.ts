@@ -7,7 +7,9 @@ import type {
 } from '@shared/types';
 import {
   ESI_BASE_URL,
+  SCOPE_READ_ACTIVITIES,
   SCOPE_READ_BLUEPRINTS,
+  SCOPE_READ_CHARACTER_STRUCTURES,
   SCOPE_READ_CLONES,
   SCOPE_READ_FATIGUE,
   SCOPE_READ_IMPLANTS,
@@ -70,6 +72,8 @@ import {
 import { getSystems, getTypeNames } from '../db/repositories/sde';
 import { pendingQueue } from '../skills/queue';
 import { resolveStructures } from './structureService';
+import { resolvePlanets } from './planetService';
+import { syncMercenaryDens, syncMercenaryOperations } from './mercenaryService';
 import { syncCharacterBlueprints } from './blueprintService';
 
 /**
@@ -81,6 +85,13 @@ import { syncCharacterBlueprints } from './blueprintService';
 interface SyncContext {
   characterId: number;
   noteStructure: (structureId: number | null | undefined) => void;
+  /**
+   * Planet ids a task came across, resolved into addresses at the end of the
+   * sync. Same arrangement as `noteStructure` for the same reason — one
+   * resolve pass per sync rather than one per task — minus the token, since
+   * the planet route is public.
+   */
+  notePlanet: (planetId: number | null | undefined) => void;
 }
 
 /**
@@ -246,6 +257,24 @@ const SYNC_TASKS: SyncTask[] = [
     run: ({ characterId }) => syncMiningLedger(characterId),
   },
   {
+    // The dens themselves. Its own task from the operations below because the
+    // two sit behind different scopes: a character that granted one and not
+    // the other still gets the half it can report.
+    name: 'Mercenary den',
+    scope: SCOPE_READ_CHARACTER_STRUCTURES,
+    async run({ characterId, notePlanet }) {
+      for (const planetId of await syncMercenaryDens(characterId)) notePlanet(planetId);
+    },
+  },
+  {
+    // Runs after the dens on purpose: an offer names the den it belongs to, so
+    // reading dens first means the board can attach every offer to a den it
+    // already knows about on the very first sync.
+    name: 'Mercenary operation',
+    scope: SCOPE_READ_ACTIVITIES,
+    run: ({ characterId }) => syncMercenaryOperations(characterId),
+  },
+  {
     // Only a character's *own* hangars — an alt corp's blueprints are read
     // once per corp through its designated reader (services/blueprintService.ts).
     name: 'Blueprint',
@@ -290,10 +319,14 @@ export async function syncCharacter(characterId: number): Promise<void> {
   // Player-owned structures the tasks reference, resolved into the shared
   // structures table once the sync's requests are done.
   const structureIds: number[] = [];
+  const planetIds: number[] = [];
   const ctx: SyncContext = {
     characterId,
     noteStructure: (structureId) => {
       if (structureId != null) structureIds.push(structureId);
+    },
+    notePlanet: (planetId) => {
+      if (planetId != null) planetIds.push(planetId);
     },
   };
 
@@ -320,6 +353,8 @@ export async function syncCharacter(characterId: number): Promise<void> {
 
   // Scope-gated, throttled and deduped inside the service; never throws.
   await resolveStructures(characterId, structureIds);
+  // Deduped and resolve-once inside the service; never throws.
+  await resolvePlanets(planetIds);
 
   touchRefreshed(characterId);
 }

@@ -102,6 +102,23 @@ export const SCOPE_READ_BLUEPRINTS = 'esi-characters.read_blueprints.v1';
 export const SCOPE_READ_MINING = 'esi-industry.read_character_mining.v1';
 
 /**
+ * A character's own deployed structures — in practice its Mercenary Dens, the
+ * only thing this route reports. Note it is `esi-structures`, *not* the
+ * `esi-universe.read_structures.v1` MCO already asks for: that one resolves
+ * *other people's* citadels by id, this one lists what this character has
+ * anchored. Neither implies the other.
+ */
+export const SCOPE_READ_CHARACTER_STRUCTURES = 'esi-structures.read_character.v1';
+
+/**
+ * The character's activity feed. MCO reads exactly one thing through it —
+ * Mercenary Tactical Operations, the jobs a den offers — because that is the
+ * other half of a den: the listing says a den exists, this says whether there
+ * is anything to run at it before its anarchy climbs.
+ */
+export const SCOPE_READ_ACTIVITIES = 'esi-activities.read_character.v1';
+
+/**
  * Blueprints an **alt corp** holds — a corporation wholly controlled by one
  * player, used as a shared hangar. Deliberately NOT in `ESI_SCOPES`: it is the
  * only corporation scope MCO asks for, ESI grants it only to a character with
@@ -124,6 +141,8 @@ export const ESI_SCOPES = [
   SCOPE_READ_ONLINE,
   SCOPE_READ_BLUEPRINTS,
   SCOPE_READ_MINING,
+  SCOPE_READ_CHARACTER_STRUCTURES,
+  SCOPE_READ_ACTIVITIES,
 ] as const;
 
 /**

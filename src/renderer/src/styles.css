@@ -813,6 +813,14 @@ tr:focus-within .row-actions button {
   color: var(--danger);
 }
 
+/* Something stopped but recoverable — a paused Mercenary Den. Amber sits
+   between the neutral idle chip and the red one, matching the token already
+   used for warnings elsewhere. */
+.chip--warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
 /* "Fatigue / Jump Clone / Training" at-a-glance boxes in the sheet toolbar. */
 .status-squares {
   display: flex;
@@ -902,6 +910,16 @@ tr:focus-within .row-actions button {
 .error-box {
   background: rgba(248, 81, 73, 0.12);
   border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+}
+
+/* Same shape as .error-box in amber: nothing has failed, but something is
+   costing the user (an Omega account training nobody). */
+.warn-box {
+  background: rgba(210, 153, 34, 0.12);
+  border: 1px solid var(--warn);
   border-radius: 8px;
   padding: 0.6rem 1rem;
   font-size: 0.85rem;
@@ -2588,4 +2606,40 @@ details.clone-block > p {
 
 .mining-bar__value {
   position: relative;
+}
+
+/* --- Mercenary Dens ------------------------------------------------------ */
+
+/* The chevron cell: a narrow, quiet control, so the row still reads as a row
+   of data rather than a row of buttons. */
+.data-table td.den-expand {
+  width: 1.6rem;
+  padding-right: 0;
+}
+
+.den-expand__button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.den-expand__button:hover {
+  color: var(--fg);
+}
+
+/* Operations nested under their den. Inset and dimmed so a scan down the
+   table still reads dens first — the sub-rows are detail, on request. */
+.data-table tr.subrow > td {
+  background: var(--bg);
+  font-size: 0.82rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.data-table tr.subrow > td:first-child {
+  border-left: 2px solid var(--border);
 }

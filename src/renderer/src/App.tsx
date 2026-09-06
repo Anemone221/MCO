@@ -17,6 +17,7 @@ import Clones from './pages/Clones';
 import Blueprints from './pages/Blueprints';
 import Wallet from './pages/Wallet';
 import Mining from './pages/Mining';
+import MercenaryDens from './pages/MercenaryDens';
 import Settings from './pages/Settings';
 import SdeBanner from './components/SdeBanner';
 import UpdateBanner from './components/UpdateBanner';
@@ -32,6 +33,7 @@ import {
   PickaxeIcon,
   RocketIcon,
   SettingsIcon,
+  ShieldIcon,
   TagIcon,
   UsersIcon,
   WalletIcon,
@@ -51,6 +53,7 @@ const NAV = [
   { to: '/blueprints', label: 'Blueprints', icon: BlueprintIcon },
   { to: '/wallet', label: 'Wallet', icon: WalletIcon },
   { to: '/mining', label: 'Mining', icon: PickaxeIcon },
+  { to: '/mercenary-dens', label: 'Mercenary Dens', icon: ShieldIcon },
 ];
 
 export default function App() {
@@ -127,6 +130,7 @@ export default function App() {
           <Route path="/blueprints" element={<Blueprints />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/mining" element={<Mining />} />
+          <Route path="/mercenary-dens" element={<MercenaryDens />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

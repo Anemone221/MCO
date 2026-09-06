@@ -2,7 +2,7 @@ import type { BrowserWindow } from 'electron';
 import { IpcChannel } from '@shared/ipc';
 import { syncDueCharacters } from './characterSync';
 import { syncBlueprintCorps } from './blueprintService';
-import { checkQueueDrainWarnings } from './notificationService';
+import { checkIdleOmegaAccounts, checkQueueDrainWarnings } from './notificationService';
 
 /** Hourly background sync; each sweep only touches characters whose cache has expired. */
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
@@ -84,6 +84,12 @@ async function executeSweep(getWindow: () => BrowserWindow | null): Promise<void
     checkQueueDrainWarnings(getWindow);
   } catch (err) {
     console.error('[scheduler] queue-drain check failed:', err);
+  }
+
+  try {
+    checkIdleOmegaAccounts(getWindow);
+  } catch (err) {
+    console.error('[scheduler] idle-Omega account check failed:', err);
   }
 }
 

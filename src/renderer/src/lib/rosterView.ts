@@ -115,8 +115,17 @@ export function saveColumnVisibility(visibility: ColumnVisibility): void {
   }
 }
 
-/** Search matches character name, account label, or the skill currently training. */
-export function filterRoster(entries: RosterEntry[], filters: RosterFilters): RosterEntry[] {
+/**
+ * Search matches character name, account label, the skill currently training,
+ * location, ship, and — given the same characterId → joined tag names lookup
+ * {@link sortRoster} takes — capability tags, so "cyno" finds every character
+ * tagged for it without touching the single-tag dropdown.
+ */
+export function filterRoster(
+  entries: RosterEntry[],
+  filters: RosterFilters,
+  tagNames?: Map<number, string>,
+): RosterEntry[] {
   const needle = filters.search.trim().toLowerCase();
   return entries.filter((entry) => {
     if (filters.training === 'training' && !entry.training.isTraining) return false;
@@ -134,6 +143,7 @@ export function filterRoster(entries: RosterEntry[], filters: RosterFilters): Ro
         entry.training.currentSkillName ?? '',
         entry.systemName ?? '',
         entry.shipTypeName ?? '',
+        tagNames?.get(entry.character.id) ?? '',
       ]
         .join('\n')
         .toLowerCase();

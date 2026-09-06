@@ -175,6 +175,43 @@ GROUP BYs over `character_mining_ledger` (`db/repositories/characterMining.ts`).
   characters most have simply never mined, and a synced character that stored no
   rows looks exactly like one that spent the window ratting.
 
+## Mercenary Dens (`/mercenary-dens`, `pages/MercenaryDens.tsx`)
+
+Which characters have Mercenary Dens, what each one is doing, and what tactical
+operations are standing at them. Assembled by `buildMercenaryBoard()`
+(`services/mercenaryService.ts`) from `mercenary_dens` + `mercenary_operations`,
+joined to `planets` for the address, `sde_systems` for security/region and
+`sde_types` for the den hull and dungeon names.
+
+- **The den is the row, not the character.** One character holds up to five (one
+  per level of Mercenary Den Management), and every question the page answers is
+  asked of a den. Characters holding none never appear, which is what keeps the
+  page short on a roster where most have never anchored one.
+- **Default sort is what needs doing.** `denAttention` (`main/mercenary/den.ts`)
+  scores each den 0-4 — reinforced, disabled, anarchy at or past level 2, an
+  offer waiting, otherwise nothing — so the handful that need the user rise
+  above the ones quietly working. A den doing its job scores zero by design.
+- **`reinforced` is derived, not reported.** ESI calls a reinforced den `Paused`,
+  the same word it uses for an idle one; only a reinforcement timer separates
+  them, and only while that timer is still ahead — a passed timer served from
+  cache would otherwise leave a den flagged long after it came back out.
+- **Expiry beats stored state for operations.** An offer that lapsed between
+  sweeps still reads `Available` in the table, so `operationStatus` checks the
+  clock; showing dead work as actionable is worse than showing none.
+- **Meters read `L2 · 45%`.** Level and cumulative amount together, because
+  either alone misleads — the level is what has effect in game, the amount is
+  how close the next one is. `Level0` is a real reading and renders as `L0`;
+  ESI's `Unspecified` and a den whose detail never landed both render "—".
+- **Operations nest under their den** as sub-rows, expanded per den, rather than
+  in a second table the reader would have to join by eye.
+- **Coverage notices** name characters missing either scope (both were added
+  after existing tokens were issued, so each needs one re-add) or with an expired
+  login. Unlike the Mining page, `pending` *is* a gap here: a character that has
+  never been swept may hold five dens, and that looks identical to holding none
+  until the first listing lands — which is what `mercenary_den_sync` records.
+- **Read-only.** MCO reports what a den is doing; ESI offers no route to start an
+  operation, and the game is where you run one.
+
 ## Roster (`/roster`, `pages/Roster.tsx`)
 
 The home table: every character with account, capability tags, last-known location and
@@ -182,8 +219,10 @@ ship, currently-training skill, time left, queue left, jump fatigue, jump-clone
 availability (ready vs. cooldown countdown), total SP, wallet balance, and last sync.
 Built by `buildRoster()` (`services/characterSync.ts`).
 
-- **Filters**: free-text search (name / account / training skill / system / ship),
-  account (incl. "unassigned"), training vs. idle, and tag.
+- **Filters**: free-text search (name / account / training skill / system / ship / tag),
+  account (incl. "unassigned"), training vs. idle, and tag. The search box reuses the
+  characterId → tag-names lookup the Tags column sorts by, so a tag needle matches
+  across tags where the dropdown narrows to exactly one.
 - **Sorting**: every column, with sensible empty-value grouping (unassigned/untagged/
   never-synced always sink to the bottom regardless of direction). Pure logic in
   `lib/rosterView.ts`.
@@ -230,6 +269,13 @@ is training what" — one character per account can train at a time, so an accou
 characters are all idle is wasting training time. Each account has a user-maintained
 **Omega checkbox** (ESI can't reveal Omega status either); it drives the red idle
 warning on the character sheet's Training status square.
+
+The table's **Training** column answers that question per account
+(`lib/accountsView.ts`, pure): "Training" (green, with `×n` when MCT has more than
+one going), a neutral "Idle" chip, "—" for a bucket with no characters yet, and an
+amber **"Nobody training"** for an Omega account whose characters are all idle. Those
+accounts are also named in a `warn-box` above the table, and warn through the
+notification bell — see the `omega-idle` kind under Notifications.
 
 ## Groups (`/groups`, `pages/Groups.tsx`)
 
@@ -635,9 +681,26 @@ than no checklist.
   (clicking it marks read + opens the window, creating one if the app is tray-only).
 - **UI** (`components/NotificationBell.tsx`): sidebar bell with unread badge,
   mark-read/mark-all-read.
-- A second kind (fatigue expired, extraction ready, plan complete) is a pure rule module
-  beside `queueDrain.ts`, the reads that feed it, and the sentence it produces —
-  `deliverNotifications` is already the shared half and does not change.
+
+A second kind, `omega-idle`, is the same three steps over accounts instead of
+characters:
+
+- **Detection** (`notifications/idleOmega.ts`, pure): an account flagged **Omega** with
+  characters assigned and *none* of them training is paying for a training slot it is
+  not using. Alpha accounts are skipped (an idle Alpha costs nothing), and so is an
+  Omega bucket with no characters — assignment is manual, so an empty bucket means
+  "not filled in yet", not a fault.
+- **Rule → sentences** (`checkIdleOmegaAccounts`): counts characters and *training*
+  characters per account (a paused queue's head has no finish date, so it doesn't
+  count), then titles each warning with the account name. Dedupe key
+  `omega-idle:<accountId>:<UTC date>` — idleness has no end date to key on the way a
+  queue's `finishDate` does, so a still-idle account warns once a day rather than once
+  an hourly sweep. The row carries no `characterId`: no one character is at fault.
+- The Accounts page shows the same condition inline — see Accounts above.
+
+A third kind (fatigue expired, extraction ready, plan complete) is a pure rule module
+beside `queueDrain.ts`, the reads that feed it, and the sentence it produces —
+`deliverNotifications` is already the shared half and does not change.
 
 ## Settings (`/settings`, `pages/Settings.tsx`)
 

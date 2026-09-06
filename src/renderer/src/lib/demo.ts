@@ -14,6 +14,7 @@ import type {
   GroupDetail,
   JumpCloneEntry,
   LocationEntry,
+  MercenaryBoard,
   MiningSummary,
   NearestBoard,
   PlanAnalysis,
@@ -448,6 +449,50 @@ export function demoMiningSummary(summary: MiningSummary): MiningSummary {
       characterName: demoCharacterName(entry.characterId, entry.characterName),
     })),
   };
+}
+
+/**
+ * A den's address is a home: the planet name carries the system name inside it
+ * ("F-YH5B VI"), so scrubbing the system alone would leave the real one on
+ * screen. The planet is rebuilt from the fake system plus the planet's own
+ * numeral, and the skyhook owner — a real corporation the user is neighbours
+ * with — is scrubbed like any other name.
+ *
+ * Den state, meters and dungeon names are game data and stay as they are.
+ */
+export function demoMercenaryBoard(board: MercenaryBoard): MercenaryBoard {
+  return {
+    ...board,
+    dens: board.dens.map((den) => {
+      const systemName = demoSystemName(den.systemName);
+      return {
+        ...den,
+        characterName: demoCharacterName(den.characterId, den.characterName),
+        accountLabel: demoAccountLabel(den.accountLabel),
+        planetName: demoPlanetName(den.planetName, systemName),
+        systemName,
+        regionName: demoRegionName(den.regionName),
+        skyhookCorporationName: demoLocationName(den.skyhookCorporationName),
+      };
+    }),
+    coverage: board.coverage.map((entry) => ({
+      ...entry,
+      characterName: demoCharacterName(entry.characterId, entry.characterName),
+    })),
+  };
+}
+
+/**
+ * "F-YH5B VI" -> "<fake system> VI". The numeral is the planet's position in
+ * its system, which identifies nothing on its own once the system is fake.
+ */
+function demoPlanetName(name: string | null, fakeSystem: string | null): string | null {
+  if (name === null) return null;
+  if (fakeSystem === null) return demoLocationName(name);
+  // Everything after the first space is the planet's designation (a Roman
+  // numeral, sometimes with a moon); everything before it is the system.
+  const designation = name.slice(name.indexOf(' ') + 1);
+  return name.includes(' ') ? `${fakeSystem} ${designation}` : fakeSystem;
 }
 
 export function demoFitAnalysis(analysis: FitAnalysis): FitAnalysis {

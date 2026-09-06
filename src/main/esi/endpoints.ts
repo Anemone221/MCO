@@ -304,3 +304,163 @@ export function getCharacterMiningLedger(characterId: number): Promise<EsiMining
     maxPages: MINING_LEDGER_MAX_PAGES,
   });
 }
+
+/**
+ * The evolution meters a Mercenary Den carries, as ESI words them: a
+ * cumulative 0-100 `amount` that rolls over into a discrete `level`.
+ *
+ * `level` is a string enum rather than a number, and `Unspecified` is a real
+ * member of it — see `mercenary/den.ts`, which is where it stops being a
+ * string.
+ */
+export type EsiMercenaryLevel =
+  | 'Unspecified'
+  | 'Level0'
+  | 'Level1'
+  | 'Level2'
+  | 'Level3'
+  | 'Level4';
+
+export interface EsiMercenaryMeter {
+  /** Cumulative progress toward the next level, 0-100. */
+  amount: number;
+  level: EsiMercenaryLevel;
+}
+
+export interface EsiMercenaryDenRef {
+  /** The den's item id — unique game-wide, so it keys the den on its own. */
+  id: number;
+  /** Planet the skyhook the den hangs off is anchored on. */
+  planet_id: number;
+}
+
+/** ESI wraps the listing in an object rather than returning a bare array. */
+export interface EsiMercenaryDensListing {
+  mercenary_dens: EsiMercenaryDenRef[];
+}
+
+export interface EsiMercenaryDenDetail {
+  id: number;
+  type_id: number;
+  /**
+   * `Paused` is how a reinforced den reads, and `Disabled` is how ESI reports
+   * a den whose owner can no longer operate it (the Mercenary Den Management
+   * skill was unlearned, or the character lost the standing to hold it) — both
+   * mean "earning nothing", for different reasons.
+   */
+  state: 'Unspecified' | 'Running' | 'Paused' | 'Disabled';
+  skyhook: {
+    id: number;
+    planet_id: number;
+    /** Owner of the *skyhook*, which is not the den's owner — usually the sov holder. */
+    corporation_id: number;
+  };
+  /** Infomorph stock — what the den has banked to pay out. */
+  infomorphs: { amount: number };
+  evolution: {
+    development: EsiMercenaryMeter;
+    anarchy: EsiMercenaryMeter;
+  };
+  /** Present only while the den is actually reinforced. */
+  reinforcement_timer?: { end: string };
+}
+
+/**
+ * Every Mercenary Den this character has anchored. Requires
+ * esi-structures.read_character.v1.
+ *
+ * Capped at 5 per character by the Mercenary Den Management skill (one per
+ * level), so this is a short list by construction — no paging, and the
+ * per-den detail fan-out below stays bounded without a guard of its own.
+ */
+export function getCharacterMercenaryDens(characterId: number): Promise<EsiMercenaryDensListing> {
+  return esiGet<EsiMercenaryDensListing>(`/characters/${characterId}/structures/mercenary-dens`, {
+    characterId,
+  });
+}
+
+/**
+ * One den's live state: what it is doing, how developed it is, how much
+ * anarchy has built up, and when a reinforcement ends.
+ *
+ * The listing does not carry any of this — it is only ids and planets — so
+ * "what is going on with this den" is always this second request.
+ */
+export function getMercenaryDen(
+  characterId: number,
+  mercenaryDenId: number,
+): Promise<EsiMercenaryDenDetail> {
+  return esiGet<EsiMercenaryDenDetail>(
+    `/characters/${characterId}/structures/mercenary-dens/${mercenaryDenId}`,
+    { characterId },
+  );
+}
+
+export interface EsiMercenaryOperationRef {
+  /** A UUID, not a number — the one id in MCO that is a string. */
+  id: string;
+  mercenary_den_id: number;
+}
+
+export interface EsiMercenaryOperationsListing {
+  operations: EsiMercenaryOperationRef[];
+}
+
+export interface EsiMercenaryOperationDetail {
+  id: string;
+  mercenary_den_id: number;
+  /**
+   * `Available` is the one that matters — an operation waiting to be run.
+   * `Removed` is ESI's tombstone for an operation whose den went away.
+   */
+  state: 'Unspecified' | 'Available' | 'Started' | 'Completed' | 'Expired' | 'Removed';
+  /** The dungeon the operation sends you into; resolves against the SDE's types. */
+  dungeon_type_id: number;
+  expires: string;
+}
+
+/**
+ * Mercenary Tactical Operations on offer to this character, as ids only.
+ * Requires esi-activities.read_character.v1.
+ *
+ * Offers belong to the character rather than to one den, and each names the den
+ * it came from — so this is read once per character, not once per den.
+ */
+export function getCharacterMercenaryOperations(
+  characterId: number,
+): Promise<EsiMercenaryOperationsListing> {
+  return esiGet<EsiMercenaryOperationsListing>(
+    `/characters/${characterId}/mercenary-tactical-operations`,
+    { characterId },
+  );
+}
+
+/** One operation's state, dungeon and expiry. */
+export function getMercenaryOperation(
+  characterId: number,
+  operationId: string,
+): Promise<EsiMercenaryOperationDetail> {
+  return esiGet<EsiMercenaryOperationDetail>(
+    `/characters/${characterId}/mercenary-tactical-operations/${operationId}`,
+    { characterId },
+  );
+}
+
+export interface EsiPlanet {
+  planet_id: number;
+  name: string;
+  system_id: number;
+  type_id: number;
+}
+
+/**
+ * Public planet info — no authorization required.
+ *
+ * Dens are addressed by planet id and the SDE import carries no planets, so
+ * this is what turns `40255188` into "F-YH5B VI". A planet never moves or gets
+ * renamed, which is why `planets` (see `db/repositories/planets.ts`) resolves
+ * each id once and never re-reads it.
+ */
+export function getPlanet(planetId: number): Promise<EsiPlanet> {
+  return esiGet<EsiPlanet>(`/universe/planets/${planetId}`);
+}

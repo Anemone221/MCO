@@ -29,7 +29,13 @@ esi-clones.read_implants.v1        esi-clones.read_clones.v1
 esi-characters.read_fatigue.v1     esi-wallet.read_character_wallet.v1
 esi-universe.read_structures.v1    esi-location.read_online.v1
 esi-characters.read_blueprints.v1  esi-industry.read_character_mining.v1
+esi-structures.read_character.v1   esi-activities.read_character.v1
 ```
+
+Note `esi-structures.read_character.v1` is **not** `esi-universe.read_structures.v1`,
+which the list already carries: the universe scope resolves *other people's*
+citadels by id, the structures scope lists what *this character* has anchored
+(in practice, its Mercenary Dens). Neither implies the other.
 
 Opt-in only (never in the standard grant):
 
@@ -272,6 +278,11 @@ Thin, typed wrappers — one function per route, no logic:
 | `getCharacterOnline` | `/characters/{id}/online` | scoped |
 | `getCharacterBlueprints` | `/characters/{id}/blueprints` | scoped, paginated |
 | `getCharacterMiningLedger` | `/characters/{id}/mining` | scoped (`esi-industry.read_character_mining.v1`), paginated |
+| `getCharacterMercenaryDens` | `/characters/{id}/structures/mercenary-dens` | scoped (`esi-structures.read_character.v1`) |
+| `getMercenaryDen` | `/characters/{id}/structures/mercenary-dens/{den_id}` | scoped (same) |
+| `getCharacterMercenaryOperations` | `/characters/{id}/mercenary-tactical-operations` | scoped (`esi-activities.read_character.v1`) |
+| `getMercenaryOperation` | `/characters/{id}/mercenary-tactical-operations/{operation_id}` | scoped (same); `operation_id` is a **UUID string** |
+| `getPlanet` | `/universe/planets/{id}` | public |
 | `getCorporationBlueprints` | `/corporations/{id}/blueprints` | scoped **+ Director role** (403 otherwise), paginated |
 | `getCorporationPublic` | `/corporations/{id}` | public |
 | `getStation` | `/universe/stations/{id}` | public |
@@ -354,6 +365,26 @@ copy, a positive number a stack of copies. Only originals tick the checklist.
   mining by the number of sweeps that saw it.
   **The table is the archive** here too: rows stay after they age out of ESI's
   30-day window, which is what the Mining page's "All" period reads.
+- **Mercenary dens** (`mercenary_dens`, `SCOPE_READ_CHARACTER_STRUCTURES`) and
+  **mercenary operations** (`mercenary_operations`, `SCOPE_READ_ACTIVITIES`):
+  two best-effort tasks rather than one, because they sit behind two different
+  scopes — a character that granted one and not the other still reports the half
+  it can. Each is a **listing plus a detail fan-out**: the listings carry only
+  ids (a den's is `(id, planet_id)`, an operation's `(id, mercenary_den_id)`),
+  so everything worth showing — state, evolution meters, reinforcement timer,
+  dungeon, expiry — costs one request per den and per offer. Neither route
+  paginates; the game's own cap (five dens per character, one per level of
+  Mercenary Den Management) is what bounds the den fan-out, with
+  `MAX_DEN_DETAILS`/`MAX_OPERATION_DETAILS` as guards rather than stopping rules.
+  Each detail is caught individually, so one failed den does not cost the
+  character its other four. Unlike the ledger tables above, **the listing is the
+  truth, not an archive**: both tables are replaced per character each sweep,
+  because a den that was unanchored and an offer that rolled over simply stop
+  appearing, and keeping either would put work on the board that cannot be done.
+- **Planet names** (`getPlanet`, no scope): a den's only address is a planet id
+  and the SDE import carries no planets, so `services/planetService.ts` resolves
+  them into the `planets` table. Resolve-once, with no refresh policy — a planet
+  is never renamed or moved — and only failures are retried.
 - **Server status** (`getServerStatus`, no scope): called fresh on every
   Dashboard load (not cached beyond ESI's own `Expires` header) and wrapped in
   a 5-second timeout in `services/dashboardService.ts` so a network hiccup
