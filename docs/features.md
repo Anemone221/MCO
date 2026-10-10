@@ -229,6 +229,12 @@ Built by `buildRoster()` (`services/characterSync.ts`).
 - **Column picker** (`ColumnPicker`): all columns except Character are toggleable;
   visibility persists in `localStorage` (`mco.roster.columns`), merged over defaults so
   newly added columns default to visible.
+- **Skill plan columns**: every plan whose *On roster* box is ticked (Plans table or plan
+  detail toolbar) adds a column after the built-in ones — a red→green bar and the share
+  held, "Complete" once done, the remaining cost (in that plan's chosen cost system) on
+  hover. Sortable like any column, opening most-complete-first. Loaded by
+  `plans.rosterProgress` (`listRosterPlanProgress`), one roster-wide analysis per flagged
+  plan; the column picker doesn't list them — the plan's own box is the switch.
 - **Context menu** (`RosterContextMenu`): right-click a character to assign/remove
   capability tags and add/remove group memberships in place.
 - **Add character** launches the SSO login flow (see [esi.md](esi.md#login-flow));
@@ -350,7 +356,11 @@ system/region names resolve only after the SDE map import. Docked characters als
 show *where*: NPC station names via public ESI, player-owned citadel names from the
 `structures` table (see below); the search box matches them.
 
-The group and **tag** filters narrow the page, which is what makes the ranking below
+Characters **online** right now (per the live tracker below) carry a green dot, and
+the stats strip counts them. Their rows are refreshed every ~20 s rather than on the
+hourly sweep — see [architecture.md](architecture.md#live-tracking-serviceslivetrackingts).
+
+The group, **tag** and **Online only** filters narrow the page, which is what makes the ranking below
 answer "which of my *cyno* alts", not just "which of my characters". Right-clicking a
 character opens the usual tag/group menu.
 
@@ -487,6 +497,9 @@ Same engine, aimed at goals instead of ships.
 - The same three cost systems (SP / Injectors / Time) and per-plan thresholds as fits;
   the system chosen on a plan's detail page also decides how that plan's gap reads on
   group objective bars and the character sheet (SP fallback when time is unknown).
+- Each unfinished plan bar on the character sheet has a collapsed *N missing skills*
+  list (have → need level, SP, prerequisites included). It's a plain `<details>`:
+  closed on every load, open state not persisted.
 - Per-character plan progress on the character sheet is computed by also analyzing a
   synthetic zero-skill character: its gap is the plan's total from-zero SP cost, and
   `1 - myGap/totalCost` is the progress fraction — same math both sides, no drift.
@@ -498,6 +511,9 @@ Same engine, aimed at goals instead of ships.
   listing all of them buries the ones being trained. The plan is untouched otherwise:
   its detail page still analyses the whole roster, and a group priority still points at
   it. New plans default to shown.
+- **Which plans get a Roster column is per plan too** — the *On roster* toggle, beside
+  the sheet one. It defaults **off**: each flagged plan widens the 90-row table and costs
+  a roster-wide analysis on every Roster load, so a plan only lands there on request.
 - Result buckets support the same right-click tag/group assignment as fits, and the
   "Plan complete" section carries the same **+ Assign tag** bulk control (`BulkTagBar`).
 
@@ -553,16 +569,70 @@ the game** on the right, each pane scrolling its own list.
   collapses to a handful of attribute-pair SP buckets and every legal arrangement in
   the 11-wide window is evaluated, so the answer is exact, not a heuristic; ties keep
   the arrangement closest to the current one. A unit test brute-forces the whole
-  legal space to confirm nothing beats it.
+  legal space to confirm nothing beats it. With remap points in the plan it optimises
+  every stretch at once, each for the rows it covers.
+- **Remap points.** **⇄** on a row puts a remap before it: a thin accent row above the
+  skill, carrying its own five attributes, from which everything down to the next
+  remap is priced. A new remap starts from the attributes in force there and is
+  optimised straight away for its stretch (same total, same window rule); its fields
+  stay editable, it has its own *Optimize*, and it shows what it saves over carrying
+  on at the attributes above it. The Attributes button is then the *starting* set,
+  in force until the first remap. A remap belongs to its row (`remapBefore` on
+  `PlanDraftEntry`), so dragging or *Fix training order* carries it along; removing
+  the row hands it to the next surviving row rather than dropping it. A level whose
+  lower levels train before the remap costs only its own step in the remap's
+  stretch — costs are taken over the whole queue, then bucketed per stretch. MCO
+  does not enforce EVE's remap cooldown; it is a planning aid.
+- **Auto remap** (`lib/autoRemap.ts`, the plan pane's *Auto remap* button with a 1–3
+  count beside it) decides where remaps pay off, **reorders the queue** so the skills
+  each remap suits train under it, and places the points — replacing any already in
+  the plan. The starting attributes stay fixed (they're what the character has); each
+  remap keeps their total. Since order *inside* a stretch doesn't change its time, the
+  problem is which stretch each row trains in, with one rule: never earlier than
+  something it needs (a prerequisite the plan trains, or its own lower level). The
+  search seeds each remap at the ideal arrangement for one of the plan's five heaviest
+  attribute pairs (every ordered pick), then alternates "every row to its cheapest
+  legal stretch" with "every remap re-optimised for its rows" (`bestArrangement`, the
+  exact search *Optimize* uses) until nothing moves, keeping the best start. Rows are
+  then laid out stretch by stretch with the author's order kept inside each, and a
+  remap lands wherever the attributes actually change — so asking for three can place
+  fewer. ~40 ms for a 320-row plan with three remaps. It's applied only if it beats
+  the plan as it stands; a result card lists each point (row, skill, the five
+  attributes to remap to with the changed ones marked, time saved) and offers
+  **Undo**. The card retires itself on the next edit.
+- **Remaps are stored in the plan text** as a `[Remap] Int 20 Mem 20 Per 27 Wil 21 Cha 17`
+  line ahead of the skill line (`formatRemapLine` / `parseRemapLine` in
+  `shared/training.ts`), so no schema change, and pasting a plan with remap lines
+  into the importer keeps them. `plans/parse.ts` attaches each one to the next skill
+  line; a trailing or malformed remap line is skipped. Remaps only affect the
+  creator's estimate — the per-character analysis (plan detail, sheets, Roster)
+  prices each character's real gap at their own synced attributes.
 - **The two panes are linked**: clicking a queued level — anywhere on the row, not
   just the name — opens that skill's group in the browser, scrolls to it and marks it
   briefly, so its − / + are to hand. A filter that already shows the skill is kept;
   one that would hide it is cleared, since an open group the filter excludes shows
   nothing.
-- **Reordering**: drag a row **by its grip**, or use its ↑/↓ buttons. Only the grip
-  arms `draggable`: with the whole row draggable, a click that drifted more than a
-  few pixels started a drag instead, and Chromium fires no click after a drag — which
-  made the click-to-reveal above work only sometimes. **Fix training order**
+- **Skill info on right-click**: right-clicking a queued row or a browser skill opens
+  an info card (`components/SkillInfoMenu.tsx`) — what the skill does (EVE's own
+  description, from `sde_skill_descriptions`), group, rank, training attributes,
+  the level the plan reaches, total SP and per-level training time at the plan's
+  starting attributes, what the skill requires (marked when the plan already covers
+  it) and what it unlocks. Prerequisite and unlock names open their own info in
+  place (← goes back); **Find in skill list** does the same reveal as a click. Built
+  entirely from the skill catalogue the creator already holds (`lib/skillInfo.ts`).
+  An install whose SDE import predates descriptions gets a re-import hint in their
+  place.
+- **Reordering**: press anywhere on a row and drag it, or use its ↑/↓ buttons. The drag
+  runs on pointer events (`lib/useRowDrag.ts`), not HTML5 drag and drop: a press only
+  becomes a drag after moving 5 px, so a click — even one that drifts a little — still
+  reveals the skill (HTML5 DnD swallowed those clicks, which is why it used to be
+  grip-only). An accent line shows where the row will land, between rows, at the very
+  top, or past the end; it is hidden when the drop would change nothing. The list
+  auto-scrolls when the pointer nears its top or bottom edge, Escape cancels, and the
+  row's own buttons and inputs never start a drag. Around a remap point the line can
+  sit on either side of it: above the remap the row trains before it; between the
+  remap and its row the dragged row takes the remap over and becomes the first row it
+  covers (`dropEntry`) — unless it brings a remap of its own. **Fix training order**
   topologically sorts the queue (prerequisites first, lower levels before higher) and
   is stable, so a hand-arranged order survives it.
 - **Per-row notes** (`draftIssues`): `order` (queued before something it needs — the
@@ -572,7 +642,8 @@ the game** on the right, each pane scrolling its own list.
 - **Export**: *Copy to clipboard* writes the same `Skill Name V` lines that MCO's
   parser and EVE's own skill-plan import both accept (via Electron's clipboard —
   `system:copyText` — since the renderer is sandboxed and packaged builds load from
-  `file://`). *Save* creates a plan, or updates the edited one **in place** so group
+  `file://`). The copy leaves remap lines out, since EVE's import has no such line;
+  the saved plan keeps them. *Save* creates a plan, or updates the edited one **in place** so group
   priorities and character-sheet cards keep pointing at it; *Save as new* forks it.
 - Opening a plan expands its lines into the per-level queue in place, preserving the
   author's order (`expandLevels`). It is lossless: a line whose name matches no skill
@@ -604,6 +675,22 @@ otherwise.
 The **medical (home) clone location** — ESI's `home_location` from the same clones
 endpoint — appears on the character sheet's Overview card and in each expanded
 board row. Station and structure names resolve the same way as clone locations.
+
+### Critical clones
+
+Any pod with implants (the active clone or a jump clone) can be **marked critical**
+from its heading in the expanded row, or on the character sheet (the Implants card
+heading for the active clone, each jump clone's summary line) — both use
+`components/CriticalCloneToggle.tsx`. The flag is stored against the *implant set*
+(`critical_implant_sets`), so it follows the pod when the character jumps into it. A
+pod matches when it wears every implant of a critical set (a superset still matches —
+one more implant doesn't make it cheaper to lose); unmarking removes every set the
+pod matches. A collapsed row shows a red **Critical pod** chip while the active clone
+is wearing one.
+
+While the character is online (and live tracking is on in Settings), the live tracker raises a `critical-undock`
+notification (OS toast + bell) when it is observed in space wearing a critical set —
+see [Notifications](#notifications).
 
 ## Blueprints (`/blueprints`, `pages/Blueprints.tsx`)
 
@@ -680,7 +767,11 @@ than no checklist.
   to the renderer per batch, and an OS toast for each notification that was actually new
   (clicking it marks read + opens the window, creating one if the app is tray-only).
 - **UI** (`components/NotificationBell.tsx`): sidebar bell with unread badge,
-  mark-read/mark-all-read.
+  mark-read/mark-all-read, and dismissal — a ✕ per row plus "Dismiss all" (which
+  confirms first, since dismissal cannot be undone). Dismissing marks the row read on
+  the way out and is a soft delete, so a warning that is still true does not come back
+  on the next sweep — see `notifications.dismissed_at` in
+  [database.md](database.md#schema-reference).
 
 A second kind, `omega-idle`, is the same three steps over accounts instead of
 characters:
@@ -698,8 +789,51 @@ characters:
   an hourly sweep. The row carries no `characterId`: no one character is at fault.
 - The Accounts page shows the same condition inline — see Accounts above.
 
-A third kind (fatigue expired, extraction ready, plan complete) is a pure rule module
-beside `queueDrain.ts`, the reads that feed it, and the sentence it produces —
+Two more kinds, `fatigue-clear` and `clone-jump-ready`, are the same three steps over a
+timer that has just *run out* rather than one about to (`queueDrain.ts` warns ahead of a
+deadline; these fire after one):
+
+- **Detection** (`notifications/timerElapsed.ts`, pure): `findElapsedTimers` reports the
+  deadlines that passed within **`ELAPSED_GRACE_MS` (24h)**. The window is the whole
+  point of the rule — a deadline in the table stays in the past forever
+  (`jump_fatigue_expire_date` holds its value until the next jump), so without one the
+  first sweep after this shipped would announce every jump every character has ever
+  made, and a week offline would greet the user with a week of stale news. 24h rather
+  than one sweep interval because the app is not always running: a fatigue that cleared
+  overnight is still worth hearing about in the morning.
+- **`fatigue-clear`** (`checkFatigueCleared`): candidates are `character_fatigue` rows,
+  the deadline is ESI's `jump_fatigue_expire_date`. Dedupe key
+  `fatigue-clear:<charId>:<expireDate>` — that date is ESI's own and moves only when the
+  character jumps again, so it names the fatigue episode that ended. Characters without
+  the fatigue scope have no row, so scope gating is free.
+- **`clone-jump-ready`** (`checkCloneJumpReady`): candidates are `character_clones_meta`
+  rows, the deadline is `nextCloneJumpDate(lastCloneJumpDate, Infomorph Synchronizing)` —
+  the same math the Roster and Clones pages use, so the toast agrees with the "JC ready"
+  shown there. Characters with **no jump clones** are skipped (the cooldown is real but
+  there is nowhere to jump, so "ready" would be noise on every alt without one), and so
+  are characters that have never clone-jumped (no cooldown was ever started). Dedupe key
+  `clone-jump-ready:<charId>:<lastCloneJumpDate>` — keyed on the *jump*, not the
+  deadline, because training a level of Infomorph Synchronizing mid-cooldown moves the
+  deadline earlier and would otherwise earn a second notification for the same cooldown.
+
+Both run from the hourly sweep after the sync that refreshes the timers they read
+(`services/scheduler.ts`), and both announce a character being *free again*, so their
+rows carry a `characterId`.
+
+### Undocked in a critical clone (`critical-undock`)
+
+Raised by the live tracker (`services/liveTracking.ts`), not the hourly sweep: every
+~20 s it observes each *online* character's location and active implants. An
+**exposure** is one stretch in space (`notifications/criticalUndock.ts`); the warning
+fires once per exposure, keyed `critical-undock:<charId>:<exposureStart>`. It is
+re-checked on every in-space tick rather than only at the undock, because the
+implants read can lag the location read after a clone jump. A first observation
+already in space (the character undocked before presence polling noticed the login)
+counts as an exposure too. Exposure state is in memory, so restarting the app while a
+character is in space warns once more.
+
+A further kind (extraction ready, plan complete) is a pure rule module beside
+`queueDrain.ts`, the reads that feed it, and the sentence it produces —
 `deliverNotifications` is already the shared half and does not change.
 
 ## Settings (`/settings`, `pages/Settings.tsx`)

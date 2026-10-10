@@ -10,7 +10,7 @@ there is no server, no account, and nothing is uploaded anywhere.
 
 - **Windows / macOS / Linux** — Electron; Windows is the primary target.
 - **Free, open source (MIT)**, unofficial and not affiliated with CCP.
-- **Version 0.5.0** — usable day to day, still pre-release. A Windows installer and a
+- **Version 0.6.0** — usable day to day, still pre-release. A Windows installer and a
   macOS DMG are on [Releases](https://github.com/Anemone221/MCO/releases); see
   [Install](#install) for the first-launch step each one needs, or build it from source
   (below).
@@ -31,6 +31,7 @@ should take five seconds start taking twenty minutes of alt-tabbing:
 | Where is everyone parked, and who's in a bad system? | Location |
 | Which of my cyno alts is closest to *that* system? | Location |
 | Which clone has the +5s, and who's off jump cooldown? | Clones |
+| Did someone just undock in the pod I can't afford to lose? | Clones / Notifications |
 | Do I already own that BPO, and who's holding it? | Blueprints |
 | Which of my Mercenary Dens needs me — reinforced, sliding into anarchy, or sitting on an unclaimed operation? | Mercenary Dens |
 | Whose skill queue runs dry this weekend? | Notifications |
@@ -61,10 +62,15 @@ Two time columns, deliberately: **Time left** is the skill currently training,
 **Queue left** is when the whole queue runs dry. A queue with no dates means training is
 paused, and says so.
 
+Any skill plan can also earn a Roster column of its own — tick its **On roster** box and
+every character gets a progress bar for it, sortable like the rest. Off by default, since
+each one widens a 90-row table.
+
 ### Character sheet
 One character in full: total SP, the pending skill queue with real skill names, wallet,
 jump fatigue, neural attributes and remap availability, jump clones, groups, tags, and
-progress against every skill plan you've imported. Three traffic-light status squares
+progress against every skill plan you've imported — each unfinished plan with a
+collapsed list of exactly which skills are still missing. Three traffic-light status squares
 (Fatigue / Jump Clone / Training) answer "can this character act right now" — the Training
 square goes red when an Omega account is training nobody. Location, current ship and
 active implants are fetched live, each independently, so one ESI hiccup never blanks the
@@ -99,7 +105,8 @@ anywhere it's listed, or in bulk from a fit's "Can fly fully" section.
 
 ### Location
 Where everyone is: system (color-coded high/low/null), region, docked status, ship, and
-how stale the data is. Docked characters show *where* — NPC stations resolve from public
+how stale the data is. Characters online right now carry a green dot and are re-read
+every ~20 seconds instead of hourly, with an **Online only** filter to match. Docked characters show *where* — NPC stations resolve from public
 ESI, and player-owned citadels resolve through the structure importer, since Upwell
 structure names are only visible to characters on the structure's ACL.
 
@@ -150,10 +157,23 @@ the ones that break it repeat themselves. Drag rows into the order you want (or 
 them into a valid one in a click), pull in every skill a fit needs — saved or pasted —
 then save it as a plan or copy it out for EVE's own skill-plan import.
 
+Plans can carry **remap points**: **⇄** on a row puts a remap before it, with its own
+attributes and its own *Optimize*, and every row below it is priced at them. Or let
+**Auto remap** decide — ask for up to three and it reorders the queue so the skills each
+remap suits train under it, places the points, and shows the time saved (with Undo).
+Remaps are saved with the plan and left out of the copy for EVE. Right-click any skill,
+queued or in the browser, for an info card: what it does, rank, attributes, training time
+per level, what it needs and what it unlocks.
+
 ### Clones
 Active implants and every jump clone — custom name, location, implant set — per
 character, plus the medical (home) clone. Each row shows clone-jump readiness: the 24h
 cooldown reduced by Infomorph Synchronizing, as a countdown chip until it's up.
+
+Mark any implanted pod **critical** — the one with the +5s. The flag
+follows the implants, not the clone, so it holds when the character jumps into it, and
+the row shows a red **Critical pod** chip while it's being worn. Undock in one and MCO
+warns you (see Notifications).
 
 ### Blueprints
 A BPO checklist: every blueprint the game has, with the ones you own ticked off, the best
@@ -222,9 +242,16 @@ characters assigned to it yet. Idleness has no finish date to dedupe against the
 queue does, so it warns once per account per day for as long as it lasts, rather than
 once an hourly sweep.
 
+It also tells you when a timer has **run out**: jump fatigue cleared, or a clone jump
+ready again (only for characters that have a jump clone to go to). And while a character
+is online, the live tracker warns within ~20 seconds if it's **in space wearing a
+critical pod**. Notifications can be dismissed one at a time or all at once, and a
+dismissed warning stays gone — the next sweep won't raise it again.
+
 ### Settings
 Sync status (per-character freshness, next due, scheduler state, "Sync all now"),
-background-sync preferences, a theme picker (dark, holo, light, void, amber), **demo
+background-sync preferences (including the live tracking of online characters — on by
+default, one switch to turn off), a theme picker (dark, holo, light, void, amber), **demo
 mode**, log export, and database backup.
 
 > **Demo mode** swaps character names, account labels, place names, ship names and
@@ -256,6 +283,10 @@ prompts you. Fit and plan analysis need it. It also **checks for newer builds**:
 patches in ships and skills between MCO releases, and the banner offers the re-import that
 picks them up — no app update required.
 
+> **Upgrading to 0.6.0:** the banner asks for one SDE re-import, which adds skill descriptions to
+> the plan creator's info card. Until then the card works, minus the description, and
+> says so. No new ESI scopes — characters don't need re-adding.
+
 ---
 
 ## Privacy & security
@@ -279,7 +310,7 @@ Scopes requested when you add a character:
 | `esi-skills.read_skillqueue.v1` | Training status, time left, queue-drain warnings |
 | `esi-location.read_location.v1` | Current system, docked status |
 | `esi-location.read_ship_type.v1` | Current ship |
-| `esi-location.read_online.v1` | "Characters online" tile |
+| `esi-location.read_online.v1` | "Characters online" tile, live tracking of who's logged in |
 | `esi-clones.read_clones.v1` | Jump clones, medical clone |
 | `esi-clones.read_implants.v1` | Active implants |
 | `esi-characters.read_fatigue.v1` | Jump fatigue timers |

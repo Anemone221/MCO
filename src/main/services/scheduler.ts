@@ -2,7 +2,13 @@ import type { BrowserWindow } from 'electron';
 import { IpcChannel } from '@shared/ipc';
 import { syncDueCharacters } from './characterSync';
 import { syncBlueprintCorps } from './blueprintService';
-import { checkIdleOmegaAccounts, checkQueueDrainWarnings } from './notificationService';
+import { startLiveTracking, stopLiveTracking } from './liveTracking';
+import {
+  checkCloneJumpReady,
+  checkFatigueCleared,
+  checkIdleOmegaAccounts,
+  checkQueueDrainWarnings,
+} from './notificationService';
 
 /** Hourly background sync; each sweep only touches characters whose cache has expired. */
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
@@ -91,6 +97,20 @@ async function executeSweep(getWindow: () => BrowserWindow | null): Promise<void
   } catch (err) {
     console.error('[scheduler] idle-Omega account check failed:', err);
   }
+
+  // Both of these read timers the sync above has just refreshed, so they run
+  // after it rather than on a cadence of their own.
+  try {
+    checkFatigueCleared(getWindow);
+  } catch (err) {
+    console.error('[scheduler] jump-fatigue check failed:', err);
+  }
+
+  try {
+    checkCloneJumpReady(getWindow);
+  } catch (err) {
+    console.error('[scheduler] clone-jump check failed:', err);
+  }
 }
 
 /** Start the hourly background sync. Safe to call once; further calls are ignored. */
@@ -100,6 +120,8 @@ export function startScheduler(getWindow: () => BrowserWindow | null): void {
   startupTimer = setTimeout(() => void runSweep(getWindow), STARTUP_DELAY_MS);
   intervalTimer = setInterval(() => void runSweep(getWindow), SWEEP_INTERVAL_MS);
   intervalArmedAtMs = Date.now();
+  // The fast lane for online characters rides the scheduler's lifetime.
+  startLiveTracking(getWindow);
 }
 
 export function stopScheduler(): void {
@@ -113,6 +135,7 @@ export function stopScheduler(): void {
   }
   intervalArmedAtMs = null;
   currentGetWindow = null;
+  stopLiveTracking();
 }
 
 /** Run one sync sweep immediately (tray "Run sync now"). No-op if the scheduler is not running. */

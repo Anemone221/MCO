@@ -23,6 +23,7 @@ vi.mock('@main/db/repositories/sde', () => ({
     hasSkillData: true,
     hasMapData: true,
     hasSkillAttributes: true,
+    hasSkillDescriptions: true,
     hasBlueprintData: true,
     hasJumpData: true,
   }),

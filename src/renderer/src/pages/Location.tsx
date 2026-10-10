@@ -33,6 +33,15 @@ interface SystemGroup {
   members: LocationEntry[];
 }
 
+/**
+ * Green dot for a character logged in right now. Nothing at all when offline or
+ * unknown — with 90+ characters most are offline, and offline is routine.
+ */
+function OnlineDot({ online }: { online: boolean | null }) {
+  if (online !== true) return null;
+  return <span className="online-dot" title="Online — location refreshed live" aria-label="Online" />;
+}
+
 function groupBySystem(entries: LocationEntry[]): SystemGroup[] {
   const groups = new Map<string, SystemGroup>();
   for (const entry of entries) {
@@ -165,6 +174,7 @@ function NearestTable({
               >
                 <td>
                   <span className="cell-name">
+                    <OnlineDot online={entry.online} />
                     <Link to={`/character/${entry.characterId}`}>{entry.characterName}</Link>
                   </span>
                 </td>
@@ -246,6 +256,7 @@ export default function Location() {
   const [target, setTarget] = useState<SystemSearchResult | null>(null);
   const [metric, setMetric] = useState<NearestMetric>('jumps');
   const [includeClones, setIncludeClones] = useState(false);
+  const [onlineOnly, setOnlineOnly] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
@@ -316,13 +327,16 @@ export default function Location() {
   const narrow = useMemo(() => {
     const groupIds = memberIdSet(charGroups, group);
     const tagIds = tagMemberIdSet(tags, tagFilter);
-    return <T extends LocationEntry>(entries: T[]): T[] =>
-      filterByTag(filterByGroup(filterBoard(entries, search), groupIds), tagIds);
-  }, [charGroups, group, tags, tagFilter, search]);
+    return <T extends LocationEntry>(entries: T[]): T[] => {
+      const narrowed = filterByTag(filterByGroup(filterBoard(entries, search), groupIds), tagIds);
+      return onlineOnly ? narrowed.filter((e) => e.online === true) : narrowed;
+    };
+  }, [charGroups, group, tags, tagFilter, search, onlineOnly]);
 
   const visible = useMemo(() => narrow(board), [board, narrow]);
   const groups = useMemo(() => groupBySystem(visible), [visible]);
   const docked = useMemo(() => visible.filter((e) => e.docked).length, [visible]);
+  const onlineCount = useMemo(() => visible.filter((e) => e.online === true).length, [visible]);
   const located = useMemo(() => visible.filter((e) => e.systemId !== null), [visible]);
 
   const ranked = useMemo(
@@ -382,6 +396,12 @@ export default function Location() {
                 <span className="stat-chip">
                   <strong>{located.length - docked}</strong> in space
                 </span>
+                <span
+                  className="stat-chip"
+                  title="Online characters have their location refreshed every ~20 seconds"
+                >
+                  <strong>{onlineCount}</strong> online
+                </span>
               </>
             ) : (
               <>
@@ -433,6 +453,15 @@ export default function Location() {
               onChange={setTagFilter}
               testId="location-tag-filter"
             />
+            <label className="muted" title="Show only characters currently logged in">
+              <input
+                type="checkbox"
+                checked={onlineOnly}
+                onChange={(e) => setOnlineOnly(e.target.checked)}
+                data-testid="location-online-only"
+              />{' '}
+              Online only
+            </label>
             <TargetSystemPicker current={target} onSelect={setTarget} />
             {target !== null && (
               <>
@@ -513,7 +542,10 @@ export default function Location() {
                     onContextMenu={(e) => openMenu(e, member.characterId, member.characterName)}
                   >
                     <span className="result-row">
-                      <Link to={`/character/${member.characterId}`}>{member.characterName}</Link>
+                      <span>
+                        <OnlineDot online={member.online} />
+                        <Link to={`/character/${member.characterId}`}>{member.characterName}</Link>
+                      </span>
                       <span className="muted">{member.docked ? 'Docked' : 'In space'}</span>
                     </span>
                     <div className="muted location-sub">

@@ -225,6 +225,38 @@ test('hides a plan from the character sheets and remembers it across restarts', 
   await second.close();
 });
 
+test('puts a plan on the roster and remembers it across restarts', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+
+  const first = await launchApp(userDataDir);
+  const firstWindow = await first.firstWindow();
+  await firstWindow.getByRole('link', { name: 'Skill Plans' }).click();
+  await firstWindow.getByTestId('plan-name-input').fill('Roster Toggle Plan');
+  await firstWindow.getByTestId('plan-text-input').fill('Gunnery V');
+  await firstWindow.getByTestId('import-plan').click();
+
+  // Unlike the sheet flag, a new plan stays off the roster until asked.
+  const listToggle = firstWindow.getByTestId('plan-roster-toggle-1');
+  await expect(listToggle).not.toBeChecked();
+  await listToggle.check();
+  await first.close();
+
+  const second = await launchApp(userDataDir);
+  const secondWindow = await second.firstWindow();
+  await secondWindow.getByRole('link', { name: 'Skill Plans' }).click();
+  await expect(secondWindow.getByTestId('plan-roster-toggle-1')).toBeChecked();
+
+  // The plan detail page shows the same flag, and clearing it there sticks.
+  await secondWindow.getByRole('link', { name: 'Roster Toggle Plan' }).click();
+  const detailToggle = secondWindow.getByTestId('plan-roster-toggle');
+  await expect(detailToggle).toBeChecked();
+  await detailToggle.uncheck();
+  await secondWindow.getByRole('link', { name: '← Skill Plans' }).click();
+  await expect(secondWindow.getByTestId('plan-roster-toggle-1')).not.toBeChecked();
+
+  await second.close();
+});
+
 test('edits a plan in the creator, reorders it and saves it back', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
   const app = await launchApp(userDataDir);
@@ -251,6 +283,102 @@ test('edits a plan in the creator, reorders it and saves it back', async () => {
   await expect(window.locator('h2')).toContainText('Reorder Me');
   await window.locator('.fit-source summary').click();
   await expect(window.locator('.eft-block')).toHaveText(/Small Hybrid Turret IV\s+Gunnery V/);
+
+  await app.close();
+});
+
+test('keeps a plan\'s remap points through the creator and back into the saved text', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Skill Plans' }).click();
+  await window.getByTestId('plan-name-input').fill('Remap Me');
+  await window
+    .getByTestId('plan-text-input')
+    .fill('Gunnery V\n[Remap] Int 27 Mem 21 Per 17 Wil 17 Cha 17\nSmall Hybrid Turret IV');
+  await window.getByTestId('import-plan').click();
+  await expect(window.getByTestId('plans-table')).toContainText('Remap Me');
+
+  // The stored remap opens as a remap row above the line it preceded.
+  await window.getByTestId('edit-plan-1').click();
+  await expect(window.getByTestId('creator-remap-1')).toBeVisible();
+  await expect(window.getByTestId('remap-1-intelligence')).toHaveValue('27');
+  await expect(window.getByTestId('creator-remap-count')).toContainText('1');
+
+  // Move it: drop the remap on row 1, put one ahead of row 0 instead.
+  await window.getByTestId('remap-remove-1').click();
+  await expect(window.getByTestId('creator-remap-1')).toHaveCount(0);
+  await window.getByTestId('creator-add-remap-0').click();
+  await expect(window.getByTestId('creator-remap-0')).toBeVisible();
+  await window.getByTestId('remap-0-perception').fill('27');
+
+  // With no static data nothing can be priced, so auto remap says so and
+  // leaves the hand-placed remap alone.
+  await window.getByTestId('auto-remap').click();
+  await expect(window.getByTestId('creator-notice')).toContainText('no skill in the plan has training data');
+  await expect(window.getByTestId('creator-remap-0')).toBeVisible();
+
+  await window.getByTestId('creator-save').click();
+  await expect(window.locator('h2')).toContainText('Remap Me');
+  await window.locator('.fit-source summary').click();
+  await expect(window.locator('.eft-block')).toHaveText(
+    /^\[Remap\] Int \d+ Mem \d+ Per 27 Wil \d+ Cha \d+\s+Gunnery V\s+Small Hybrid Turret IV$/,
+  );
+
+  await app.close();
+});
+
+test('reorders the creator queue by dragging whole rows', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Skill Plans' }).click();
+  await window.getByTestId('plan-name-input').fill('Drag Me');
+  await window.getByTestId('plan-text-input').fill('Alpha I\nBravo I\nCharlie I\nDelta I');
+  await window.getByTestId('import-plan').click();
+  await window.getByTestId('edit-plan-1').click();
+  await expect(window.getByTestId('creator-row-0')).toContainText('Alpha');
+
+  const order = async (): Promise<string[]> =>
+    (await window.locator('[data-testid^="creator-reveal-"]').allTextContents()).map((text) =>
+      text.replace(/^⠿|unknown/g, '').trim(),
+    );
+
+  /** Press on a row's name (not its grip) and drag to a height on another row. */
+  const drag = async (from: number, to: number, where: 'upper' | 'lower', cancel = false) => {
+    const source = (await window.getByTestId(`creator-row-${from}`).boundingBox())!;
+    const target = (await window.getByTestId(`creator-row-${to}`).boundingBox())!;
+    const y = where === 'upper' ? target.y + target.height * 0.2 : target.y + target.height * 0.8;
+    await window.mouse.move(source.x + 160, source.y + source.height / 2);
+    await window.mouse.down();
+    await window.mouse.move(source.x + 160, source.y + source.height / 2 + 8, { steps: 2 });
+    await window.mouse.move(source.x + 160, y, { steps: 8 });
+    if (cancel) await window.keyboard.press('Escape');
+    await window.mouse.up();
+  };
+
+  // Down: Alpha onto the lower half of Charlie lands after it.
+  await drag(0, 2, 'lower');
+  expect(await order()).toEqual(['Bravo', 'Charlie', 'Alpha', 'Delta']);
+
+  // Up: Delta onto the upper half of the first row lands at the top.
+  await drag(3, 0, 'upper');
+  expect(await order()).toEqual(['Delta', 'Bravo', 'Charlie', 'Alpha']);
+
+  // Escape mid-drag drops nothing.
+  await drag(0, 3, 'lower', true);
+  expect(await order()).toEqual(['Delta', 'Bravo', 'Charlie', 'Alpha']);
+
+  // A plain click on a row is still a click, not a reorder.
+  await window.getByTestId('creator-reveal-1').click();
+  expect(await order()).toEqual(['Delta', 'Bravo', 'Charlie', 'Alpha']);
+
+  await window.getByTestId('creator-save').click();
+  await expect(window.locator('h2')).toContainText('Drag Me');
+  await window.locator('.fit-source summary').click();
+  await expect(window.locator('.eft-block')).toHaveText(/^Delta I\s+Bravo I\s+Charlie I\s+Alpha I$/);
 
   await app.close();
 });

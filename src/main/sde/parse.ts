@@ -17,6 +17,14 @@ export interface ParsedType {
    * into the m³ a miner actually thinks in.
    */
   volume: number | null;
+  /**
+   * The English description exactly as types.yaml writes it — the `en:` entry
+   * and its continuation lines, still YAML — or null when the type has none.
+   * Left undecoded because only skills keep theirs (~600 of ~50k types), and
+   * which types are skills isn't known until groups are read; the importer
+   * decodes the few it keeps with `decodeDescription`.
+   */
+  descriptionSource: string | null;
 }
 
 export interface ParsedNamedEntry {
@@ -140,10 +148,31 @@ export async function parseTypesStream(
   let metaGroupId: number | null = null;
   let volume: number | null = null;
   let inNameBlock = false;
+  let inDescriptionBlock = false;
+  /** Lines of the description's `en:` entry while it is being read, else null. */
+  let descriptionLines: string[] | null = null;
+  let descriptionSource: string | null = null;
+
+  const closeDescription = (): void => {
+    if (descriptionLines === null) return;
+    descriptionSource = descriptionLines.join('\n');
+    descriptionLines = null;
+  };
 
   const flush = (): void => {
+    // An `en:` entry that ran to the end of the block is still open here.
+    closeDescription();
     if (id !== null && groupId !== null && name !== null) {
-      rows.push({ id, groupId, name, published, marketGroupId, metaGroupId, volume });
+      rows.push({
+        id,
+        groupId,
+        name,
+        published,
+        marketGroupId,
+        metaGroupId,
+        volume,
+        descriptionSource,
+      });
       if (rows.length % 10_000 === 0) onProgress?.({ typesProcessed: rows.length });
     }
   };
@@ -160,9 +189,31 @@ export async function parseTypesStream(
       metaGroupId = null;
       volume = null;
       inNameBlock = false;
+      inDescriptionBlock = false;
+      descriptionLines = null;
+      descriptionSource = null;
       continue;
     }
     if (id === null) continue;
+
+    // A description value can wrap over several lines (and quoted ones hold
+    // blank lines), so the `en:` entry runs until the next language key or the
+    // next field — whichever 4- or 2-space key comes first.
+    if (inDescriptionBlock) {
+      // Continuation lines belong to whichever language is open — kept for
+      // `en:`, skipped for the rest (a blank one is not the end of the block).
+      if (line === '' || /^ {6}/.test(line)) {
+        descriptionLines?.push(line);
+        continue;
+      }
+      closeDescription();
+      if (line.startsWith('    en:')) {
+        descriptionLines = [line.slice(4)];
+        continue;
+      }
+      if (/^ {4}\S/.test(line)) continue;
+      inDescriptionBlock = false;
+    }
 
     if (line.startsWith('  groupID:')) {
       groupId = Number(line.slice('  groupID:'.length).trim());
@@ -175,6 +226,8 @@ export async function parseTypesStream(
       metaGroupId = Number(line.slice('  metaGroupID:'.length).trim());
     } else if (line.startsWith('  published:')) {
       published = line.includes('true') ? 1 : 0;
+    } else if (line === '  description:') {
+      inDescriptionBlock = true;
     } else if (line === '  name:') {
       inNameBlock = true;
     } else if (inNameBlock && line.startsWith('    en:')) {
@@ -186,6 +239,45 @@ export async function parseTypesStream(
   }
   flush();
   return rows;
+}
+
+const HTML_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+};
+
+/**
+ * Turn a `descriptionSource` into plain text: parse the YAML scalar, drop the
+ * client's markup (`<b>`, `<color>`, `<a href=showinfo:…>` — the link text
+ * stays), decode the few HTML entities, and keep paragraph breaks. Null when
+ * nothing readable is left.
+ */
+export function decodeDescription(source: string): string | null {
+  let value: unknown;
+  try {
+    value = (YAML.parse(source) as { en?: unknown } | null)?.en;
+  } catch {
+    return null;
+  }
+  if (typeof value !== 'string') return null;
+  const text = value
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&(#\d+|[a-z]+);/gi, (match, entity: string) => {
+      if (entity.startsWith('#')) return String.fromCharCode(Number(entity.slice(1)));
+      return HTML_ENTITIES[entity.toLowerCase()] ?? match;
+    })
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return text.length > 0 ? text : null;
 }
 
 export interface ParsedBlueprint {

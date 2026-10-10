@@ -58,6 +58,11 @@ export function savePlanAttributes(attributes: NeuralAttributes): void {
   }
 }
 
+/** All five attributes added up — what a remap rearranges without changing. */
+export function attributeTotal(attributes: NeuralAttributes): number {
+  return TRAINING_ATTRIBUTES.reduce((sum, attribute) => sum + attributes[attribute], 0);
+}
+
 /** Whether these are still the even remap the creator starts from. */
 export function isBalanced(attributes: NeuralAttributes): boolean {
   return TRAINING_ATTRIBUTES.every(

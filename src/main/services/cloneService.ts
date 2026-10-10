@@ -8,6 +8,13 @@ import { getAllActiveImplants, getAllCloneMeta, getAllJumpClones } from '../db/r
 import { getInvalidTokenIds } from '../db/repositories/tokens';
 import { getActiveSkillLevels } from '../db/repositories/skills';
 import { INFOMORPH_SYNCHRONIZING_TYPE_ID, nextCloneJumpDate } from '../clones/jumpCooldown';
+import { findCriticalMatch, implantSetKey, parseImplantSetKey } from '../clones/criticalImplants';
+import {
+  addCriticalImplantSet,
+  getAllCriticalImplantSets,
+  removeCriticalImplantSet,
+} from '../db/repositories/criticalImplants';
+import { requireCharacter } from './characterSync';
 import { getTypeNames } from '../db/repositories/sde';
 import { getStructureNames } from '../db/repositories/structures';
 import { getStation, type EsiStation } from '../esi/endpoints';
@@ -49,6 +56,40 @@ export function locationDisplayName(
   return null;
 }
 
+/** Critical implant-set keys for one character (see clones/criticalImplants.ts). */
+export function criticalKeysFor(characterId: number): string[] {
+  return (getAllCriticalImplantSets().get(characterId) ?? []).map((s) => s.implantKey);
+}
+
+/**
+ * Mark or unmark an implant set as critical.
+ *
+ * Unmarking removes every critical set this pod is flagged by — the exact set
+ * and any smaller set it contains — because matching is by containment
+ * (`findCriticalMatch`): leaving a contained set behind would keep the pod
+ * warning after the user switched it off.
+ */
+export function setCriticalImplantSet(
+  characterId: number,
+  implantTypeIds: number[],
+  critical: boolean,
+  label: string | null,
+): void {
+  requireCharacter(characterId);
+  const key = implantSetKey(implantTypeIds);
+  if (critical) {
+    if (key === '') throw new Error('A clone with no implants cannot be marked critical');
+    addCriticalImplantSet(characterId, key, label?.trim() || null);
+    return;
+  }
+  const worn = new Set(implantTypeIds);
+  for (const existing of criticalKeysFor(characterId)) {
+    if (parseImplantSetKey(existing).every((id) => worn.has(id))) {
+      removeCriticalImplantSet(characterId, existing);
+    }
+  }
+}
+
 /** Build the clone board: every character's active implants and jump clones. */
 export async function buildCloneBoard(): Promise<CloneBoardEntry[]> {
   const characters = listCharacters();
@@ -83,6 +124,7 @@ export async function buildCloneBoard(): Promise<CloneBoardEntry[]> {
   const invalidTokens = getInvalidTokenIds();
   const CLONE_SCOPES = [SCOPE_READ_IMPLANTS, SCOPE_READ_CLONES];
   const syncLevels = getActiveSkillLevels(INFOMORPH_SYNCHRONIZING_TYPE_ID);
+  const criticalSets = getAllCriticalImplantSets();
 
   return characters.map((character) => {
     const m = meta.get(character.id);
@@ -92,6 +134,11 @@ export async function buildCloneBoard(): Promise<CloneBoardEntry[]> {
       missingScopes: missing,
       hasSynced: m !== undefined,
     });
+
+    const criticalKeys = (criticalSets.get(character.id) ?? []).map((s) => s.implantKey);
+    const isCritical = (implants: number[]): boolean =>
+      findCriticalMatch(implants, criticalKeys) !== null;
+    const active = activeImplants.get(character.id) ?? [];
 
     const clones: JumpCloneEntry[] = (jumpClones.get(character.id) ?? []).map((clone) => ({
       jumpCloneId: clone.jumpCloneId,
@@ -105,6 +152,7 @@ export async function buildCloneBoard(): Promise<CloneBoardEntry[]> {
         structureNames,
       ),
       implants: clone.implants.map(toImplantInfo),
+      critical: isCritical(clone.implants),
     }));
 
     return {
@@ -114,7 +162,8 @@ export async function buildCloneBoard(): Promise<CloneBoardEntry[]> {
         character.accountId !== null ? (accounts.get(character.accountId) ?? null) : null,
       status,
       missingScopes: missing,
-      activeImplants: (activeImplants.get(character.id) ?? []).map(toImplantInfo),
+      activeImplants: active.map(toImplantInfo),
+      activeCritical: isCritical(active),
       clones,
       updatedAt: m?.updatedAt ?? null,
       nextCloneJumpAt: nextCloneJumpDate(m?.lastCloneJumpDate ?? null, syncLevels.get(character.id) ?? 0),

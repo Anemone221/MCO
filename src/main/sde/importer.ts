@@ -5,6 +5,7 @@ import {
   replaceGroups,
   replaceRegions,
   replaceSkillAttributes,
+  replaceSkillDescriptions,
   replaceSkillRanks,
   replaceSystemJumps,
   replaceSystems,
@@ -15,6 +16,7 @@ import {
   type SdeTypeRow,
 } from '../db/repositories/sde';
 import {
+  decodeDescription,
   parseBlueprints,
   parseNamedFile,
   parseSolarSystems,
@@ -29,6 +31,25 @@ export interface SdeImportProgress {
   typesProcessed?: number;
 }
 
+/** SDE category holding every trainable skill. */
+const SKILL_CATEGORY_ID = 16;
+
+/** Decode the descriptions of the types that are skills; the rest are dropped. */
+function skillDescriptions(
+  types: SdeTypeRow[],
+  skillGroupIds: ReadonlySet<number>,
+  sources: ReadonlyMap<number, string>,
+): Array<{ skillTypeId: number; description: string }> {
+  const rows: Array<{ skillTypeId: number; description: string }> = [];
+  for (const type of types) {
+    if (!skillGroupIds.has(type.groupId)) continue;
+    const source = sources.get(type.id);
+    const description = source === undefined ? null : decodeDescription(source);
+    if (description !== null) rows.push({ skillTypeId: type.id, description });
+  }
+  return rows;
+}
+
 /** Import the SDE zip into SQLite: categories, groups, types, and the version stamp. */
 export async function importSde(
   zipPath: string,
@@ -36,6 +57,10 @@ export async function importSde(
 ): Promise<{ version: string; typeCount: number }> {
   let version = 'unknown';
   let typeRows: SdeTypeRow[] = [];
+  /** Raw English descriptions by type id; only skills' are decoded and kept. */
+  let descriptionSources = new Map<number, string>();
+  /** Groups in the skill category, from groups.yaml; null if it never came. */
+  let skillGroupIds: Set<number> | null = null;
 
   await processZip(zipPath, {
     '_sde.yaml': async (stream) => {
@@ -57,6 +82,9 @@ export async function importSde(
         published: e.published,
       }));
       replaceGroups(rows);
+      skillGroupIds = new Set(
+        rows.filter((g) => g.categoryId === SKILL_CATEGORY_ID).map((g) => g.id),
+      );
     },
     'types.yaml': async (stream) => {
       onProgress?.({ phase: 'types', typesProcessed: 0 });
@@ -72,6 +100,11 @@ export async function importSde(
         metaGroupId: t.metaGroupId,
         volume: t.volume,
       }));
+      descriptionSources = new Map(
+        parsed.flatMap((t) =>
+          t.descriptionSource === null ? [] : [[t.id, t.descriptionSource] as const],
+        ),
+      );
     },
     'blueprints.yaml': async (stream) => {
       onProgress?.({ phase: 'blueprints' });
@@ -117,6 +150,9 @@ export async function importSde(
 
   onProgress?.({ phase: 'finalizing' });
   replaceTypes(typeRows);
+  if (skillGroupIds !== null) {
+    replaceSkillDescriptions(skillDescriptions(typeRows, skillGroupIds, descriptionSources));
+  }
   setSdeVersion(version);
   return { version, typeCount: typeRows.length };
 }

@@ -3,6 +3,7 @@ import type {
   GroupObjectiveStatus,
   PlanAnalysis,
   PlanSkillResolved,
+  RosterPlanProgress,
   SkillPlan,
 } from '@shared/types';
 import { parseSkillPlan } from '../plans/parse';
@@ -18,6 +19,7 @@ import {
   createPlan,
   getPlan,
   listPlans,
+  setPlanRosterVisibility,
   setPlanSheetVisibility,
   updatePlan,
 } from '../db/repositories/plans';
@@ -54,6 +56,34 @@ export function setPlanSheetVisibilityById(planId: number, show: boolean): Skill
   const updated = setPlanSheetVisibility(planId, show);
   if (!updated) throw new UserFacingError('That skill plan no longer exists.');
   return updated;
+}
+
+/** Give a plan (or take away) its progress column on the Roster table. */
+export function setPlanRosterVisibilityById(planId: number, show: boolean): SkillPlan {
+  const updated = setPlanRosterVisibility(planId, show);
+  if (!updated) throw new UserFacingError('That skill plan no longer exists.');
+  return updated;
+}
+
+/**
+ * Every character's progress toward each plan flagged for the Roster table:
+ * one analysis pass per flagged plan covers the whole roster. Unflagged plans
+ * cost nothing, which is why the flag defaults off.
+ */
+export function listRosterPlanProgress(): RosterPlanProgress {
+  const plans = listPlans().filter((p) => p.showOnRoster);
+  if (plans.length === 0) return { needsSkillData: false, plans: [] };
+  if (!getSdeStatus().hasSkillData) return { needsSkillData: true, plans: [] };
+
+  const characterIds = listCharacters().map((c) => c.id);
+  return {
+    needsSkillData: false,
+    plans: plans.map((plan) => ({
+      planId: plan.id,
+      planName: plan.name,
+      statuses: Object.fromEntries(planObjectiveStatus(plan.id, characterIds) ?? []),
+    })),
+  };
 }
 
 /** Analyse a stored skill plan across the whole character roster. */
@@ -167,6 +197,7 @@ export function listPlanProgressForCharacter(characterId: number): {
       progress: objectiveProgress(mine!.spGap, totalSp),
       lsiGap: mine!.lsiGap,
       timeGapMinutes: mine!.timeGapMinutes,
+      missingSkills: mine!.missingSkills,
     };
   });
   return { needsSkillData: false, plans: progress };

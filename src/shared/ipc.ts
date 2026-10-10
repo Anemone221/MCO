@@ -21,6 +21,7 @@ import type {
   PlanDraftSource,
   PlanSkillInfo,
   RosterEntry,
+  RosterPlanProgress,
   SdeProgress,
   SdeStatus,
   SdeUpdateStatus,
@@ -86,6 +87,8 @@ export const IpcChannel = {
   plansUpdate: 'plans:update',
   plansRemove: 'plans:remove',
   plansSetSheetVisibility: 'plans:setSheetVisibility',
+  plansSetRosterVisibility: 'plans:setRosterVisibility',
+  plansRosterProgress: 'plans:rosterProgress',
   plansAnalyze: 'plans:analyze',
   plansSkillCatalog: 'plans:skillCatalog',
   plansShipCatalog: 'plans:shipCatalog',
@@ -99,6 +102,7 @@ export const IpcChannel = {
   structuresSearch: 'structures:search',
   systemsSearch: 'systems:search',
   clonesBoard: 'clones:board',
+  clonesSetCritical: 'clones:setCritical',
   blueprintsBoard: 'blueprints:board',
   blueprintsRefresh: 'blueprints:refresh',
   blueprintsAddCorp: 'blueprints:addCorp',
@@ -110,6 +114,8 @@ export const IpcChannel = {
   notificationsList: 'notifications:list',
   notificationsMarkRead: 'notifications:markRead',
   notificationsMarkAllRead: 'notifications:markAllRead',
+  notificationsDismiss: 'notifications:dismiss',
+  notificationsDismissAll: 'notifications:dismissAll',
   notificationsChanged: 'notifications:changed',
   systemClientConfigured: 'system:clientConfigured',
   systemAppInfo: 'system:appInfo',
@@ -129,6 +135,8 @@ export const IpcChannel = {
   settingsBackgroundMode: 'settings:backgroundMode',
   settingsSetCloseToTray: 'settings:setCloseToTray',
   settingsRunInBackground: 'settings:runInBackground',
+  settingsLiveTracking: 'settings:liveTracking',
+  settingsSetLiveTracking: 'settings:setLiveTracking',
 } as const;
 
 /** Any declared channel name — what the main/preload wrappers key on. */
@@ -248,6 +256,10 @@ export interface McoApi {
     remove: (planId: number) => Promise<void>;
     /** Show or hide this plan on every character sheet's "Skill plans" card. */
     setSheetVisibility: (planId: number, show: boolean) => Promise<SkillPlan>;
+    /** Give this plan (or take away) a progress column on the Roster table. */
+    setRosterVisibility: (planId: number, show: boolean) => Promise<SkillPlan>;
+    /** Every character's progress toward each roster-visible plan. */
+    rosterProgress: () => Promise<RosterPlanProgress>;
     analyze: (planId: number) => Promise<PlanAnalysis>;
     /**
      * Every skill in the game with its group, rank, attributes, per-level SP
@@ -294,6 +306,18 @@ export interface McoApi {
   };
   clones: {
     board: () => Promise<CloneBoardEntry[]>;
+    /**
+     * Mark (or unmark) an implant set as critical for a character: undocking
+     * while wearing it raises a warning. Keyed by the implants, not the clone,
+     * so the flag follows the pod when the character jumps into it. `label`
+     * names the set in the warning (the clone's name, when it has one).
+     */
+    setCritical: (
+      characterId: number,
+      implantTypeIds: number[],
+      critical: boolean,
+      label: string | null,
+    ) => Promise<void>;
   };
   blueprints: {
     /** The checklist: the SDE's blueprint universe with owned originals counted against it. */
@@ -332,9 +356,18 @@ export interface McoApi {
     board: () => Promise<MercenaryBoard>;
   };
   notifications: {
+    /** Every notification not yet dismissed, newest first. */
     list: () => Promise<AppNotification[]>;
     markRead: (id: number) => Promise<void>;
     markAllRead: () => Promise<void>;
+    /**
+     * Drop one notification from the bell for good. The row itself is kept as
+     * the record that its occurrence was already reported, so dismissing a
+     * warning that is still true does not invite it back on the next sweep.
+     */
+    dismiss: (id: number) => Promise<void>;
+    /** Dismiss every listed notification. Resolves with how many were cleared. */
+    dismissAll: () => Promise<number>;
     /** Subscribe to new/updated notifications. Returns an unsubscribe function. */
     onChanged: (callback: () => void) => () => void;
   };
@@ -401,5 +434,12 @@ export interface McoApi {
      * resulting state — the window stays open if no tray icon could be raised.
      */
     runInBackground: () => Promise<BackgroundModeSettings>;
+    /**
+     * Live tracking: presence polling every 2 min, and location/implants every
+     * ~20 s for online characters (drives the critical-clone undock warning).
+     */
+    liveTracking: () => Promise<boolean>;
+    /** Persist and apply the live-tracking switch; resolves to the resulting state. */
+    setLiveTracking: (enabled: boolean) => Promise<boolean>;
   };
 }

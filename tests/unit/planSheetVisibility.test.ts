@@ -13,7 +13,12 @@ let hasSkillData = true;
 /** Skill type ids the analysis was asked to rank, one entry per plan analysed. */
 let ranked: number[][] = [];
 
-function plan(id: number, name: string, showOnCharacterSheet: boolean): SkillPlan {
+function plan(
+  id: number,
+  name: string,
+  showOnCharacterSheet: boolean,
+  showOnRoster = false,
+): SkillPlan {
   return {
     id,
     name,
@@ -21,6 +26,7 @@ function plan(id: number, name: string, showOnCharacterSheet: boolean): SkillPla
     planText: `Skill ${id} V`,
     importedAt: '2026-01-01T00:00:00Z',
     showOnCharacterSheet,
+    showOnRoster,
   };
 }
 
@@ -30,6 +36,7 @@ vi.mock('@main/db/repositories/plans', () => ({
   createPlan: () => stored[0]!,
   updatePlan: () => stored[0]!,
   setPlanSheetVisibility: () => stored[0]!,
+  setPlanRosterVisibility: () => stored[0]!,
 }));
 
 vi.mock('@main/db/repositories/sde', () => ({
@@ -40,6 +47,7 @@ vi.mock('@main/db/repositories/sde', () => ({
     hasSkillData,
     hasMapData: true,
     hasSkillAttributes: true,
+    hasSkillDescriptions: true,
     hasBlueprintData: true,
     hasJumpData: true,
   }),
@@ -57,18 +65,26 @@ vi.mock('@main/db/repositories/sde', () => ({
   getTypeNames: (ids: number[]) => new Map(ids.map((id) => [id, `Skill ${id}`])),
 }));
 
-vi.mock('@main/db/repositories/characters', () => ({ listCharacters: () => [] }));
+/** Character ids on the roster, for the roster-wide analysis. */
+let rosterIds: number[] = [];
+
+vi.mock('@main/db/repositories/characters', () => ({
+  listCharacters: () => rosterIds.map((id) => ({ id, name: `Pilot ${id}` })),
+}));
 vi.mock('@main/db/repositories/skills', () => ({ getCharacterSkillMap: () => new Map() }));
 vi.mock('@main/services/trainingData', () => ({
   getNeuralAttributes: () => undefined,
   getSkillTrainingAttributes: () => new Map(),
 }));
 
-const { listPlanProgressForCharacter } = await import('@main/services/planService');
+const { listPlanProgressForCharacter, listRosterPlanProgress } = await import(
+  '@main/services/planService'
+);
 
 beforeEach(() => {
   hasSkillData = true;
   ranked = [];
+  rosterIds = [];
 });
 
 describe('listPlanProgressForCharacter', () => {
@@ -102,5 +118,43 @@ describe('listPlanProgressForCharacter', () => {
     hasSkillData = false;
 
     expect(listPlanProgressForCharacter(93)).toEqual({ needsSkillData: true, plans: [] });
+  });
+});
+
+describe('listRosterPlanProgress', () => {
+  it('gives each roster-flagged plan a status for every character', () => {
+    stored = [plan(1, 'Column', true, true), plan(2, 'Sheet only', true, false)];
+    rosterIds = [90, 91];
+
+    const { needsSkillData, plans } = listRosterPlanProgress();
+
+    expect(needsSkillData).toBe(false);
+    expect(plans.map((p) => p.planName)).toEqual(['Column']);
+    expect(Object.keys(plans[0]!.statuses).map(Number).sort()).toEqual([90, 91]);
+    // The skill-less stubs hold nothing, so nobody has started the plan.
+    expect(plans[0]!.statuses[90]!.complete).toBe(false);
+  });
+
+  it('does not analyse a plan left off the roster', () => {
+    stored = [plan(1, 'Column', false, true), plan(2, 'Sheet only', true, false)];
+    rosterIds = [90];
+
+    listRosterPlanProgress();
+
+    expect(ranked).toEqual([[1]]);
+  });
+
+  it('reads as "no columns" when no plan is flagged, not as missing SDE data', () => {
+    stored = [plan(1, 'Sheet only', true, false)];
+    hasSkillData = false;
+
+    expect(listRosterPlanProgress()).toEqual({ needsSkillData: false, plans: [] });
+  });
+
+  it('reports missing skill data when a flagged plan cannot be analysed', () => {
+    stored = [plan(1, 'Column', true, true)];
+    hasSkillData = false;
+
+    expect(listRosterPlanProgress()).toEqual({ needsSkillData: true, plans: [] });
   });
 });

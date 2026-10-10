@@ -95,6 +95,7 @@ export const mco: McoApi = {
     search: (query) => scrubbed(real.systems.search(query), (r) => r.map(demoSystemResult)),
   },
   clones: {
+    ...real.clones,
     board: () => scrubbed(real.clones.board(), (b) => b.map(demoCloneBoardEntry)),
   },
   blueprints: {

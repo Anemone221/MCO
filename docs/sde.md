@@ -27,6 +27,7 @@ sde:import (IPC)
             ├─ categories.yaml      → sde_categories
             ├─ groups.yaml          → sde_groups
             ├─ types.yaml           → sde_types        (streamed, progress-counted)
+            │                         + sde_skill_descriptions (skills only, at finalize)
             ├─ typeDogma.yaml       → sde_type_skill_reqs + sde_skill_ranks
             │                         + sde_skill_attributes (streamed)
             ├─ blueprints.yaml      → sde_blueprints
@@ -69,7 +70,7 @@ Notes:
 
 ## Status & gating (`getSdeStatus`)
 
-`SdeStatus` reports `installed`, `version`, `importedAt`, plus five capability flags
+`SdeStatus` reports `installed`, `version`, `importedAt`, plus six capability flags
 derived from actual table contents (not the version stamp):
 
 | Flag | True when | Gates |
@@ -77,6 +78,7 @@ derived from actual table contents (not the version stamp):
 | `hasSkillData` | `sde_type_skill_reqs` is non-empty | Fit/plan **analysis**. Without it, analyses return `needsSkillData: true` and the UI explains instead of showing wrong numbers. |
 | `hasMapData` | `sde_systems` is non-empty | System/region/security name resolution on Roster & Location (falls back to "—"). |
 | `hasSkillAttributes` | `sde_skill_attributes` is non-empty | The **Time** cost metric on fit/plan analysis. Without it, analyses return `needsSkillAttributes: true`, per-character `timeGapMinutes` is null, and the Time view explains why. |
+| `hasSkillDescriptions` | `sde_skill_descriptions` is non-empty | The description text on the plan creator's right-click skill info card. Without it the card says to re-import. |
 | `hasBlueprintData` | `sde_blueprints` is non-empty | The **blueprint checklist**. Without it the Blueprints page says so instead of claiming 0 of 0 owned. |
 | `hasJumpData` | `sde_system_jumps` is non-empty | **Gate distances** in the Location page's nearest-to-a-system ranking. Without it every distance is "no route", so the ranking says to re-import instead. |
 

@@ -774,6 +774,72 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Lets the bell's rows be dismissed. A soft delete rather than a DELETE
+    // because `dedupe_key` is what makes "notify once per occurrence" hold:
+    // drop the row and the next hourly sweep finds the occurrence unreported,
+    // re-inserts it and toasts again — dismissing would un-dismiss itself.
+    // The row stays as the record that this occurrence was already raised; only
+    // the bell stops listing it.
+    //
+    // Deliberately no retention sweep: a dismissed row is a few dozen bytes and
+    // the kinds are self-limiting (one per queue-drain finish date, one per
+    // account per day), so pruning would buy nothing and could resurrect a
+    // still-current occurrence a user had dismissed.
+    version: 37,
+    name: 'notification_dismissal',
+    sql: `
+      ALTER TABLE notifications ADD COLUMN dismissed_at TEXT;
+
+      CREATE INDEX idx_notifications_visible ON notifications(dismissed_at, created_at);
+    `,
+  },
+  {
+    // Pods the user has marked "critical": undocking while wearing one raises
+    // a warning (services/liveTracking.ts). Keyed by the implant set rather than
+    // the jump-clone id, because jumping into a jump clone removes it from ESI's
+    // jump-clone list — an id-keyed flag would be gone the moment the pod is
+    // worn. `implant_key` is clones/criticalImplants.ts's implantSetKey (sorted
+    // type ids, comma-joined). `label` is the clone's name when it was marked,
+    // for the warning's wording only.
+    version: 38,
+    name: 'critical_implant_sets',
+    sql: `
+      CREATE TABLE critical_implant_sets (
+        character_id  INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+        implant_key   TEXT NOT NULL,
+        label         TEXT,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (character_id, implant_key)
+      );
+    `,
+  },
+  {
+    // Whether a plan gets its own progress column on the Roster table. The
+    // sibling of show_on_character_sheet, but defaulting to 0: every flagged
+    // plan widens a 90-row table by a column and costs a roster-wide analysis
+    // on each Roster load, so a plan only lands there when the user asks.
+    version: 39,
+    name: 'plan_roster_visibility',
+    sql: `
+      ALTER TABLE skill_plans ADD COLUMN show_on_roster INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    // What each skill does, for the plan creator's right-click info card —
+    // English plain text, markup stripped at import. Skills only (~600 rows,
+    // ~85 KB): every other type's description would be ~12 MB nothing reads.
+    // Empty on upgraded installs until the SDE is re-imported; the SDE banner
+    // asks for that (`hasSkillDescriptions`).
+    version: 40,
+    name: 'sde_skill_descriptions',
+    sql: `
+      CREATE TABLE sde_skill_descriptions (
+        skill_type_id INTEGER PRIMARY KEY,
+        description   TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

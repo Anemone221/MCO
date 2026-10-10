@@ -13,6 +13,8 @@ import {
   draftIssues,
   draftText,
   draftTotals,
+  dropEntry,
+  entryAttributes,
   entryKey,
   entrySpCosts,
   entryTimeCosts,
@@ -22,11 +24,15 @@ import {
   lowerSkill,
   mergeSkills,
   moveEntry,
+  optimizeAllAttributes,
   optimizeAttributes,
   planLevel,
   raiseSkill,
   removeEntry,
   removeFromLevel,
+  remapCount,
+  remapSegments,
+  setRemap,
   sortByPrereqs,
   type SkillMap,
 } from '@renderer/lib/planDraft';
@@ -58,6 +64,7 @@ function skill(
     primaryAttribute: attributes[0],
     secondaryAttribute: attributes[1],
     spAtLevel: [1, 2, 3, 4, 5].map((level) => spForLevel(rank, level)),
+    description: null,
     prereqs,
     published: true,
   };
@@ -254,6 +261,69 @@ describe('moveEntry', () => {
   it('copies the list unchanged for a no-op or out-of-range move', () => {
     expect(names(moveEntry(entries, 1, 1))).toEqual(names(entries));
     expect(names(moveEntry(entries, 9, 0))).toEqual(names(entries));
+  });
+});
+
+describe('dropEntry', () => {
+  const entries = addRequirements([], [{ skillTypeId: GUNNERY, level: 4 }], SKILLS);
+  const REMAP: NeuralAttributes = { ...BALANCED_ATTRIBUTES, perception: 27, charisma: 12 };
+
+  it('lands in front of the target row, wherever the row came from', () => {
+    // Index counts rows as they are before the drag, so "in front of row 3" from row 0
+    // puts it third.
+    expect(names(dropEntry(entries, 0, { index: 3, underRemap: false }))).toEqual([
+      'Gunnery 2',
+      'Gunnery 3',
+      'Gunnery 1',
+      'Gunnery 4',
+    ]);
+    expect(names(dropEntry(entries, 3, { index: 1, underRemap: false }))).toEqual([
+      'Gunnery 1',
+      'Gunnery 4',
+      'Gunnery 2',
+      'Gunnery 3',
+    ]);
+  });
+
+  it('drops at the very end', () => {
+    expect(names(dropEntry(entries, 0, { index: 4, underRemap: false }))).toEqual([
+      'Gunnery 2',
+      'Gunnery 3',
+      'Gunnery 4',
+      'Gunnery 1',
+    ]);
+  });
+
+  it('keeps every row object when the drop goes back where it came from', () => {
+    const same = dropEntry(entries, 1, { index: 2, underRemap: false });
+    expect(same.every((entry, i) => entry === entries[i])).toBe(true);
+  });
+
+  it('above a remap trains before it; under it, takes the remap over', () => {
+    const withRemap = setRemap(entries, entryKey(entries[2]!), REMAP);
+
+    const above = dropEntry(withRemap, 0, { index: 2, underRemap: false });
+    expect(names(above)).toEqual(['Gunnery 2', 'Gunnery 1', 'Gunnery 3', 'Gunnery 4']);
+    expect(above[2]!.remapBefore).toBe(REMAP);
+
+    const under = dropEntry(withRemap, 0, { index: 2, underRemap: true });
+    expect(names(under)).toEqual(['Gunnery 2', 'Gunnery 1', 'Gunnery 3', 'Gunnery 4']);
+    expect(under[1]!.remapBefore).toBe(REMAP);
+    expect(under[2]!.remapBefore).toBeUndefined();
+    expect(remapCount(under)).toBe(1);
+  });
+
+  it('lets a dragged row keep its own remap when dropped under another', () => {
+    const own: NeuralAttributes = { ...BALANCED_ATTRIBUTES, memory: 27, charisma: 12 };
+    const both = setRemap(
+      setRemap(entries, entryKey(entries[2]!), REMAP),
+      entryKey(entries[0]!),
+      own,
+    );
+
+    const dropped = dropEntry(both, 0, { index: 2, underRemap: true });
+    expect(dropped[1]!.remapBefore).toBe(own);
+    expect(dropped[2]!.remapBefore).toBe(REMAP);
   });
 });
 
@@ -563,5 +633,159 @@ describe('draftText', () => {
     expect(draftText(entries)).toBe(
       'Gunnery I\nSmall Hybrid Turret I\nSmall Hybrid Turret II',
     );
+  });
+});
+
+describe('remap points', () => {
+  const PER_WIL: NeuralAttributes = {
+    charisma: 17,
+    intelligence: 17,
+    memory: 17,
+    perception: 27,
+    willpower: 21,
+  };
+  const INT_MEM: NeuralAttributes = {
+    charisma: 17,
+    intelligence: 27,
+    memory: 21,
+    perception: 17,
+    willpower: 17,
+  };
+
+  /** Gunnery I–V (Per/Wil), then Spaceship Command I and Gallente Frigate I–IV (Int/Mem). */
+  function mixedPlan(): PlanDraftEntry[] {
+    return addRequirements(
+      [],
+      [
+        { skillTypeId: GUNNERY, level: 5 },
+        { skillTypeId: GALLENTE_FRIGATE, level: 4 },
+      ],
+      SKILLS,
+    );
+  }
+
+  /** Index of the first Gallente Frigate row. */
+  function frigateStart(entries: readonly PlanDraftEntry[]): number {
+    return entries.findIndex((entry) => entry.skillTypeId === GALLENTE_FRIGATE);
+  }
+
+  it('prices rows after a remap at the remap, and rows before it at the start', () => {
+    const plain = mixedPlan();
+    const at = frigateStart(plain);
+    const entries = setRemap(plain, entryKey(plain[at]!), INT_MEM);
+
+    const inForce = entryAttributes(entries, PER_WIL);
+    expect(inForce[0]).toBe(PER_WIL);
+    expect(inForce[at - 1]).toBe(PER_WIL);
+    expect(inForce[at]).toBe(INT_MEM);
+    expect(inForce[entries.length - 1]).toBe(INT_MEM);
+
+    const rate = spPerMinute(INT_MEM, { primary: 'intelligence', secondary: 'memory' });
+    expect(entryTimeCosts(entries, SKILLS, PER_WIL)[at]).toBeCloseTo(spForLevel(2, 1) / rate);
+    expect(draftTotals(entries, SKILLS, PER_WIL).minutes).toBeLessThan(
+      draftTotals(plain, SKILLS, PER_WIL).minutes,
+    );
+  });
+
+  it('splits the queue into one stretch per attribute set', () => {
+    const plain = mixedPlan();
+    const at = frigateStart(plain);
+    const entries = setRemap(plain, entryKey(plain[at]!), INT_MEM);
+
+    expect(remapSegments(entries)).toEqual([
+      { start: 0, end: at },
+      { start: at, end: entries.length },
+    ]);
+    expect(remapCount(entries)).toBe(1);
+    expect(remapCount(setRemap(entries, entryKey(entries[at]!), null))).toBe(0);
+  });
+
+  it('optimises each stretch for the skills it trains', () => {
+    const plain = mixedPlan();
+    const at = frigateStart(plain);
+    const entries = setRemap(plain, entryKey(plain[at]!), BALANCED_ATTRIBUTES);
+
+    const optimized = optimizeAllAttributes(entries, SKILLS, BALANCED_ATTRIBUTES);
+
+    // Before the remap: Gunnery and Spaceship Command, all Per/Wil.
+    expect(optimized.base.perception).toBe(27);
+    expect(optimized.base.willpower).toBe(21);
+    // After it: Gallente Frigate alone, Int/Mem.
+    expect(optimized.entries[at]!.remapBefore!.intelligence).toBe(27);
+    expect(optimized.entries[at]!.remapBefore!.memory).toBe(21);
+  });
+
+  it('costs a level in a later stretch only from where an earlier one left it', () => {
+    const plain = addRequirements([], [{ skillTypeId: GUNNERY, level: 5 }], SKILLS);
+    // Remap before Gunnery V: its stretch holds one row, which costs IV→V only.
+    const entries = setRemap(plain, entryKey(plain[4]!), BALANCED_ATTRIBUTES);
+    const optimized = optimizeAttributes(entries, SKILLS, BALANCED_ATTRIBUTES, 4);
+
+    expect(optimized.perception).toBe(27);
+    expect(entryTimeCosts(entries, SKILLS, PER_WIL)[4]).toBeCloseTo(
+      (spForLevel(1, 5) - spForLevel(1, 4)) /
+        spPerMinute(BALANCED_ATTRIBUTES, { primary: 'perception', secondary: 'willpower' }),
+    );
+  });
+
+  it('travels with its row when the queue is reordered', () => {
+    const plain = mixedPlan();
+    const at = frigateStart(plain);
+    const entries = setRemap(plain, entryKey(plain[at]!), INT_MEM);
+
+    const moved = moveEntry(entries, at, entries.length - 1);
+    expect(moved[moved.length - 1]!.remapBefore).toBe(INT_MEM);
+    expect(remapCount(moved)).toBe(1);
+  });
+
+  it('hands its remap to the next row when its own row is removed', () => {
+    const plain = addRequirements([], [{ skillTypeId: GUNNERY, level: 3 }], SKILLS);
+    const entries = setRemap(plain, entryKey(plain[1]!), INT_MEM);
+
+    // Removing Gunnery II takes III with it; nothing follows, so the remap goes.
+    expect(remapCount(removeFromLevel(entries, GUNNERY, 2))).toBe(0);
+
+    const mixed = mixedPlan();
+    const at = frigateStart(mixed);
+    const withRemap = setRemap(mixed, entryKey(mixed[at - 1]!), INT_MEM);
+    const removed = removeEntry(withRemap, entryKey(withRemap[at - 1]!));
+    expect(removed[at - 1]!.remapBefore).toBe(INT_MEM);
+  });
+
+  it('keeps a remap where the author put it when a plan is expanded', () => {
+    const entries = expandLevels([
+      { skillTypeId: GUNNERY, skillName: 'Gunnery', level: 2 },
+      { skillTypeId: SMALL_HYBRID, skillName: 'Small Hybrid Turret', level: 3, remapBefore: PER_WIL },
+    ]);
+
+    expect(names(entries)).toEqual([
+      'Gunnery 1',
+      'Gunnery 2',
+      'Small Hybrid Turret 1',
+      'Small Hybrid Turret 2',
+      'Small Hybrid Turret 3',
+    ]);
+    expect(entries[2]!.remapBefore).toBe(PER_WIL);
+    expect(remapCount(entries)).toBe(1);
+  });
+
+  it('moves a remap on a duplicate line to the next row that trains something', () => {
+    const entries = expandLevels([
+      { skillTypeId: GUNNERY, skillName: 'Gunnery', level: 2 },
+      { skillTypeId: GUNNERY, skillName: 'Gunnery', level: 1, remapBefore: PER_WIL },
+      { skillTypeId: SPACESHIP_COMMAND, skillName: 'Spaceship Command', level: 1 },
+    ]);
+
+    expect(entries.map((entry) => entry.remapBefore)).toEqual([undefined, undefined, PER_WIL]);
+  });
+
+  it('is written into saved text but left out of the clipboard copy', () => {
+    const plain = addRequirements([], [{ skillTypeId: GUNNERY, level: 2 }], SKILLS);
+    const entries = setRemap(plain, entryKey(plain[1]!), PER_WIL);
+
+    expect(draftText(entries)).toBe(
+      'Gunnery I\n[Remap] Int 17 Mem 17 Per 27 Wil 21 Cha 17\nGunnery II',
+    );
+    expect(draftText(entries, { includeRemaps: false })).toBe('Gunnery I\nGunnery II');
   });
 });

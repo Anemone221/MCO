@@ -84,3 +84,48 @@ const ATTRIBUTE_ABBR: Record<TrainingAttribute, string> = {
 export function attributeAbbr(attribute: TrainingAttribute | null | undefined): string {
   return attribute ? ATTRIBUTE_ABBR[attribute] : '—';
 }
+
+/**
+ * How a remap point is written into stored plan text: one line, ahead of the
+ * skill line it precedes, e.g. `[Remap] Int 20 Mem 20 Per 27 Wil 21 Cha 17`.
+ * It lives in the text (not a column) so a plan stays one portable string —
+ * pasting a plan back in keeps its remaps. EVE's own skill-plan import doesn't
+ * know the line, so the clipboard export leaves it out.
+ */
+const REMAP_PREFIX = '[Remap]';
+
+export function formatRemapLine(attributes: NeuralAttributes): string {
+  const parts = TRAINING_ATTRIBUTES.map(
+    (attribute) => `${ATTRIBUTE_ABBR[attribute]} ${attributes[attribute]}`,
+  );
+  return `${REMAP_PREFIX} ${parts.join(' ')}`;
+}
+
+/** Whether a line is meant as a remap point, valid or not. */
+export function isRemapLine(line: string): boolean {
+  return line.trim().toLowerCase().startsWith(REMAP_PREFIX.toLowerCase());
+}
+
+/**
+ * Read a remap line back: all five attributes, any order, each one EVE could
+ * actually produce. Anything less is null — a half-stated remap would price
+ * the plan at attributes nobody chose.
+ */
+export function parseRemapLine(line: string): NeuralAttributes | null {
+  if (!isRemapLine(line)) return null;
+  const body = line.trim().slice(REMAP_PREFIX.length);
+  const byAbbr = new Map(
+    TRAINING_ATTRIBUTES.map((attribute) => [ATTRIBUTE_ABBR[attribute].toLowerCase(), attribute]),
+  );
+
+  const found: Partial<NeuralAttributes> = {};
+  for (const [, abbr, value] of body.matchAll(/([A-Za-z]{3})\s*:?\s*(\d+)/g)) {
+    const attribute = byAbbr.get(abbr!.toLowerCase());
+    const number = Number(value);
+    if (!attribute || number < MIN_ATTRIBUTE || number > MAX_ATTRIBUTE) return null;
+    found[attribute] = number;
+  }
+  return TRAINING_ATTRIBUTES.every((attribute) => found[attribute] !== undefined)
+    ? (found as NeuralAttributes)
+    : null;
+}

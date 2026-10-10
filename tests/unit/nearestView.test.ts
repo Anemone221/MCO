@@ -53,6 +53,7 @@ function entry(
     shipName: null,
     shipTypeName: null,
     updatedAt: null,
+    online: null,
     jumps,
     lightYears,
     tagNames: [],

@@ -12,7 +12,7 @@ MCO is an Electron app with the standard three-process split, built by
 │  auth/           SSO PKCE login, token store, scope status       │
 │  sde/            SDE download + streaming YAML import            │
 │  fits/ plans/    pure parsers + analysis math (no I/O)           │
-│  notifications/  pure queue-drain detection                      │
+│  notifications/  pure notification rules (queue drain, timers)   │
 │  sync/           pure character sync-state classification        │
 │  update/         pure semver compare + release parsing/mapping   │
 │  wallet/         pure current-month income windowing             │
@@ -232,13 +232,41 @@ under the NSIS build target (which, unlike Squirrel, does not auto-register the 
   notifications (see [features.md](features.md#notifications)).
 - The sweep ends by pushing `characters:changed` so an open window refreshes.
 
+## Live tracking (`services/liveTracking.ts`)
+
+A fast lane beside the hourly sweep, started and stopped with the scheduler. Both
+loops lean on `esiGet`'s cache — a call inside ESI's `Expires` window is answered
+from `esi_cache` without a request — so polling faster than ESI's cache is harmless
+but pointless.
+
+- **Presence**, every 2 min (first after 30 s): `/online` for every character whose
+  token has `esi-location.read_online.v1` (ESI caches it 60 s). A 90+ roster is ~45
+  requests a minute.
+- **Active**, every 20 s, only for characters last seen online: active implants
+  (ESI cache ~2 min, so mostly cache hits), then location + ship (cache 5 s). Changes
+  are written to `character_implants` / `character_location`, and the critical-clone
+  check runs (see [features.md](features.md#critical-clones)).
+- Each loop is single-flight, skips characters with an invalid token, and pushes
+  `characters:changed` **only when stored data actually changed** — every open page
+  reloads on that event.
+- Both loops have their own timers, independent of the hourly sweep — a login is
+  noticed within one presence interval, not at the next sweep.
+- **Off switch:** Settings → Background sync → "Live-track online characters"
+  (`app_settings` key `live_tracking`, absent = on). Toggling applies immediately
+  (`setLiveTrackingEnabled` arms/disarms the loops); off, online status and location
+  update with the hourly sweep only, and no critical-clone warnings are raised.
+- Requests share the one rate limiter with the sweep, so while an hourly sweep is
+  draining, live requests queue behind it and a warning can lag by the sweep's length.
+
 ## What syncs where
 
 | Data | Written by | Read from |
 | --- | --- | --- |
 | Public info, skills, skill queue | every sync (required) | DB |
-| Location + current ship | every sync (best-effort) | DB (Roster/Location); live ESI on CharacterDetail |
-| Active implants, jump clones | sync, only if scope granted (best-effort) | DB |
+| Location + current ship | every sync (best-effort); every ~20 s while online (live tracker) | DB (Roster/Location); live ESI on CharacterDetail |
+| Online status | every sync; every 2 min (live tracker), if scope granted | DB (Dashboard/Location) |
+| Active implants | sync, if scope granted; every ~20 s while online (live tracker) | DB |
+| Jump clones | sync, only if scope granted (best-effort) | DB |
 | Jump fatigue | sync, only if scope granted (best-effort) | DB |
 | NPC station names | on demand (public ESI, cached) | esi_cache |
 

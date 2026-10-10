@@ -209,6 +209,22 @@ export function replaceSkillAttributes(rows: SkillAttributeRow[]): void {
   })();
 }
 
+export interface SkillDescriptionRow {
+  skillTypeId: number;
+  description: string;
+}
+
+export function replaceSkillDescriptions(rows: SkillDescriptionRow[]): void {
+  const db = getDb();
+  const ins = db.prepare(
+    'INSERT OR REPLACE INTO sde_skill_descriptions (skill_type_id, description) VALUES (?, ?)',
+  );
+  db.transaction(() => {
+    db.exec('DELETE FROM sde_skill_descriptions');
+    for (const r of rows) ins.run(r.skillTypeId, r.description);
+  })();
+}
+
 /** Training attributes (dogma 180/181 values) keyed by skill type id. */
 export function getSkillAttributes(
   skillTypeIds: number[],
@@ -246,6 +262,8 @@ export interface SkillTypeRow {
   groupName: string | null;
   rank: number;
   published: boolean;
+  /** What the skill does, plain text; null until an SDE import that stores it. */
+  description: string | null;
 }
 
 const SKILL_SELECT = `SELECT t.id            AS id,
@@ -253,10 +271,12 @@ const SKILL_SELECT = `SELECT t.id            AS id,
                              t.published     AS published,
                              g.id            AS group_id,
                              g.name          AS group_name,
-                             COALESCE(r.rank, 1) AS rank
+                             COALESCE(r.rank, 1) AS rank,
+                             d.description   AS description
                       FROM sde_types t
                       JOIN sde_groups g ON g.id = t.group_id
-                      LEFT JOIN sde_skill_ranks r ON r.skill_type_id = t.id`;
+                      LEFT JOIN sde_skill_ranks r ON r.skill_type_id = t.id
+                      LEFT JOIN sde_skill_descriptions d ON d.skill_type_id = t.id`;
 
 interface SkillTypeQueryRow {
   id: number;
@@ -265,6 +285,7 @@ interface SkillTypeQueryRow {
   group_id: number | null;
   group_name: string | null;
   rank: number;
+  description: string | null;
 }
 
 function toSkillTypeRow(row: SkillTypeQueryRow): SkillTypeRow {
@@ -275,6 +296,7 @@ function toSkillTypeRow(row: SkillTypeQueryRow): SkillTypeRow {
     groupName: row.group_name,
     rank: row.rank,
     published: row.published === 1,
+    description: row.description,
   };
 }
 
@@ -634,6 +656,9 @@ export function getSdeStatus(): SdeStatus {
   const skillAttributes = getDb()
     .prepare('SELECT EXISTS(SELECT 1 FROM sde_skill_attributes LIMIT 1) AS present')
     .get() as { present: number };
+  const skillDescriptions = getDb()
+    .prepare('SELECT EXISTS(SELECT 1 FROM sde_skill_descriptions LIMIT 1) AS present')
+    .get() as { present: number };
   const blueprintData = getDb()
     .prepare('SELECT EXISTS(SELECT 1 FROM sde_blueprints LIMIT 1) AS present')
     .get() as { present: number };
@@ -647,6 +672,7 @@ export function getSdeStatus(): SdeStatus {
     hasSkillData: skillData.present === 1,
     hasMapData: mapData.present === 1,
     hasSkillAttributes: skillAttributes.present === 1,
+    hasSkillDescriptions: skillDescriptions.present === 1,
     hasBlueprintData: blueprintData.present === 1,
     hasJumpData: jumpData.present === 1,
   };

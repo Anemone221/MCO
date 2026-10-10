@@ -1,9 +1,13 @@
 import { listAccounts } from '../db/repositories/accounts';
 import { listCharacters } from '../db/repositories/characters';
-import { getQueue } from '../db/repositories/skills';
+import { listCharacterFatigue } from '../db/repositories/characterFatigue';
+import { getAllCloneMeta, getAllJumpClones } from '../db/repositories/clones';
+import { getActiveSkillLevels, getQueue } from '../db/repositories/skills';
 import { getTypeNames } from '../db/repositories/sde';
+import { INFOMORPH_SYNCHRONIZING_TYPE_ID, nextCloneJumpDate } from '../clones/jumpCooldown';
 import { findIdleOmegaAccounts } from '../notifications/idleOmega';
 import { findQueueDrainWarnings, type QueueDrainCandidate } from '../notifications/queueDrain';
+import { findElapsedTimers, type TimerCandidate } from '../notifications/timerElapsed';
 import { pendingQueue } from '../skills/queue';
 import { deliverNotifications, type GetWindow } from './notificationDelivery';
 
@@ -14,6 +18,24 @@ function formatRemaining(ms: number): string {
   if (days > 0) return `in ${days}d ${hours}h`;
   if (hours > 0) return `in ${hours}h ${totalMinutes % 60}m`;
   return `in ${Math.max(totalMinutes, 1)}m`;
+}
+
+/**
+ * The past-tense twin of {@link formatRemaining}, for a deadline that has
+ * already passed. Never needs a day unit: nothing older than
+ * `ELAPSED_GRACE_MS` (24h) reaches a sentence.
+ */
+function formatElapsed(ms: number): string {
+  const totalMinutes = Math.floor(ms / 60_000);
+  if (totalMinutes < 1) return 'just now';
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours < 1) return `${totalMinutes}m ago`;
+  return `${hours}h ${totalMinutes % 60}m ago`;
+}
+
+/** characterId → name, for joining a per-character table to its display name. */
+function characterNames(): Map<number, string> {
+  return new Map(listCharacters().map((c) => [c.id, c.name]));
 }
 
 /**
@@ -120,6 +142,111 @@ export function checkIdleOmegaAccounts(getWindow: GetWindow, now = Date.now()): 
         body: `None of the ${count} character${count === 1 ? '' : 's'} on "${warning.accountLabel}" is training a skill. Omega training time is going to waste.`,
       };
     }),
+    getWindow,
+  );
+}
+
+/**
+ * Check every character whose jump fatigue has finished decaying, notifying
+ * (OS toast + in-app) once per fatigue episode.
+ *
+ * Same three steps as the kinds above: gather from the DB, hand to the pure
+ * rule ({@link findElapsedTimers}), turn what comes back into sentences. Only
+ * characters whose token carries the fatigue scope have a row at all, so scope
+ * gating needs no check here.
+ */
+export function checkFatigueCleared(getWindow: GetWindow, now = Date.now()): void {
+  const names = characterNames();
+
+  const candidates: TimerCandidate[] = listCharacterFatigue().flatMap((row) => {
+    const characterName = names.get(row.characterId);
+    if (characterName === undefined) return [];
+    return [{ characterId: row.characterId, characterName, deadline: row.jumpFatigueExpireDate }];
+  });
+
+  const cleared = findElapsedTimers(candidates, now);
+  if (cleared.length === 0) return;
+
+  deliverNotifications(
+    cleared.map((timer) => ({
+      kind: 'fatigue-clear',
+      // The expire date, which is ESI's own and only changes when the character
+      // jumps again — i.e. it names the fatigue episode that just ended.
+      dedupeKey: `fatigue-clear:${timer.characterId}:${timer.deadline}`,
+      characterId: timer.characterId,
+      title: `${timer.characterName}: jump fatigue cleared`,
+      // The name leads the body as well as the title: a toast body, or a row in
+      // the OS notification centre, is read on its own, and "fatigue cleared"
+      // means nothing when the answer could be any of 90+ characters. Who, what
+      // and when, and nothing more — a toast has room for about that much
+      // before it truncates.
+      body:
+        `${timer.characterName} is clear of jump fatigue — it expired ` +
+        `${formatElapsed(now - new Date(timer.deadline).getTime())}.`,
+    })),
+    getWindow,
+  );
+}
+
+/**
+ * Check every character whose clone-jump cooldown has run out, notifying (OS
+ * toast + in-app) once per cooldown.
+ *
+ * Characters with no jump clones are skipped: the cooldown is real but there is
+ * nowhere to jump, so "ready" would be noise on every alt that has none — the
+ * same reasoning that keeps {@link checkIdleOmegaAccounts} off empty account
+ * buckets.
+ */
+export function checkCloneJumpReady(getWindow: GetWindow, now = Date.now()): void {
+  const names = characterNames();
+  const meta = getAllCloneMeta();
+  const jumpClones = getAllJumpClones();
+  const infomorphLevels = getActiveSkillLevels(INFOMORPH_SYNCHRONIZING_TYPE_ID);
+
+  // The jump each cooldown belongs to, kept for the dedupe key below.
+  const lastJumps = new Map<number, string>();
+
+  const candidates: TimerCandidate[] = [...meta].flatMap(([characterId, cloneMeta]) => {
+    const characterName = names.get(characterId);
+    if (characterName === undefined) return [];
+    if ((jumpClones.get(characterId)?.length ?? 0) === 0) return [];
+    // Never clone-jumped: no cooldown was ever started, so there is no "ready
+    // again" moment to announce — the jump has been available all along.
+    if (cloneMeta.lastCloneJumpDate === null) return [];
+    lastJumps.set(characterId, cloneMeta.lastCloneJumpDate);
+    return [
+      {
+        characterId,
+        characterName,
+        // Same math as the Roster and Clones pages, so the notification agrees
+        // with the "JC ready" the user reads there.
+        deadline: nextCloneJumpDate(
+          cloneMeta.lastCloneJumpDate,
+          infomorphLevels.get(characterId) ?? 0,
+        ),
+      },
+    ];
+  });
+
+  const ready = findElapsedTimers(candidates, now);
+  if (ready.length === 0) return;
+
+  deliverNotifications(
+    ready.map((timer) => ({
+      kind: 'clone-jump-ready',
+      // Keyed on the *jump*, not on the deadline: the deadline is derived from
+      // Infomorph Synchronizing, so training a level mid-cooldown moves it
+      // earlier and would earn a second notification for the same cooldown.
+      dedupeKey: `clone-jump-ready:${timer.characterId}:${lastJumps.get(timer.characterId)!}`,
+      characterId: timer.characterId,
+      title: `${timer.characterName}: clone jump ready`,
+      // Named in the body too, and no longer than it has to be — see
+      // checkFatigueCleared above. How many clones the character has is on the
+      // Clones page; a toast does not have the room to spend on it.
+      body:
+        `${timer.characterName} can clone-jump again — the cooldown ended ` +
+        `${formatElapsed(now - new Date(timer.deadline).getTime())}.`,
+    })),
     getWindow,
   );
 }

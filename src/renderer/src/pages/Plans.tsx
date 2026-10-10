@@ -4,6 +4,9 @@ import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import { formatDate } from '../lib/format';
 
+/** The per-plan visibility flags, each with its own setter channel. */
+type VisibilityFlag = 'showOnCharacterSheet' | 'showOnRoster';
+
 export default function Plans() {
   const [name, setName] = useState('');
   const [planText, setPlanText] = useState('');
@@ -36,15 +39,16 @@ export default function Plans() {
   // patch lands before the round-trip so the checkbox tracks the click instead
   // of snapping back to its old state until the write returns; a failed write
   // puts it back.
-  async function setSheetVisibility(id: number, show: boolean): Promise<void> {
+  async function setVisibility(id: number, flag: VisibilityFlag, show: boolean): Promise<void> {
     setError(null);
     const patch = (value: boolean): void =>
-      setData(
-        (prev) => prev?.map((p) => (p.id === id ? { ...p, showOnCharacterSheet: value } : p)) ?? prev,
-      );
+      setData((prev) => prev?.map((p) => (p.id === id ? { ...p, [flag]: value } : p)) ?? prev);
     patch(show);
     try {
-      const updated = await mco.plans.setSheetVisibility(id, show);
+      const updated =
+        flag === 'showOnRoster'
+          ? await mco.plans.setRosterVisibility(id, show)
+          : await mco.plans.setSheetVisibility(id, show);
       setData((prev) => prev?.map((p) => (p.id === id ? updated : p)) ?? prev);
     } catch (e) {
       patch(!show);
@@ -143,6 +147,7 @@ export default function Plans() {
               <th title="Show this plan's progress bar on every character sheet">
                 On character sheets
               </th>
+              <th title="Give this plan a progress column on the Roster table">On roster</th>
               <th aria-label="actions" />
             </tr>
           </thead>
@@ -158,10 +163,23 @@ export default function Plans() {
                     <input
                       type="checkbox"
                       checked={plan.showOnCharacterSheet}
-                      onChange={(e) => void setSheetVisibility(plan.id, e.target.checked)}
+                      onChange={(e) =>
+                        void setVisibility(plan.id, 'showOnCharacterSheet', e.target.checked)
+                      }
                       data-testid={`plan-sheet-toggle-${plan.id}`}
                     />{' '}
                     {plan.showOnCharacterSheet ? 'Shown' : 'Hidden'}
+                  </label>
+                </td>
+                <td>
+                  <label className="sheet-toggle">
+                    <input
+                      type="checkbox"
+                      checked={plan.showOnRoster}
+                      onChange={(e) => void setVisibility(plan.id, 'showOnRoster', e.target.checked)}
+                      data-testid={`plan-roster-toggle-${plan.id}`}
+                    />{' '}
+                    {plan.showOnRoster ? 'Shown' : 'Hidden'}
                   </label>
                 </td>
                 <td className="row-actions">

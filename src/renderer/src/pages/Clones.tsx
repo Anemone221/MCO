@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { CloneBoardEntry, EsiDataStatus, ImplantInfo, JumpCloneEntry } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import { formatDate, formatTimeUntil } from '../lib/format';
 import CharacterAvatar from '../components/CharacterAvatar';
+import CriticalCloneToggle from '../components/CriticalCloneToggle';
 
 /** Calm, actionable copy for each non-ok ESI-data state — feature-agnostic. */
 function statusLabel(status: EsiDataStatus, missingScopes: string[]): string | null {
@@ -46,10 +47,14 @@ function CloneRow({
   entry,
   expanded,
   onToggle,
+  busy,
+  onSetCritical,
 }: {
   entry: CloneBoardEntry;
   expanded: boolean;
   onToggle: () => void;
+  busy: boolean;
+  onSetCritical: (implants: ImplantInfo[], critical: boolean, label: string | null) => void;
 }) {
   const label = statusLabel(entry.status, entry.missingScopes);
   // Implants can sync on tokens that predate the clones scope, so show
@@ -88,6 +93,15 @@ function CloneRow({
         <span className="row-list__meta">
           {hasSyncedData && (
             <>
+              {entry.activeCritical && (
+                <span
+                  className="chip chip--danger"
+                  title="The active clone is wearing a critical implant set"
+                  data-testid={`critical-active-${entry.characterId}`}
+                >
+                  Critical pod
+                </span>
+              )}
               {jcCooldown ? (
                 <span className="chip chip--fatigue" data-testid={`jc-cooldown-${entry.characterId}`}>
                   JC {formatTimeUntil(entry.nextCloneJumpAt).replace(/^in /, '')}
@@ -105,7 +119,15 @@ function CloneRow({
 
       {expanded && hasSyncedData && (
         <div className="row-list__body">
-          <h4>Active clone</h4>
+          <h4 className="clone-heading">
+            Active clone
+            <CriticalCloneToggle
+              implants={entry.activeImplants}
+              critical={entry.activeCritical}
+              busy={busy}
+              onChange={(critical) => onSetCritical(entry.activeImplants, critical, null)}
+            />
+          </h4>
           <ImplantList implants={entry.activeImplants} />
 
           {entry.status === 'ok' && (
@@ -116,9 +138,17 @@ function CloneRow({
               </p>
               {entry.clones.map((clone) => (
                 <div key={clone.jumpCloneId} className="clone-block">
-                  <h4>
-                    {clone.name ?? 'Jump clone'}
-                    <span className="muted"> · {cloneLocation(clone)}</span>
+                  <h4 className="clone-heading">
+                    <span>
+                      {clone.name ?? 'Jump clone'}
+                      <span className="muted"> · {cloneLocation(clone)}</span>
+                    </span>
+                    <CriticalCloneToggle
+                      implants={clone.implants}
+                      critical={clone.critical}
+                      busy={busy}
+                      onChange={(critical) => onSetCritical(clone.implants, critical, clone.name)}
+                    />
                   </h4>
                   <ImplantList implants={clone.implants} />
                 </div>
@@ -141,6 +171,8 @@ export default function Clones() {
   const [search, setSearch] = useState('');
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data, error, loading, reload } = useMcoData(() => mco.clones.board(), {
     onCharactersChanged: true,
@@ -169,6 +201,29 @@ export default function Clones() {
       return haystack.includes(needle);
     });
   }, [board, search, attentionOnly]);
+
+  async function setCritical(
+    characterId: number,
+    implants: ImplantInfo[],
+    critical: boolean,
+    label: string | null,
+  ): Promise<void> {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await mco.clones.setCritical(
+        characterId,
+        implants.map((i) => i.typeId),
+        critical,
+        label,
+      );
+      await reload();
+    } catch (e) {
+      setActionError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function toggle(characterId: number): void {
     setExpanded((prev) => {
@@ -227,6 +282,7 @@ export default function Clones() {
       )}
 
       {error && <div className="error-box" data-testid="clones-error">{error}</div>}
+      {actionError && <div className="error-box">{actionError}</div>}
 
       {board.length === 0 ? (
         <div className="empty-state">
@@ -244,6 +300,10 @@ export default function Clones() {
               entry={entry}
               expanded={expanded.has(entry.characterId)}
               onToggle={() => toggle(entry.characterId)}
+              busy={busy}
+              onSetCritical={(implants, critical, label) =>
+                void setCritical(entry.characterId, implants, critical, label)
+              }
             />
           ))}
         </div>

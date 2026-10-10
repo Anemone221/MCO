@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type {
   Fit,
@@ -26,6 +34,8 @@ import {
   draftIssues,
   draftText,
   draftTotals,
+  dropEntry,
+  entryAttributes,
   entryKey,
   entrySpCosts,
   entryTimeCosts,
@@ -37,22 +47,34 @@ import {
   MAX_LEVEL,
   mergeSkills,
   moveEntry,
+  optimizeAllAttributes,
   optimizeAttributes,
   planLevel,
   raiseSkill,
+  remapCount,
   removeEntry,
   removeFromLevel,
+  setRemap,
   sortByPrereqs,
   type SkillGroup,
   type SkillMap,
 } from '../lib/planDraft';
 import {
+  attributeTotal,
   isBalanced,
   loadPlanAttributes,
   savePlanAttributes,
   withAttribute,
 } from '../lib/planAttributes';
+import {
+  autoRemap,
+  MAX_AUTO_REMAPS,
+  type AutoRemapPoint,
+  type AutoRemapResult,
+} from '../lib/autoRemap';
+import { useRowDrag } from '../lib/useRowDrag';
 import ShipBrowser from '../components/ShipBrowser';
+import SkillInfoMenu from '../components/SkillInfoMenu';
 
 /** DOM id of a skill's row in the browser, so the plan can scroll to it. */
 function browserSkillId(skillTypeId: number): string {
@@ -104,10 +126,11 @@ function AttributeEditor({
         </div>
       </div>
       <p className="muted">
-        What this character will have while training the plan — remap plus implants. Every
-        attribute starts at {MIN_ATTRIBUTE} with 14 points to spread (27 max before implants);
-        balanced spends them evenly. <strong>Optimize</strong> keeps the total you've set and
-        rearranges it into the fastest arrangement this plan allows.
+        What this character will have when they start training the plan — remap plus implants.
+        Every attribute starts at {MIN_ATTRIBUTE} with 14 points to spread (27 max before
+        implants); balanced spends them evenly. These hold until the first remap point (⇄ on a
+        plan row). <strong>Optimize</strong> keeps each total you've set and rearranges it into
+        the fastest arrangement for the rows it covers — these and every remap point.
       </p>
       <div className="attribute-editor__fields">
         {TRAINING_ATTRIBUTES.map((attribute) => (
@@ -128,6 +151,180 @@ function AttributeEditor({
   );
 }
 
+/**
+ * A remap point, drawn as its own thin row above the skill it precedes: the
+ * attributes everything from here to the next remap trains at.
+ */
+function RemapRow({
+  index,
+  attributes,
+  savedMinutes,
+  dropLine,
+  onChange,
+  onOptimize,
+  onRemove,
+}: {
+  index: number;
+  attributes: NeuralAttributes;
+  /** A dragged row would land just above this remap. */
+  dropLine: boolean;
+  /** How much faster the rows it governs train than without it; null if unknown. */
+  savedMinutes: number | null;
+  onChange: (attribute: TrainingAttribute, value: number) => void;
+  onOptimize: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <tr
+      className={dropLine ? 'plan-draft__remap plan-draft__row--drop-before' : 'plan-draft__remap'}
+      data-drag-remap={index}
+      data-testid={`creator-remap-${index}`}
+    >
+      <td colSpan={8} className="plan-draft__remap-cell">
+        <div className="plan-draft__remap-body">
+          <span className="plan-draft__remap-label" title="Remap before training the row below">
+            ⇄ Remap
+          </span>
+          {TRAINING_ATTRIBUTES.map((attribute) => (
+            <label key={attribute}>
+              <span className="muted">{attributeAbbr(attribute)}</span>
+              <input
+                type="number"
+                min={MIN_ATTRIBUTE}
+                max={MAX_ATTRIBUTE}
+                value={attributes[attribute]}
+                onChange={(e) => onChange(attribute, Number(e.target.value))}
+                data-testid={`remap-${index}-${attribute}`}
+              />
+            </label>
+          ))}
+          <span className="muted" title="Attribute points in this remap, implants included">
+            {attributeTotal(attributes)} pts
+          </span>
+          {savedMinutes !== null && savedMinutes > 0 && (
+            <span className="muted" title="Faster than carrying on at the attributes above">
+              −{formatDuration(savedMinutes)}
+            </span>
+          )}
+          <span className="plan-draft__remap-actions">
+            <button
+              type="button"
+              className="btn-sm"
+              title="Rearrange these points into the fastest remap for the rows it covers"
+              onClick={onOptimize}
+              data-testid={`remap-optimize-${index}`}
+            >
+              Optimize
+            </button>
+            <button
+              type="button"
+              className="danger btn-sm"
+              title="Remove this remap point"
+              onClick={onRemove}
+              data-testid={`remap-remove-${index}`}
+            >
+              ✕
+            </button>
+          </span>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+/** One attribute of a remap: the value to set, flagged when it changes. */
+function RemapAttribute({ point, attribute }: { point: AutoRemapPoint; attribute: TrainingAttribute }) {
+  const to = point.attributes[attribute];
+  const from = point.previous[attribute];
+  const delta = to - from;
+  return (
+    <span
+      className={
+        delta > 0
+          ? 'auto-remap__attr auto-remap__attr--up'
+          : delta < 0
+            ? 'auto-remap__attr auto-remap__attr--down'
+            : 'auto-remap__attr muted'
+      }
+      title={delta === 0 ? 'Unchanged' : `${from} → ${to}`}
+    >
+      {attributeAbbr(attribute)} <strong>{to}</strong>
+      {delta !== 0 && (
+        <span className="auto-remap__delta">
+          {' '}
+          ({delta > 0 ? '+' : ''}
+          {delta})
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * What auto remap did: the time it saved, how much of the queue it moved, and
+ * for each remap point where it falls and the attributes to remap to there.
+ */
+function AutoRemapCard({
+  result,
+  onUndo,
+  onDismiss,
+}: {
+  result: AutoRemapResult;
+  onUndo: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="card auto-remap" data-testid="auto-remap-result">
+      <div className="bucket-head">
+        <h3>
+          Auto remap · {formatDuration(result.beforeMinutes)} → {formatDuration(result.afterMinutes)}
+        </h3>
+        <div className="toolbar__actions">
+          <button type="button" className="btn-sm" onClick={onUndo} data-testid="auto-remap-undo">
+            Undo
+          </button>
+          <button type="button" className="ghost btn-sm" onClick={onDismiss}>
+            Dismiss
+          </button>
+        </div>
+      </div>
+      <p className="muted">
+        Saves {formatDuration(result.beforeMinutes - result.afterMinutes)}
+        {result.moved > 0 ? ` · ${result.moved} rows reordered so each remap covers the skills it suits` : ''}
+        {' · '}prerequisites still train first. Remap to these at each point:
+      </p>
+      <table className="data-table auto-remap__table">
+        <thead>
+          <tr>
+            <th className="num">#</th>
+            <th>Before</th>
+            <th>Remap to</th>
+            <th className="num" title="Faster than staying on the attributes before it">
+              Saves
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.points.map((point, i) => (
+            <tr key={point.index} data-testid={`auto-remap-point-${i}`}>
+              <td className="num muted">{point.index + 1}</td>
+              <td>
+                {point.skillName} {romanLevel(point.level)}
+              </td>
+              <td className="auto-remap__attrs">
+                {TRAINING_ATTRIBUTES.map((attribute) => (
+                  <RemapAttribute key={attribute} point={point} attribute={attribute} />
+                ))}
+              </td>
+              <td className="num">{formatDuration(point.savedMinutes)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** One skill row in the browser: its level in the plan, and the − / + that set it. */
 function BrowserSkill({
   skill,
@@ -137,6 +334,7 @@ function BrowserSkill({
   revealed,
   onRaise,
   onLower,
+  onInfo,
 }: {
   skill: PlanSkillInfo;
   group: SkillGroup;
@@ -146,6 +344,8 @@ function BrowserSkill({
   revealed: boolean;
   onRaise: () => void;
   onLower: () => void;
+  /** Right-click: open the skill's info card at the pointer. */
+  onInfo: (e: ReactMouseEvent) => void;
 }) {
   // The group header already states the pair its skills train against; only the
   // ones that break it repeat it.
@@ -160,8 +360,12 @@ function BrowserSkill({
       ]
         .join(' ')
         .trim()}
+      onContextMenu={onInfo}
     >
-      <span className="skill-browser__name" title={`Rank ${skill.rank}`}>
+      <span
+        className="skill-browser__name"
+        title={`Rank ${skill.rank} — right-click for info`}
+      >
         {skill.name}
         {deviates && (
           <span className="skill-browser__attrs muted">
@@ -308,12 +512,21 @@ export default function PlanCreator() {
    * effect that does.
    */
   const [revealed, setRevealed] = useState<{ skillTypeId: number; seq: number } | null>(null);
+  /** The skill whose info card is open (right-click), and where. */
+  const [info, setInfo] = useState<{ skillTypeId: number; x: number; y: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
-  /** The row whose grip is held down — the only row HTML5 drag may start on. */
-  const [dragArmed, setDragArmed] = useState<number | null>(null);
+  /** The queue's scroll box — what a drag hit-tests against and auto-scrolls. */
+  const queueRef = useRef<HTMLDivElement>(null);
+  const [autoRemapCount, setAutoRemapCount] = useState(1);
+  /**
+   * The last auto remap, with the queue it replaced (for Undo). Shown only
+   * while the queue is still exactly what it produced — any edit retires it.
+   */
+  const [autoResult, setAutoResult] = useState<{
+    result: AutoRemapResult;
+    previous: PlanDraftEntry[];
+  } | null>(null);
 
   const { data, error, loading, setError } = useMcoData(
     async () => {
@@ -385,6 +598,34 @@ export default function PlanCreator() {
     [issues],
   );
 
+  const remaps = useMemo(() => remapCount(entries), [entries]);
+  const inForce = useMemo(() => entryAttributes(entries, attributes), [entries, attributes]);
+
+  /**
+   * Per remap row, how much faster the rows it governs train than they would
+   * carrying on at the attributes above it — what the remap is worth.
+   */
+  const remapSavings = useMemo(() => {
+    const saved = new Map<number, number | null>();
+    entries.forEach((entry, index) => {
+      if (!entry.remapBefore) return;
+      const without = entryTimeCosts(setRemap(entries, entryKey(entry), null), skills, attributes);
+      let end = index + 1;
+      while (end < entries.length && !entries[end]!.remapBefore) end += 1;
+      let delta = 0;
+      for (let row = index; row < end; row += 1) {
+        const before = without[row];
+        const after = times[row];
+        if (before === null || before === undefined || after === null || after === undefined) {
+          continue;
+        }
+        delta += before - after;
+      }
+      saved.set(index, delta);
+    });
+    return saved;
+  }, [entries, skills, attributes, times]);
+
   /** Running training time down the rows — when this line finishes. */
   const elapsed = useMemo(() => {
     let running = 0;
@@ -402,17 +643,61 @@ export default function PlanCreator() {
     });
   }
 
-  /** Rearrange the attributes into the fastest legal remap for this plan. */
-  function optimize(): void {
-    const next = optimizeAttributes(entries, skills, attributes);
-    setAttributes(next);
-    savePlanAttributes(next);
-    const after = draftTotals(entries, skills, next).minutes;
+  /** Tell the user what an optimisation bought them. */
+  function reportOptimized(after: number, what: string): void {
     setNotice(
       after < totals.minutes
-        ? `Attributes optimised — ${formatDuration(totals.minutes)} → ${formatDuration(after)}.`
+        ? `${what} optimised — ${formatDuration(totals.minutes)} → ${formatDuration(after)}.`
         : 'Already the fastest arrangement for this plan.',
     );
+  }
+
+  /**
+   * Rearrange the starting attributes, and every remap point, into the fastest
+   * legal arrangement for the rows each one covers.
+   */
+  function optimize(): void {
+    const next = optimizeAllAttributes(entries, skills, attributes);
+    setAttributes(next.base);
+    savePlanAttributes(next.base);
+    setEntries(next.entries);
+    reportOptimized(
+      draftTotals(next.entries, skills, next.base).minutes,
+      remaps > 0 ? 'Attributes and remaps' : 'Attributes',
+    );
+  }
+
+  /**
+   * Put a remap point before a row. It starts from whatever is in force there
+   * and is optimised straight away for the rows it will cover — the reason to
+   * remap at all — keeping that total.
+   */
+  function addRemap(index: number): void {
+    const entry = entries[index];
+    if (!entry || entry.remapBefore) return;
+    const placed = setRemap(entries, entryKey(entry), inForce[index] ?? attributes);
+    const best = optimizeAttributes(placed, skills, placed[index]!.remapBefore!, index);
+    const next = setRemap(placed, entryKey(entry), best);
+    setEntries(next);
+    const after = draftTotals(next, skills, attributes).minutes;
+    setNotice(
+      after < totals.minutes
+        ? `Remap added before ${entry.skillName} ${romanLevel(entry.level)} — ${formatDuration(totals.minutes)} → ${formatDuration(after)}.`
+        : 'Remap added — the attributes above it are already the fastest for what follows.',
+    );
+  }
+
+  function changeRemap(key: string, current: NeuralAttributes, attribute: TrainingAttribute, value: number): void {
+    setEntries((prev) => setRemap(prev, key, withAttribute(current, attribute, value)));
+  }
+
+  function optimizeRemap(index: number): void {
+    const entry = entries[index];
+    if (!entry?.remapBefore) return;
+    const best = optimizeAttributes(entries, skills, entry.remapBefore, index);
+    const next = setRemap(entries, entryKey(entry), best);
+    setEntries(next);
+    reportOptimized(draftTotals(next, skills, attributes).minutes, 'Remap');
   }
 
   /** Every skill a hull needs, straight from the ship browser. */
@@ -474,11 +759,29 @@ export default function PlanCreator() {
     setRevealed((prev) => ({ skillTypeId, seq: (prev?.seq ?? 0) + 1 }));
   }
 
-  function endDrag(): void {
-    setDragIndex(null);
-    setDropIndex(null);
-    setDragArmed(null);
+  /** Right-click on a skill (queue row or browser): its info card at the pointer. */
+  function openInfo(e: ReactMouseEvent, skillTypeId: number | null): void {
+    if (skillTypeId === null) return;
+    e.preventDefault();
+    setInfo({ skillTypeId, x: e.clientX, y: e.clientY });
   }
+  const closeInfo = useCallback(() => setInfo(null), []);
+
+  const drag = useRowDrag(queueRef, entries.length, (from, target) =>
+    setEntries((prev) => dropEntry(prev, from, target)),
+  );
+
+  /**
+   * Where the drop line goes: the drag's target, unless dropping there would
+   * change nothing (back onto its own place), in which case no line at all.
+   */
+  const dropAt = useMemo(() => {
+    if (!drag.active?.target) return null;
+    const { from, target } = drag.active;
+    // dropEntry keeps every row object it doesn't change, so identity says it all.
+    const after = dropEntry(entries, from, target);
+    return after.every((entry, i) => entry === entries[i]) ? null : target;
+  }, [drag.active, entries]);
 
   async function save(asNew: boolean): Promise<void> {
     const planName = name.trim();
@@ -502,11 +805,41 @@ export default function PlanCreator() {
   async function copy(): Promise<void> {
     setError(null);
     try {
-      await mco.system.copyText(draftText(entries));
-      setNotice("Copied — paste it into EVE's skill plan import.");
+      // EVE's import has no remap line, so the clipboard gets the skills alone.
+      await mco.system.copyText(draftText(entries, { includeRemaps: false }));
+      setNotice(
+        remaps > 0
+          ? "Copied — paste it into EVE's skill plan import. Remap points stay in MCO; EVE's import can't carry them."
+          : "Copied — paste it into EVE's skill plan import.",
+      );
     } catch (e) {
       setError(errorMessage(e));
     }
+  }
+
+  /**
+   * Work out where remap points pay off, reorder the queue so the skills each
+   * one suits train under it, and place them. Applied only when it actually
+   * beats the plan as it stands; the card it leaves lists what to remap to.
+   */
+  function runAutoRemap(): void {
+    const result = autoRemap(entries, skills, attributes, autoRemapCount);
+    if (!result) {
+      setNotice('Nothing to remap for — no skill in the plan has training data.');
+      return;
+    }
+    if (result.afterMinutes >= result.beforeMinutes - 1) {
+      setAutoResult(null);
+      setNotice(
+        remaps > 0
+          ? 'Auto remap found nothing faster than the remap points already in the plan.'
+          : 'No remap would make this plan faster — your starting attributes already suit it.',
+      );
+      return;
+    }
+    setAutoResult({ result, previous: entries });
+    setEntries(result.entries);
+    setNotice(null);
   }
 
   async function clear(): Promise<void> {
@@ -539,7 +872,7 @@ export default function PlanCreator() {
             type="button"
             className="ghost"
             onClick={() => setAttributesOpen((open) => !open)}
-            title="Attributes training time is estimated at"
+            title="Attributes training time is estimated at, until the first remap point"
             data-testid="creator-attributes-toggle"
           >
             Attributes {attributeSummary}
@@ -593,6 +926,17 @@ export default function PlanCreator() {
         </div>
       )}
 
+      {autoResult && autoResult.result.entries === entries && (
+        <AutoRemapCard
+          result={autoResult.result}
+          onUndo={() => {
+            setEntries(autoResult.previous);
+            setAutoResult(null);
+          }}
+          onDismiss={() => setAutoResult(null)}
+        />
+      )}
+
       {attributesOpen && (
         <AttributeEditor
           attributes={attributes}
@@ -611,6 +955,29 @@ export default function PlanCreator() {
           <div className="bucket-head">
             <h3>Plan ({entries.length})</h3>
             <div className="toolbar__actions">
+              <select
+                className="btn-sm"
+                value={autoRemapCount}
+                title="How many remap points auto remap may place"
+                onChange={(e) => setAutoRemapCount(Number(e.target.value))}
+                data-testid="auto-remap-count"
+              >
+                {Array.from({ length: MAX_AUTO_REMAPS }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n} remap{n === 1 ? '' : 's'}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="ghost btn-sm"
+                disabled={entries.length === 0}
+                title="Find where remapping pays off, move the skills that suit each remap under it, and place the remap points"
+                onClick={runAutoRemap}
+                data-testid="auto-remap"
+              >
+                Auto remap
+              </button>
               <button
                 type="button"
                 className="ghost btn-sm"
@@ -640,6 +1007,11 @@ export default function PlanCreator() {
               <strong>{formatSp(totals.sp)}</strong> total
               {totals.unknown > 0 && <span className="muted"> · {totals.unknown} unknown</span>}
             </span>
+            {remaps > 0 && (
+              <span className="stat-chip" data-testid="creator-remap-count">
+                <strong>{remaps}</strong> remap{remaps === 1 ? '' : 's'}
+              </span>
+            )}
             {orderIssueCount > 0 && (
               <span className="stat-chip stat-chip--warn" data-testid="creator-order-warning">
                 <strong>{orderIssueCount}</strong> out of order
@@ -662,8 +1034,11 @@ export default function PlanCreator() {
               </p>
             </div>
           ) : (
-            <div className="table-scroll">
-              <table className="data-table plan-draft" data-testid="creator-table">
+            <div className="table-scroll" ref={queueRef}>
+              <table
+                className={drag.active ? 'data-table plan-draft plan-draft--dragging' : 'data-table plan-draft'}
+                data-testid="creator-table"
+              >
                 <thead>
                   <tr>
                     <th className="num">#</th>
@@ -685,144 +1060,162 @@ export default function PlanCreator() {
                     const issue = issues.get(key);
                     const cost = costs[index];
                     const minutes = times[index];
+                    const remap = entry.remapBefore;
                     return (
-                      <tr
-                        key={key}
-                        // Only the grip starts a drag. With the whole row
-                        // draggable, any click that drifts a few pixels — most
-                        // of them, on a row this short — became a drag instead,
-                        // and Chromium fires no click after a drag.
-                        draggable={dragArmed === index}
-                        onClick={(e) => {
-                          // The row's own controls are not a reveal.
-                          if ((e.target as HTMLElement).closest('button, select')) return;
-                          reveal(entry.skillTypeId);
-                        }}
-                        onMouseUp={() => setDragArmed(null)}
-                        onDragStart={(e) => {
-                          setDragIndex(index);
-                          e.dataTransfer.effectAllowed = 'move';
-                          e.dataTransfer.setData('text/plain', key);
-                        }}
-                        onDragOver={(e) => {
-                          if (dragIndex === null) return;
-                          e.preventDefault();
-                          e.dataTransfer.dropEffect = 'move';
-                          setDropIndex(index);
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          if (dragIndex !== null) move(dragIndex, index);
-                          endDrag();
-                        }}
-                        onDragEnd={endDrag}
-                        className={[
-                          dragIndex === index ? 'plan-draft__row--dragging' : '',
-                          dropIndex === index && dragIndex !== index ? 'plan-draft__row--over' : '',
-                        ]
-                          .join(' ')
-                          .trim()}
-                        data-testid={`creator-row-${index}`}
-                      >
-                        <td className="num muted">{index + 1}</td>
-                        <td
-                          className={
-                            entry.skillTypeId === null
-                              ? 'plan-draft__name'
-                              : 'plan-draft__name plan-draft__name--linked'
-                          }
-                          title={
-                            entry.skillTypeId === null
-                              ? entry.skillName
-                              : `${entry.skillName} — click to find it in the skill list`
-                          }
-                          role={entry.skillTypeId === null ? undefined : 'button'}
-                          tabIndex={entry.skillTypeId === null ? undefined : 0}
-                          onKeyDown={(e) => {
-                            if (e.key !== 'Enter' && e.key !== ' ') return;
-                            e.preventDefault();
+                      <Fragment key={key}>
+                        {remap && (
+                          <RemapRow
+                            index={index}
+                            attributes={remap}
+                            savedMinutes={remapSavings.get(index) ?? null}
+                            dropLine={dropAt?.index === index && !dropAt.underRemap}
+                            onChange={(attribute, value) => changeRemap(key, remap, attribute, value)}
+                            onOptimize={() => optimizeRemap(index)}
+                            onRemove={() => setEntries((prev) => setRemap(prev, key, null))}
+                          />
+                        )}
+                        <tr
+                          // The whole row drags; a press only becomes a drag
+                          // once it has moved a few pixels, so a click on the
+                          // row still reveals its skill (see useRowDrag).
+                          onPointerDown={(e) => drag.onRowPointerDown(index, e)}
+                          onClick={(e) => {
+                            if (drag.consumeClick()) return;
+                            // The row's own controls are not a reveal.
+                            if ((e.target as HTMLElement).closest('button, select')) return;
                             reveal(entry.skillTypeId);
                           }}
-                          data-testid={`creator-reveal-${index}`}
+                          onContextMenu={(e) => openInfo(e, entry.skillTypeId)}
+                          data-drag-row={index}
+                          data-has-remap={remap ? '' : undefined}
+                          className={[
+                            drag.active?.from === index ? 'plan-draft__row--dragging' : '',
+                            dropAt &&
+                            dropAt.index === index &&
+                            (dropAt.underRemap || !remap)
+                              ? 'plan-draft__row--drop-before'
+                              : '',
+                            dropAt?.index === entries.length && index === entries.length - 1
+                              ? 'plan-draft__row--drop-after'
+                              : '',
+                          ]
+                            .join(' ')
+                            .trim()}
+                          data-testid={`creator-row-${index}`}
                         >
-                          <span
-                            className="plan-draft__grip"
-                            title="Drag to reorder"
-                            onMouseDown={() => setDragArmed(index)}
-                            aria-hidden="true"
-                          >
-                            ⠿
-                          </span>
-                          {issue && (
-                            <span
-                              className={`plan-draft__issue plan-draft__issue--${issue.kind}`}
-                              title={issue.message}
-                              data-testid={`creator-issue-${index}`}
-                            >
-                              {ISSUE_LABEL[issue.kind]}
-                            </span>
-                          )}
-                          {entry.skillName}
-                        </td>
-                        <td className="plan-draft__level">{romanLevel(entry.level)}</td>
-                        <td
-                          className="muted"
-                          title={
-                            skill?.primaryAttribute
-                              ? `Primary ${skill.primaryAttribute}, secondary ${skill.secondaryAttribute}`
-                              : undefined
-                          }
-                        >
-                          {attributeAbbr(skill?.primaryAttribute)}/
-                          {attributeAbbr(skill?.secondaryAttribute)}
-                        </td>
-                        <td className="num">
-                          {cost === null || cost === undefined ? '—' : formatSp(cost)}
-                        </td>
-                        <td className="num">
-                          {minutes === null || minutes === undefined
-                            ? '—'
-                            : formatDuration(minutes)}
-                        </td>
-                        <td className="num muted">{formatDuration(elapsed[index] ?? 0)}</td>
-                        <td className="row-actions">
-                          <button
-                            type="button"
-                            className="btn-sm"
-                            disabled={index === 0}
-                            title="Move up"
-                            onClick={() => move(index, index - 1)}
-                            data-testid={`creator-up-${index}`}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-sm"
-                            disabled={index === entries.length - 1}
-                            title="Move down"
-                            onClick={() => move(index, index + 1)}
-                            data-testid={`creator-down-${index}`}
-                          >
-                            ↓
-                          </button>
-                          <button
-                            type="button"
-                            className="danger btn-sm"
-                            title="Remove this level (and any above it)"
-                            onClick={() =>
-                              setEntries((prev) =>
-                                entry.skillTypeId === null
-                                  ? removeEntry(prev, key)
-                                  : removeFromLevel(prev, entry.skillTypeId, entry.level),
-                              )
+                          <td className="num muted">{index + 1}</td>
+                          <td
+                            className={
+                              entry.skillTypeId === null
+                                ? 'plan-draft__name'
+                                : 'plan-draft__name plan-draft__name--linked'
                             }
-                            data-testid={`creator-remove-${index}`}
+                            title={
+                              entry.skillTypeId === null
+                                ? entry.skillName
+                                : `${entry.skillName} — click to find it in the skill list, right-click for info`
+                            }
+                            role={entry.skillTypeId === null ? undefined : 'button'}
+                            tabIndex={entry.skillTypeId === null ? undefined : 0}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return;
+                              e.preventDefault();
+                              reveal(entry.skillTypeId);
+                            }}
+                            data-testid={`creator-reveal-${index}`}
                           >
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
+                            <span
+                              className="plan-draft__grip"
+                              title="Drag the row to reorder"
+                              aria-hidden="true"
+                            >
+                              ⠿
+                            </span>
+                            {issue && (
+                              <span
+                                className={`plan-draft__issue plan-draft__issue--${issue.kind}`}
+                                title={issue.message}
+                                data-testid={`creator-issue-${index}`}
+                              >
+                                {ISSUE_LABEL[issue.kind]}
+                              </span>
+                            )}
+                            {entry.skillName}
+                          </td>
+                          <td className="plan-draft__level">{romanLevel(entry.level)}</td>
+                          <td
+                            className="muted"
+                            title={
+                              skill?.primaryAttribute
+                                ? `Primary ${skill.primaryAttribute}, secondary ${skill.secondaryAttribute}`
+                                : undefined
+                            }
+                          >
+                            {attributeAbbr(skill?.primaryAttribute)}/
+                            {attributeAbbr(skill?.secondaryAttribute)}
+                          </td>
+                          <td className="num">
+                            {cost === null || cost === undefined ? '—' : formatSp(cost)}
+                          </td>
+                          <td className="num">
+                            {minutes === null || minutes === undefined
+                              ? '—'
+                              : formatDuration(minutes)}
+                          </td>
+                          <td className="num muted">{formatDuration(elapsed[index] ?? 0)}</td>
+                          <td className="row-actions">
+                            <button
+                              type="button"
+                              className="ghost btn-sm"
+                              disabled={remap !== undefined}
+                              title={
+                                remap
+                                  ? 'This row already has a remap point'
+                                  : 'Remap before training this — optimised for the rows it covers'
+                              }
+                              onClick={() => addRemap(index)}
+                              data-testid={`creator-add-remap-${index}`}
+                            >
+                              ⇄
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-sm"
+                              disabled={index === 0}
+                              title="Move up"
+                              onClick={() => move(index, index - 1)}
+                              data-testid={`creator-up-${index}`}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-sm"
+                              disabled={index === entries.length - 1}
+                              title="Move down"
+                              onClick={() => move(index, index + 1)}
+                              data-testid={`creator-down-${index}`}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              className="danger btn-sm"
+                              title="Remove this level (and any above it)"
+                              onClick={() =>
+                                setEntries((prev) =>
+                                  entry.skillTypeId === null
+                                    ? removeEntry(prev, key)
+                                    : removeFromLevel(prev, entry.skillTypeId, entry.level),
+                                )
+                              }
+                              data-testid={`creator-remove-${index}`}
+                            >
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -897,6 +1290,7 @@ export default function PlanCreator() {
                           setEntries((prev) => raiseSkill(prev, skill.skillTypeId, skills))
                         }
                         onLower={() => setEntries((prev) => lowerSkill(prev, skill.skillTypeId))}
+                        onInfo={(e) => openInfo(e, skill.skillTypeId)}
                       />
                     ))}
                   </ul>
@@ -906,6 +1300,21 @@ export default function PlanCreator() {
           </div>
         </div>
       </div>
+
+      {info && (
+        <SkillInfoMenu
+          key={`${info.skillTypeId}-${info.x}-${info.y}`}
+          x={info.x}
+          y={info.y}
+          skillTypeId={info.skillTypeId}
+          skills={skills}
+          catalog={data?.catalog ?? []}
+          attributes={attributes}
+          planLevel={(id) => planLevel(entries, id)}
+          onFind={reveal}
+          onClose={closeInfo}
+        />
+      )}
 
       {shipBrowserOpen && (
         <ShipBrowser

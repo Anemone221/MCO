@@ -7,6 +7,7 @@ interface SkillPlanRow {
   plan_text: string;
   imported_at: string;
   show_on_character_sheet: number;
+  show_on_roster: number;
 }
 
 function toSkillPlan(row: SkillPlanRow): SkillPlan {
@@ -16,10 +17,11 @@ function toSkillPlan(row: SkillPlanRow): SkillPlan {
     planText: row.plan_text,
     importedAt: row.imported_at,
     showOnCharacterSheet: row.show_on_character_sheet === 1,
+    showOnRoster: row.show_on_roster === 1,
   };
 }
 
-const COLUMNS = 'id, name, plan_text, imported_at, show_on_character_sheet';
+const COLUMNS = 'id, name, plan_text, imported_at, show_on_character_sheet, show_on_roster';
 
 export function listPlans(): SkillPlan[] {
   const rows = getDb()
@@ -62,6 +64,14 @@ export function updatePlan(id: number, input: { name: string; planText: string }
 export function setPlanSheetVisibility(id: number, show: boolean): SkillPlan | null {
   getDb()
     .prepare('UPDATE skill_plans SET show_on_character_sheet = @show WHERE id = @id')
+    .run({ id, show: show ? 1 : 0 });
+  return getPlan(id);
+}
+
+/** Give a plan (or take away) its progress column on the Roster table. */
+export function setPlanRosterVisibility(id: number, show: boolean): SkillPlan | null {
+  getDb()
+    .prepare('UPDATE skill_plans SET show_on_roster = @show WHERE id = @id')
     .run({ id, show: show ? 1 : 0 });
   return getPlan(id);
 }

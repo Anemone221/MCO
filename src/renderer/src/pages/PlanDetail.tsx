@@ -101,8 +101,8 @@ export default function PlanDetail() {
   // Only the plan record changes, so the (expensive) analysis is patched rather
   // than re-run — optimistically, so the checkbox tracks the click rather than
   // snapping back until the write returns; a failed write puts it back.
-  const setSheetVisibility = useCallback(
-    async (show: boolean) => {
+  const setVisibility = useCallback(
+    async (flag: 'showOnCharacterSheet' | 'showOnRoster', show: boolean) => {
       setError(null);
       const patch = (value: boolean): void =>
         setData((prev) =>
@@ -111,14 +111,17 @@ export default function PlanDetail() {
                 ...prev,
                 analysis: {
                   ...prev.analysis,
-                  plan: { ...prev.analysis.plan, showOnCharacterSheet: value },
+                  plan: { ...prev.analysis.plan, [flag]: value },
                 },
               }
             : prev,
         );
       patch(show);
       try {
-        const plan = await mco.plans.setSheetVisibility(planId, show);
+        const plan =
+          flag === 'showOnRoster'
+            ? await mco.plans.setRosterVisibility(planId, show)
+            : await mco.plans.setSheetVisibility(planId, show);
         setData((prev) => (prev ? { ...prev, analysis: { ...prev.analysis, plan } } : prev));
       } catch (e) {
         patch(!show);
@@ -172,10 +175,24 @@ export default function PlanDetail() {
               <input
                 type="checkbox"
                 checked={analysis.plan.showOnCharacterSheet}
-                onChange={(e) => void setSheetVisibility(e.target.checked)}
+                onChange={(e) => void setVisibility('showOnCharacterSheet', e.target.checked)}
                 data-testid="plan-sheet-toggle"
               />{' '}
               On character sheets
+            </label>
+          )}
+          {analysis && (
+            <label
+              className="sheet-toggle"
+              title="Give this plan a progress column on the Roster table"
+            >
+              <input
+                type="checkbox"
+                checked={analysis.plan.showOnRoster}
+                onChange={(e) => void setVisibility('showOnRoster', e.target.checked)}
+                data-testid="plan-roster-toggle"
+              />{' '}
+              On roster
             </label>
           )}
           <Link to={`/plans/${planId}/edit`} className="link-btn" data-testid="edit-plan">

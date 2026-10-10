@@ -74,6 +74,10 @@ The profile's version is shown in Settings → About.
 | 34 | sde_types_volume | `sde_types.volume` |
 | 35 | mercenary_dens | `mercenary_dens`, `mercenary_operations`, `mercenary_den_sync` |
 | 36 | planets | `planets` |
+| 37 | notification_dismissal | `notifications.dismissed_at` |
+| 38 | critical_implant_sets | `critical_implant_sets` |
+| 39 | plan_roster_visibility | `skill_plans.show_on_roster` |
+| 40 | sde_skill_descriptions | `sde_skill_descriptions` |
 
 ## Schema reference
 
@@ -216,6 +220,12 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
   character's active pod. Per group: the same clone can be ignored for one group and
   still flagged for another. Rows survive the clone (managed on the Ignored tab) but
   cascade away with their group or character.
+- **`critical_implant_sets`** — pods marked "critical" on the Clones page, per
+  character. Keyed by `implant_key` (sorted implant type ids, comma-joined —
+  `clones/criticalImplants.ts`), **not** by jump-clone id: jumping into a jump clone
+  removes it from ESI's jump-clone list, so an id-keyed flag would vanish the moment
+  the pod is worn. `label` is the clone's name when it was marked, used only in the
+  warning's wording. Cascades away with the character.
 - **`tags`** + **`character_tags`** — character *capabilities* ("Is able to Cyno").
   Tag names are unique case-insensitively (`idx_tags_name` on `name COLLATE NOCASE`).
   See the Organization model section of [CLAUDE.md](../CLAUDE.md#organization-model) for
@@ -226,10 +236,13 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 - **`fits`** — EFT text blobs plus parsed ship name and (when the SDE resolves it)
   `ship_type_id`. Fits are re-parsed on every analysis; the DB stores the source text.
 - **`skill_plans`** — plan name + raw plan text; also re-parsed on demand.
-  `show_on_character_sheet` (default 1) is the only per-plan setting: with it off the
-  plan is skipped by `listPlanProgressForCharacter`, so it neither costs an analysis
-  nor takes a row on any character sheet. Nothing else reads it — the plan keeps its
-  detail page, its list row and any group priority pointing at it.
+  Two per-plan visibility flags, neither of which touches the plan's detail page, list
+  row or any group priority pointing at it:
+  - `show_on_character_sheet` (default 1): with it off the plan is skipped by
+    `listPlanProgressForCharacter`, so it neither costs an analysis nor takes a row on
+    any character sheet.
+  - `show_on_roster` (default 0): with it on, `listRosterPlanProgress` analyses the plan
+    across every character and the Roster table gets a progress column for it.
 
 ### Caches & infrastructure
 
@@ -247,6 +260,13 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
   is worth re-reading.
 - **`notifications`** — in-app notification feed. `dedupe_key` (UNIQUE) is what makes
   "notify once per distinct occurrence" work, e.g. `queue-drain:<charId>:<finishDate>`.
+  Dismissal is a soft delete (`dismissed_at`), not a `DELETE`, *because* of that key:
+  removing the row would leave the occurrence unreported, so the next hourly sweep would
+  re-insert it and toast again. A dismissed row is filtered out of the bell's list and
+  the unread count but stays as the record that its occurrence was already raised. No
+  retention sweep prunes them — every kind is self-limiting (one row per queue-drain
+  finish date, per account per day, per fatigue episode, per clone jump) and pruning
+  could resurrect a dismissed warning.
 - **`sde_version`** — single row (id=1): imported SDE build number + timestamp.
 - **`app_settings`** — key/value store for preferences the *main* process owns, i.e. ones
   it must read with no renderer around (`close_to_tray`, `tray_notice_shown` — see
@@ -281,6 +301,9 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
 - **`sde_skill_attributes`** — skill → primary/secondary training attribute ids (dogma
   180/181; the values are attribute ids 164–168). Powers the training-time cost metric.
   Non-empty ⇒ `hasSkillAttributes`; empty on upgraded installs until an SDE re-import.
+- **`sde_skill_descriptions`** — skill → what it does, English plain text (markup
+  stripped at import). Skills only (~580 rows). Feeds the plan creator's right-click
+  info card. Non-empty ⇒ `hasSkillDescriptions`; empty until an SDE re-import.
 - **`sde_regions`** / **`sde_systems`** — map data (system name, region, security,
   and since v31 the system's position in metres, `pos_x/pos_y/pos_z`, which the
   light-year distances are measured from). Non-empty `sde_systems` ⇒ `hasMapData`;

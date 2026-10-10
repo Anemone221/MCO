@@ -5,6 +5,7 @@ import { registerAccountChannels } from './channels/accounts';
 import { registerBlueprintChannels } from './channels/blueprints';
 import { registerBoardChannels } from './channels/boards';
 import { registerCharacterChannels } from './channels/characters';
+import { registerCloneChannels } from './channels/clones';
 import { registerFitChannels } from './channels/fits';
 import { registerGroupChannels } from './channels/groups';
 import { registerNotificationChannels } from './channels/notifications';
@@ -38,6 +39,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   registerUniverseChannels(getWindow);
   registerBlueprintChannels();
   registerBoardChannels();
+  registerCloneChannels();
   registerNotificationChannels();
   registerSystemChannels(getWindow);
   registerSettingsChannels(getWindow);

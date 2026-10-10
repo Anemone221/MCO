@@ -24,7 +24,8 @@ import {
   getCharacterShip,
 } from '../esi/endpoints';
 import { getSkillQueue, getTrainingStatus } from './characterSync';
-import { locationDisplayName, resolveStationNames } from './cloneService';
+import { criticalKeysFor, locationDisplayName, resolveStationNames } from './cloneService';
+import { findCriticalMatch } from '../clones/criticalImplants';
 import { listPlanProgressForCharacter } from './planService';
 
 /**
@@ -120,6 +121,7 @@ export async function buildCharacterDetail(characterId: number): Promise<Charact
   if (cloneMeta) collect(cloneMeta.homeLocationType, cloneMeta.homeLocationId);
   const stationNames = await resolveStationNames(stationIds);
   const structureNames = getStructureNames(structureIds);
+  const criticalKeys = criticalKeysFor(characterId);
   const clones: JumpCloneEntry[] = cloneRows.map((clone) => ({
     jumpCloneId: clone.jumpCloneId,
     name: clone.name,
@@ -135,6 +137,7 @@ export async function buildCharacterDetail(characterId: number): Promise<Charact
       typeId,
       typeName: cloneImplantNames.get(typeId) ?? null,
     })),
+    critical: findCriticalMatch(clone.implants, criticalKeys) !== null,
   }));
 
   const planProgress = listPlanProgressForCharacter(characterId);
@@ -179,6 +182,11 @@ export async function buildCharacterDetail(characterId: number): Promise<Charact
     location,
     ship,
     implants,
+    implantsCritical:
+      findCriticalMatch(
+        implants.map((i) => i.typeId),
+        criticalKeys,
+      ) !== null,
     jumpFatigue,
     attributes,
     wallet: walletRow ? { balance: walletRow.balance, updatedAt: walletRow.updatedAt } : null,

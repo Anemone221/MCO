@@ -112,6 +112,8 @@ const api: McoApi = {
     update: call(IpcChannel.plansUpdate),
     remove: call(IpcChannel.plansRemove),
     setSheetVisibility: call(IpcChannel.plansSetSheetVisibility),
+    setRosterVisibility: call(IpcChannel.plansSetRosterVisibility),
+    rosterProgress: call(IpcChannel.plansRosterProgress),
     analyze: call(IpcChannel.plansAnalyze),
     skillCatalog: call(IpcChannel.plansSkillCatalog),
     shipCatalog: call(IpcChannel.plansShipCatalog),
@@ -133,6 +135,7 @@ const api: McoApi = {
   },
   clones: {
     board: call(IpcChannel.clonesBoard),
+    setCritical: call(IpcChannel.clonesSetCritical),
   },
   blueprints: {
     board: call(IpcChannel.blueprintsBoard),
@@ -156,6 +159,8 @@ const api: McoApi = {
     list: call(IpcChannel.notificationsList),
     markRead: call(IpcChannel.notificationsMarkRead),
     markAllRead: call(IpcChannel.notificationsMarkAllRead),
+    dismiss: call(IpcChannel.notificationsDismiss),
+    dismissAll: call(IpcChannel.notificationsDismissAll),
     onChanged: subscribe(IpcChannel.notificationsChanged),
   },
   system: {
@@ -178,6 +183,8 @@ const api: McoApi = {
     openDataFolder: call(IpcChannel.settingsOpenDataFolder),
     backgroundMode: call(IpcChannel.settingsBackgroundMode),
     setCloseToTray: call(IpcChannel.settingsSetCloseToTray),
+    liveTracking: call(IpcChannel.settingsLiveTracking),
+    setLiveTracking: call(IpcChannel.settingsSetLiveTracking),
     runInBackground: call(IpcChannel.settingsRunInBackground),
   },
 };

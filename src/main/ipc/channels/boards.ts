@@ -1,7 +1,6 @@
 import { IpcChannel } from '@shared/ipc';
 import { buildLocationBoard } from '../../services/locationService';
 import { buildNearestBoard } from '../../services/proximityService';
-import { buildCloneBoard } from '../../services/cloneService';
 import { buildDashboardSummary } from '../../services/dashboardService';
 import { buildWalletSummary } from '../../services/walletService';
 import { buildMiningSummary } from '../../services/miningService';
@@ -21,7 +20,6 @@ export function registerBoardChannels(): void {
     (_event, solarSystemId: number, includeJumpClones: boolean | null) =>
       buildNearestBoard(solarSystemId, includeJumpClones === true),
   );
-  handle(IpcChannel.clonesBoard, () => buildCloneBoard());
   handle(IpcChannel.dashboardSummary, () => buildDashboardSummary());
   handle(IpcChannel.walletSummary, () => buildWalletSummary());
   handle(IpcChannel.miningSummary, (_event, days: number | null) => buildMiningSummary(days));

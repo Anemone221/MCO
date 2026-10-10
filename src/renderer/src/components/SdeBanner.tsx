@@ -85,14 +85,15 @@ export default function SdeBanner() {
     }
   }
 
-  // Fully imported, including skill, map, stargate, training-attribute and
-  // blueprint data — quiet confirmation, no action.
+  // Fully imported, including skill, map, stargate, training-attribute,
+  // skill-description and blueprint data — quiet confirmation, no action.
   const fullyImported =
     status?.installed === true &&
     status.hasSkillData &&
     status.hasMapData &&
     status.hasJumpData &&
     status.hasSkillAttributes &&
+    status.hasSkillDescriptions &&
     status.hasBlueprintData;
   if (fullyImported && !importing && progress?.stage !== 'error') {
     // EVE patches in ships, skills and blueprints between MCO releases; CCP
@@ -136,8 +137,9 @@ export default function SdeBanner() {
       !status.hasMapData ||
       !status.hasJumpData ||
       !status.hasSkillAttributes ||
+      !status.hasSkillDescriptions ||
       !status.hasBlueprintData)
-      ? 'Static data is incomplete — re-import to enable fit testing, training-time estimates, location names, jump distances and the blueprint checklist.'
+      ? 'Static data is incomplete — re-import to enable fit testing, training-time estimates, skill descriptions, location names, jump distances and the blueprint checklist.'
       : 'Static data is not imported yet — skill, item and system names will show as IDs.';
 
   const buttonLabel = status?.installed ? 'Re-import static data' : 'Import static data';

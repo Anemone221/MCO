@@ -8,6 +8,7 @@ import {
   filterRoster,
   loadColumnVisibility,
   NO_ROSTER_FILTERS,
+  planSortKey,
   queueRemainingMs,
   saveColumnVisibility,
   sortRoster,
@@ -432,6 +433,45 @@ describe('sortRoster by wallet', () => {
     expect(sortRoster(pool, { key: 'wallet', dir: 'asc' }).map((e) => e.character.id)).toEqual([
       2, 1, 3,
     ]);
+  });
+});
+
+describe('sortRoster by plan column', () => {
+  const done = entry({ id: 1, name: 'Done' });
+  const half = entry({ id: 2, name: 'Half' });
+  const fresh = entry({ id: 3, name: 'Fresh' });
+  const unanalysed = entry({ id: 4, name: 'Unanalysed' });
+  const pool = [half, unanalysed, fresh, done];
+  const progress = new Map([
+    [7, new Map([[1, 1], [2, 0.5], [3, 0]])],
+    [8, new Map([[1, 0], [2, 0], [3, 1]])],
+  ]);
+
+  it('orders by the chosen plan with unanalysed characters last both ways', () => {
+    const key = planSortKey(7);
+    expect(
+      sortRoster(pool, { key, dir: 'desc' }, undefined, progress).map((e) => e.character.id),
+    ).toEqual([1, 2, 3, 4]);
+    expect(
+      sortRoster(pool, { key, dir: 'asc' }, undefined, progress).map((e) => e.character.id),
+    ).toEqual([3, 2, 1, 4]);
+  });
+
+  it('reads only the chosen plan', () => {
+    // Done and Half tie at 0 on plan 8; the name tie-break flips with direction.
+    expect(
+      sortRoster(pool, { key: planSortKey(8), dir: 'desc' }, undefined, progress).map(
+        (e) => e.character.id,
+      ),
+    ).toEqual([3, 2, 1, 4]);
+  });
+
+  it('falls back to name order for a plan no longer on the roster', () => {
+    expect(
+      sortRoster(pool, { key: planSortKey(99), dir: 'asc' }, undefined, progress).map(
+        (e) => e.character.name,
+      ),
+    ).toEqual(['Done', 'Fresh', 'Half', 'Unanalysed']);
   });
 });
 

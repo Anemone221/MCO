@@ -1,12 +1,13 @@
-import { type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type {
   CharacterDetail as Detail,
   CharacterPlanProgress,
+  ImplantInfo,
   JumpCloneEntry,
   OrgRef,
 } from '@shared/types';
-import { mco } from '../lib/ipc';
+import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import {
   formatDate,
@@ -19,6 +20,7 @@ import {
 import { formatCost, loadCostView } from '../lib/costView';
 import CharacterAvatar from '../components/CharacterAvatar';
 import StatusSquare from '../components/StatusSquare';
+import CriticalCloneToggle from '../components/CriticalCloneToggle';
 import SkillGroupRadarChart from '../components/charts/SkillGroupRadarChart';
 
 /** Queue entries shown on the card; the shared card height is sized to fit this. */
@@ -282,6 +284,22 @@ function PlanProgressRow({ plan }: { plan: CharacterPlanProgress }) {
         />
         {tick !== null && <span className="plan-progress__tick" style={{ left: `${tick}%` }} />}
       </div>
+      {plan.missingSkills.length > 0 && (
+        // Plain <details>: closed on every load, open state deliberately not remembered.
+        <details className="plan-missing" data-testid={`plan-missing-${plan.planId}`}>
+          <summary>
+            {plan.missingSkills.length} missing skill{plan.missingSkills.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="missing-skills">
+            {plan.missingSkills.map((s) => (
+              <li key={s.skillTypeId}>
+                {s.skillName ?? `Skill ${s.skillTypeId}`} {romanLevel(s.haveLevel)} →{' '}
+                {romanLevel(s.needLevel)} <span className="muted">({formatSp(s.spDelta)})</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
@@ -336,7 +354,18 @@ function SkillRadarCard({ detail }: { detail: Detail }) {
   );
 }
 
-function JumpClonesCard({ detail }: { detail: Detail }) {
+/** Mark/unmark an implant set critical; see `mco.clones.setCritical`. */
+type SetCritical = (implants: ImplantInfo[], critical: boolean, label: string | null) => void;
+
+function JumpClonesCard({
+  detail,
+  busy,
+  onSetCritical,
+}: {
+  detail: Detail;
+  busy: boolean;
+  onSetCritical: SetCritical;
+}) {
   return (
     <div className="card">
       <h3>Jump clones ({detail.clones.length})</h3>
@@ -353,7 +382,13 @@ function JumpClonesCard({ detail }: { detail: Detail }) {
                 <span className="muted">
                   {' '}
                   · {cloneLocation(clone)} · {clone.implants.length} implants
-                </span>
+                </span>{' '}
+                <CriticalCloneToggle
+                  implants={clone.implants}
+                  critical={clone.critical}
+                  busy={busy}
+                  onChange={(critical) => onSetCritical(clone.implants, critical, clone.name)}
+                />
               </summary>
               {clone.implants.length === 0 ? (
                 <p className="muted">No implants.</p>
@@ -381,7 +416,32 @@ export default function CharacterDetail() {
     error,
     loading,
     reload,
+    setError,
   } = useMcoData<Detail>(() => mco.characters.detail(characterId), { deps: [characterId] });
+  const [busy, setBusy] = useState(false);
+
+  async function setCritical(
+    implants: ImplantInfo[],
+    critical: boolean,
+    label: string | null,
+  ): Promise<void> {
+    setBusy(true);
+    try {
+      await mco.clones.setCritical(
+        characterId,
+        implants.map((i) => i.typeId),
+        critical,
+        label,
+      );
+      await reload();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const onSetCritical: SetCritical = (implants, critical, label) =>
+    void setCritical(implants, critical, label);
 
   return (
     <section className="page">
@@ -505,7 +565,15 @@ export default function CharacterDetail() {
           <SkillPlansCard detail={detail} />
 
           <div className="card">
-            <h3>Implants ({detail.implants.length})</h3>
+            <h3 className="clone-heading">
+              <span>Implants ({detail.implants.length})</span>
+              <CriticalCloneToggle
+                implants={detail.implants}
+                critical={detail.implantsCritical}
+                busy={busy}
+                onChange={(critical) => onSetCritical(detail.implants, critical, null)}
+              />
+            </h3>
             <div className="card-body">
               {detail.implants.length === 0 ? (
                 <p className="muted">No implants reported.</p>
@@ -519,7 +587,7 @@ export default function CharacterDetail() {
             </div>
           </div>
 
-          <JumpClonesCard detail={detail} />
+          <JumpClonesCard detail={detail} busy={busy} onSetCritical={onSetCritical} />
 
           <SkillRadarCard detail={detail} />
         </div>

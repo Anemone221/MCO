@@ -2,6 +2,7 @@ import type { LocationEntry } from '@shared/types';
 import { listAccounts } from '../db/repositories/accounts';
 import { listCharacters } from '../db/repositories/characters';
 import { listCharacterLocations } from '../db/repositories/characterLocation';
+import { listCharacterOnline } from '../db/repositories/characterOnline';
 import { getSystems, getTypeNames } from '../db/repositories/sde';
 import { getStructureNames } from '../db/repositories/structures';
 import { resolveStationNames } from './cloneService';
@@ -15,6 +16,7 @@ export async function buildLocationBoard(): Promise<LocationEntry[]> {
   const characters = listCharacters();
   const locations = new Map(listCharacterLocations().map((l) => [l.characterId, l]));
   const accounts = new Map(listAccounts().map((a) => [a.id, a.label]));
+  const online = new Map(listCharacterOnline().map((o) => [o.characterId, o.online]));
 
   const values = [...locations.values()];
   const systems = getSystems(distinct(values.map((l) => l.solarSystemId)));
@@ -47,6 +49,7 @@ export async function buildLocationBoard(): Promise<LocationEntry[]> {
       shipTypeName:
         loc?.shipTypeId != null ? (shipNames.get(loc.shipTypeId) ?? null) : null,
       updatedAt: loc?.updatedAt ?? null,
+      online: online.get(character.id) ?? null,
     };
   });
 }

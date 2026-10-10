@@ -58,6 +58,7 @@ function decorate(skills: SkillTypeRow[]): PlanSkillInfo[] {
       primaryAttribute: training?.primary ?? null,
       secondaryAttribute: training?.secondary ?? null,
       spAtLevel: LEVELS.map((level) => spForLevel(skill.rank, level)),
+      description: skill.description,
       prereqs: prereqs.get(skill.skillTypeId) ?? [],
       published: skill.published,
     };
@@ -101,6 +102,7 @@ export function planDraft(planId: number): PlanDraftSource {
     skillTypeId: resolved.get(entry.skillName) ?? null,
     skillName: entry.skillName,
     level: entry.level,
+    ...(entry.remapBefore ? { remapBefore: entry.remapBefore } : {}),
   }));
   return { entries, unresolved, suggestedName: plan.name };
 }

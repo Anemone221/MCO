@@ -16,7 +16,12 @@ import type {
   PlanSkillInfo,
   TrainingAttribute,
 } from '@shared/types';
-import { remapWindow, spPerMinute, TRAINING_ATTRIBUTES } from '@shared/training';
+import {
+  formatRemapLine,
+  remapWindow,
+  spPerMinute,
+  TRAINING_ATTRIBUTES,
+} from '@shared/training';
 import { romanLevel } from './format';
 
 /** Skill data keyed by type id — the catalogue, as the page holds it. */
@@ -116,6 +121,37 @@ export function raiseSkill(
   return addRequirements(entries, [{ skillTypeId, level }], skills);
 }
 
+/** A copy of a row carrying exactly this remap point (none when undefined). */
+function withRemap(entry: PlanDraftEntry, remap: NeuralAttributes | undefined): PlanDraftEntry {
+  const next: PlanDraftEntry = { ...entry };
+  if (remap) next.remapBefore = remap;
+  else delete next.remapBefore;
+  return next;
+}
+
+/**
+ * Filter rows out of a draft without losing the remap points they carried. A
+ * remap marks a moment in the queue, not a skill, so a removed row hands its
+ * remap to the next row that survives — unless that row already has its own,
+ * or nothing follows, in which case the remap no longer prices anything.
+ */
+function dropRows(
+  entries: readonly PlanDraftEntry[],
+  keep: (entry: PlanDraftEntry) => boolean,
+): PlanDraftEntry[] {
+  const out: PlanDraftEntry[] = [];
+  let orphan: NeuralAttributes | undefined;
+  for (const entry of entries) {
+    if (!keep(entry)) {
+      orphan = orphan ?? entry.remapBefore;
+      continue;
+    }
+    out.push(orphan && !entry.remapBefore ? { ...entry, remapBefore: orphan } : entry);
+    orphan = undefined;
+  }
+  return out;
+}
+
 /**
  * Drop a level and every level above it. Removing the middle of a skill's
  * queue would leave a level that can't train, so `-` on III takes IV and V with
@@ -126,7 +162,8 @@ export function removeFromLevel(
   skillTypeId: number,
   level: number,
 ): PlanDraftEntry[] {
-  return entries.filter(
+  return dropRows(
+    entries,
     (entry) => entry.skillTypeId !== skillTypeId || entry.level < level,
   );
 }
@@ -143,7 +180,7 @@ export function lowerSkill(
 
 /** Remove one row by key — for lines whose skill the SDE doesn't know. */
 export function removeEntry(entries: readonly PlanDraftEntry[], key: string): PlanDraftEntry[] {
-  return entries.filter((entry) => entryKey(entry) !== key);
+  return dropRows(entries, (entry) => entryKey(entry) !== key);
 }
 
 /** Move the entry at `from` so that it sits at index `to`. */
@@ -160,21 +197,69 @@ export function moveEntry(
 }
 
 /**
+ * Where a dragged row lands: in front of the row now at `index` (`entries.length`
+ * for the very end). When that row carries a remap point the drop line can sit
+ * on either side of it — above the remap (`underRemap: false`, the dropped row
+ * trains before the remap) or between the remap and its row (`underRemap: true`,
+ * the dropped row becomes the first one the remap covers).
+ */
+export interface DropTarget {
+  index: number;
+  underRemap: boolean;
+}
+
+/**
+ * Drop the row at `from` on a target. Under a remap, the remap moves onto the
+ * dropped row — it marks a moment in the queue, and the user put the row just
+ * after it — unless the dropped row brings a remap of its own, which wins.
+ */
+export function dropEntry(
+  entries: readonly PlanDraftEntry[],
+  from: number,
+  target: DropTarget,
+): PlanDraftEntry[] {
+  const moving = entries[from];
+  if (!moving) return [...entries];
+  const to = target.index > from ? target.index - 1 : target.index;
+  const anchor = entries[target.index];
+  const takeRemap =
+    target.underRemap && anchor !== undefined && anchor !== moving && anchor.remapBefore && !moving.remapBefore;
+
+  if (!takeRemap) return moveEntry(entries, from, to);
+  const moved = moveEntry(entries, from, to);
+  return moved.map((entry) => {
+    if (entry === moving) return { ...entry, remapBefore: anchor.remapBefore };
+    if (entry === anchor) return withRemap(entry, undefined);
+    return entry;
+  });
+}
+
+/**
  * Expand a plan written the compact way — one line per skill, at its target
  * level — into the queue this editor works in: a row per level, each missing
  * one inserted directly ahead of the line that asked for it, so the author's
  * order is preserved. Exact duplicates collapse. Lines with no known skill are
  * passed through untouched.
+ *
+ * A remap point stays where the author put it: on the first row its line
+ * produced, or — when the line produced nothing new — on the next row that is.
  */
 export function expandLevels(entries: readonly PlanDraftEntry[]): PlanDraftEntry[] {
   const out: PlanDraftEntry[] = [];
+  let remap: NeuralAttributes | undefined;
+  const emit = (row: PlanDraftEntry): void => {
+    out.push(withRemap(row, remap));
+    remap = undefined;
+  };
+
   for (const entry of entries) {
+    remap = entry.remapBefore ?? remap;
     if (entry.skillTypeId === null) {
-      if (!out.some((seen) => entryKey(seen) === entryKey(entry))) out.push(entry);
+      if (!out.some((seen) => entryKey(seen) === entryKey(entry))) emit(entry);
       continue;
     }
     for (let level = planLevel(out, entry.skillTypeId) + 1; level <= entry.level; level += 1) {
-      out.push({ ...entry, level });
+      emit({ ...entry, level });
     }
   }
   return out;
@@ -340,8 +425,55 @@ export function entrySpCosts(
 }
 
 /**
- * Minutes each row takes at the given attributes — the SP it adds divided by
- * that skill's own training speed. Null where the SP or the skill's attributes
+ * The attributes each row trains at: the starting set until the first remap
+ * point, then each remap's own set until the next one.
+ */
+export function entryAttributes(
+  entries: readonly PlanDraftEntry[],
+  base: NeuralAttributes,
+): NeuralAttributes[] {
+  let current = base;
+  return entries.map((entry) => {
+    current = entry.remapBefore ?? current;
+    return current;
+  });
+}
+
+/**
+ * The stretches of the queue that train at one attribute set, as `[start, end)`
+ * index ranges: the first at the starting attributes (empty when row 0 carries
+ * a remap), then one per remap point.
+ */
+export function remapSegments(
+  entries: readonly PlanDraftEntry[],
+): Array<{ start: number; end: number }> {
+  const starts = [0];
+  entries.forEach((entry, index) => {
+    if (entry.remapBefore && index > 0) starts.push(index);
+  });
+  return starts.map((start, i) => ({ start, end: starts[i + 1] ?? entries.length }));
+}
+
+/** Put a remap point before a row, or take it away (`null`). */
+export function setRemap(
+  entries: readonly PlanDraftEntry[],
+  key: string,
+  attributes: NeuralAttributes | null,
+): PlanDraftEntry[] {
+  return entries.map((entry) =>
+    entryKey(entry) === key ? withRemap(entry, attributes ?? undefined) : entry,
+  );
+}
+
+/** How many remap points a draft carries. */
+export function remapCount(entries: readonly PlanDraftEntry[]): number {
+  return entries.filter((entry) => entry.remapBefore).length;
+}
+
+/**
+ * Minutes each row takes — the SP it adds divided by that skill's own training
+ * speed, at the attributes in force for that row (the starting set, or the
+ * latest remap point above it). Null where the SP or the skill's attributes
  * are unknown, so a missing figure never reads as "free".
  */
 export function entryTimeCosts(
@@ -349,11 +481,12 @@ export function entryTimeCosts(
   skills: SkillMap,
   attributes: NeuralAttributes,
 ): Array<number | null> {
+  const inForce = entryAttributes(entries, attributes);
   return entrySpCosts(entries, skills).map((sp, index) => {
     if (sp === null) return null;
     const skill = skills.get(entries[index]!.skillTypeId!);
     if (!skill?.primaryAttribute || !skill.secondaryAttribute) return null;
-    const rate = spPerMinute(attributes, {
+    const rate = spPerMinute(inForce[index]!, {
       primary: skill.primaryAttribute,
       secondary: skill.secondaryAttribute,
     });
@@ -391,19 +524,31 @@ export function draftTotals(
   return { sp: totalSp, minutes, unknown };
 }
 
+/** SP to be trained against one primary/secondary attribute pair. */
+export interface PairBucket {
+  primary: TrainingAttribute;
+  secondary: TrainingAttribute;
+  sp: number;
+}
+
 /**
- * SP the draft spends on each attribute pair — the whole objective the
- * optimiser needs, collapsed from hundreds of rows to at most a handful of
- * buckets. Rows with no SP or no attribute data contribute nothing.
+ * SP one stretch of the draft (`[start, end)`) spends on each attribute pair —
+ * the whole objective the optimiser needs, collapsed from hundreds of rows to
+ * at most a handful of buckets. Costs are taken over the whole draft, so a
+ * level whose lower levels train in an earlier stretch costs only its own
+ * step. Rows with no SP or no attribute data contribute nothing.
  */
 function spByAttributePair(
   entries: readonly PlanDraftEntry[],
   skills: SkillMap,
-): Array<{ primary: TrainingAttribute; secondary: TrainingAttribute; sp: number }> {
+  start: number,
+  end: number,
+): PairBucket[] {
   const costs = entrySpCosts(entries, skills);
-  const byPair = new Map<string, { primary: TrainingAttribute; secondary: TrainingAttribute; sp: number }>();
+  const byPair = new Map<string, PairBucket>();
 
   entries.forEach((entry, index) => {
+    if (index < start || index >= end) return;
     const sp = costs[index];
     if (entry.skillTypeId === null || sp === null || sp === undefined) return;
     const skill = skills.get(entry.skillTypeId);
@@ -420,7 +565,7 @@ function spByAttributePair(
 
 /** Minutes a whole draft takes at one attribute set, from the pair buckets. */
 function minutesFor(
-  buckets: ReturnType<typeof spByAttributePair>,
+  buckets: readonly PairBucket[],
   attributes: NeuralAttributes,
 ): number {
   let minutes = 0;
@@ -449,13 +594,31 @@ function attributeDistance(a: NeuralAttributes, b: NeuralAttributes): number {
  * values wide, and the plan collapses to a handful of attribute-pair buckets,
  * so the exact answer costs less than a frame. Ties keep the arrangement
  * closest to the current one, and a plan with nothing to price is left alone.
+ *
+ * Only the rows these attributes govern count: from `start` (0 for the starting
+ * attributes, a remap row's index for that remap) up to the next remap point.
  */
 export function optimizeAttributes(
   entries: readonly PlanDraftEntry[],
   skills: SkillMap,
   current: NeuralAttributes,
+  start = 0,
 ): NeuralAttributes {
-  const buckets = spByAttributePair(entries, skills);
+  const segment = remapSegments(entries).find((range) => range.start === start);
+  if (!segment) return current;
+  return bestArrangement(spByAttributePair(entries, skills, segment.start, segment.end), current);
+}
+
+/**
+ * The exact search behind `optimizeAttributes`, over any set of attribute-pair
+ * SP buckets: every legal rearrangement of `current`'s total, fastest wins,
+ * ties to the one closest to `current`. No buckets means nothing to price, and
+ * `current` comes back unchanged.
+ */
+export function bestArrangement(
+  buckets: readonly PairBucket[],
+  current: NeuralAttributes,
+): NeuralAttributes {
   if (buckets.length === 0) return current;
 
   const total = TRAINING_ATTRIBUTES.reduce((sum, attribute) => sum + current[attribute], 0);
@@ -503,6 +666,24 @@ export function optimizeAttributes(
 
   walk(0, total);
   return best ?? current;
+}
+
+/**
+ * Optimise every stretch of the plan at once: the starting attributes for the
+ * rows before the first remap point, and each remap for the rows it governs.
+ * Each keeps its own total.
+ */
+export function optimizeAllAttributes(
+  entries: readonly PlanDraftEntry[],
+  skills: SkillMap,
+  base: NeuralAttributes,
+): { base: NeuralAttributes; entries: PlanDraftEntry[] } {
+  const next = entries.map((entry, index) =>
+    entry.remapBefore
+      ? { ...entry, remapBefore: optimizeAttributes(entries, skills, entry.remapBefore, index) }
+      : entry,
+  );
+  return { base: optimizeAttributes(entries, skills, base), entries: next };
 }
 
 /** A skill group as the browser lists it: its skills and the pair most of them train. */
@@ -584,7 +765,19 @@ export function filterGroups(groups: readonly SkillGroup[], query: string): Skil
  * The draft as plan text: one `Skill Name V` line per row. This is both what
  * MCO stores (see `main/plans/parse.ts`) and what EVE's own "import skill plan
  * from clipboard" accepts, so one rendering serves saving and exporting.
+ *
+ * Remap points are written as `[Remap] …` lines ahead of their row when the
+ * plan is saved; the clipboard export passes `includeRemaps: false`, since
+ * EVE's import has no such line.
  */
-export function draftText(entries: readonly PlanDraftEntry[]): string {
-  return entries.map((entry) => `${entry.skillName} ${romanLevel(entry.level)}`).join('\n');
+export function draftText(
+  entries: readonly PlanDraftEntry[],
+  { includeRemaps = true }: { includeRemaps?: boolean } = {},
+): string {
+  return entries
+    .flatMap((entry) => [
+      ...(includeRemaps && entry.remapBefore ? [formatRemapLine(entry.remapBefore)] : []),
+      `${entry.skillName} ${romanLevel(entry.level)}`,
+    ])
+    .join('\n');
 }

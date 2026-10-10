@@ -329,8 +329,7 @@ export default function MercenaryDens() {
 
           {board.dens.length > 0 && (
             <p className="muted">
-              Last read {formatDate(board.dens[0]?.updatedAt ?? null)}. MCO reports what a den is
-              doing; starting an operation happens in game.
+              Last read {formatDate(board.dens[0]?.updatedAt ?? null)}.
             </p>
           )}
         </>

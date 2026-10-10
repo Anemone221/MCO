@@ -149,6 +149,7 @@ describe('demoLocationEntry', () => {
       shipName: 'Secret Hauler Deluxe',
       shipTypeName: 'Charon',
       updatedAt: null,
+      online: null,
     };
     const scrubbed = demoLocationEntry(entry);
     expect(scrubbed.characterName).not.toBe('Secret Hauler');

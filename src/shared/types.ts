@@ -164,6 +164,8 @@ export interface CharacterPlanProgress {
   lsiGap: number;
   /** Attribute-based minutes to train the gap; null when the data is missing. */
   timeGapMinutes: number | null;
+  /** Every skill level still missing, prerequisites included; empty when complete. */
+  missingSkills: MissingSkill[];
 }
 
 export interface CharacterDetail {
@@ -175,6 +177,8 @@ export interface CharacterDetail {
   location: { solarSystemId: number; solarSystemName: string | null } | null;
   ship: { typeId: number; typeName: string | null; name: string } | null;
   implants: ImplantInfo[];
+  /** The active clone (`implants`) is wearing a critical implant set. */
+  implantsCritical: boolean;
   /**
    * Jump fatigue: `null` when unknown (never synced / scope not granted).
    * When present, `expireDate` is null/past for a character carrying no fatigue.
@@ -220,6 +224,8 @@ export interface SdeStatus {
   hasMapData: boolean;
   /** True once per-skill training attributes (dogma 180/181) have been imported. */
   hasSkillAttributes: boolean;
+  /** True once skill descriptions (types.yaml, skills only) have been imported. */
+  hasSkillDescriptions: boolean;
   /** True once blueprints.yaml has been imported — gates the blueprint checklist. */
   hasBlueprintData: boolean;
   /**
@@ -308,6 +314,12 @@ export interface LocationEntry {
   shipName: string | null;
   shipTypeName: string | null;
   updatedAt: string | null;
+  /**
+   * Logged into Tranquility, per the live tracker's presence poll; null when
+   * the token lacks the online scope or presence has never been read. Online
+   * characters have their location refreshed every ~20 s rather than hourly.
+   */
+  online: boolean | null;
 }
 
 /**
@@ -453,6 +465,21 @@ export interface SkillPlan {
   importedAt: string;
   /** Whether this plan's progress bar appears on every character sheet. */
   showOnCharacterSheet: boolean;
+  /** Whether this plan gets a progress column on the Roster table. */
+  showOnRoster: boolean;
+}
+
+/** One roster-visible plan's progress for every character, keyed by character id. */
+export interface RosterPlanColumn {
+  planId: number;
+  planName: string;
+  statuses: Record<number, GroupObjectiveStatus>;
+}
+
+export interface RosterPlanProgress {
+  /** True when a plan is flagged for the roster but SDE skill data isn't imported. */
+  needsSkillData: boolean;
+  plans: RosterPlanColumn[];
 }
 
 export interface PlanSkillResolved {
@@ -524,6 +551,8 @@ export interface PlanSkillInfo {
   secondaryAttribute: TrainingAttribute | null;
   /** Total SP to hold level 1..5, index 0 = level I. */
   spAtLevel: number[];
+  /** What the skill does, plain text; null until the SDE is re-imported. */
+  description: string | null;
   /** This skill's own prerequisites, each at the level needed to train it. */
   prereqs: Array<{ skillTypeId: number; level: number }>;
   /**
@@ -551,6 +580,12 @@ export interface PlanDraftEntry {
   skillTypeId: number | null;
   skillName: string;
   level: number;
+  /**
+   * A remap point: the attributes the character remaps to before training this
+   * row. It belongs to the row, so it travels with it when the queue is
+   * reordered, and everything after it (up to the next one) is priced at it.
+   */
+  remapBefore?: NeuralAttributes;
 }
 
 /**
@@ -679,6 +714,13 @@ export interface AppNotification {
   body: string;
   createdAt: string;
   readAt: string | null;
+  /**
+   * When the user dismissed this notification, or null while it is still
+   * listed. Dismissed rows are filtered out of `notifications.list`, so in
+   * practice the renderer only ever sees null here — the field is what makes
+   * the dismissal visible to anything that reads a row by id.
+   */
+  dismissedAt: string | null;
 }
 
 export interface JumpCloneEntry {
@@ -690,6 +732,8 @@ export interface JumpCloneEntry {
   /** Resolved station or structure name; null while unresolved. */
   locationName: string | null;
   implants: ImplantInfo[];
+  /** This clone's implant set is marked critical (see CloneBoardEntry.activeCritical). */
+  critical: boolean;
 }
 
 /**
@@ -711,6 +755,11 @@ export interface CloneBoardEntry {
   missingScopes: string[];
   /** Implants in the currently-active clone. */
   activeImplants: ImplantInfo[];
+  /**
+   * The active clone is wearing a critical implant set — undocking in it
+   * raises a warning while the character is online.
+   */
+  activeCritical: boolean;
   clones: JumpCloneEntry[];
   /** Null until clone data has synced. */
   updatedAt: string | null;

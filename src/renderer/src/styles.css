@@ -392,7 +392,15 @@ code {
   margin-bottom: 0.5rem;
 }
 
+.notification-bell__panel-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
 .notification-bell__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -400,6 +408,27 @@ code {
 
 .notification-bell__item:last-child {
   border-bottom: none;
+}
+
+.notification-bell__item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-bell__item-dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 0.15rem;
+  line-height: 1;
+}
+
+.notification-bell__item-dismiss:hover {
+  color: var(--text);
 }
 
 .notification-bell__item--unread .notification-bell__item-title {
@@ -853,6 +882,27 @@ tr:focus-within .row-actions button {
   font-size: 0.85rem;
 }
 
+/* Roster plan columns: a short bar and a percentage, so several fit a wide table. */
+.data-table th.roster-plan-head {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roster-plan {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.roster-plan__bar {
+  display: inline-block;
+  width: 3.5rem;
+  overflow: hidden;
+}
+
 /* Reads as a setting, not a row selection: the label carries the state. */
 .sheet-toggle {
   color: var(--muted);
@@ -1017,6 +1067,32 @@ tr:focus-within .row-actions button {
   margin-top: 0.5rem;
 }
 
+/* A character logged in right now (Location page). Green like EVE's online indicator. */
+.online-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+/* Clone heading with its critical-pod toggle at the far end. */
+.clone-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* A chip that is also a button (the "Critical" toggle): keep the chip look. */
+button.chip-button {
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
 /* Expandable jump clone (details/summary) on the character sheet. */
 details.clone-block {
   margin-top: 0;
@@ -1087,6 +1163,17 @@ details.clone-block > p {
   width: 2px;
   border-radius: 1px;
   background: var(--text);
+}
+
+/* Collapsed per-plan missing-skill list under a sheet progress bar. */
+.plan-missing {
+  margin-top: 0.2rem;
+}
+
+.plan-missing summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .clone-updated {
@@ -1842,6 +1929,116 @@ details.clone-block > p {
   text-align: left;
 }
 
+/* Right-click skill info card in the plan creator (a wider context menu). */
+.context-menu.skill-info {
+  max-width: none;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.skill-info__title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text);
+}
+
+.skill-info__back,
+.skill-info__link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.skill-info__back {
+  color: var(--muted);
+}
+
+.skill-info__link {
+  color: var(--accent);
+  text-align: left;
+}
+
+.skill-info__link:hover {
+  text-decoration: underline;
+}
+
+/* EVE's own skill text; paragraph breaks kept, long text scrolls inside. */
+.skill-info__desc {
+  margin: 0 0.4rem 0.4rem;
+  white-space: pre-line;
+  line-height: 1.35;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.skill-info__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.6rem;
+  margin: 0 0.4rem 0.35rem;
+}
+
+.skill-info__facts dt {
+  color: var(--muted);
+}
+
+.skill-info__facts dd {
+  margin: 0;
+}
+
+.skill-info__levels {
+  width: calc(100% - 0.8rem);
+  margin: 0 0.4rem 0.35rem;
+  border-collapse: collapse;
+}
+
+.skill-info__levels th {
+  color: var(--muted);
+  font-weight: 500;
+  text-align: left;
+}
+
+.skill-info__levels th.num,
+.skill-info__levels td.num {
+  text-align: right;
+}
+
+.skill-info__levels th,
+.skill-info__levels td {
+  padding: 0.05rem 0;
+}
+
+.skill-info__level--planned td:first-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.skill-info__section {
+  padding: 0.3rem 0.4rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.skill-info__heading {
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 0.1rem;
+}
+
+.skill-info__list {
+  list-style: none;
+  margin: 0 0 0.3rem;
+  padding: 0;
+}
+
+.skill-info__action {
+  margin-top: 0.15rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
 /* "Columns" dropdown on the Roster filter bar. */
 .column-picker {
   position: relative;
@@ -2144,9 +2341,12 @@ details.clone-block > p {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* The row is a link back to its skill in the browser; only the grip drags. */
+/* A click on the row is a link back to its skill in the browser; pressing and
+   moving it drags it (useRowDrag). Row text isn't for selecting — a drag that
+   started as a selection would fight the reorder. */
 .plan-draft tbody tr {
   cursor: pointer;
+  user-select: none;
 }
 
 .plan-draft__grip {
@@ -2155,16 +2355,33 @@ details.clone-block > p {
   cursor: grab;
 }
 
-.plan-draft__grip:active {
-  cursor: grabbing;
+/* While a row is held, the whole page reads as grabbing — the pointer can
+   wander off the table and the drag still tracks it. */
+body.is-row-dragging,
+body.is-row-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
 }
 
-.plan-draft__row--dragging {
-  opacity: 0.45;
+.plan-draft__row--dragging td {
+  opacity: 0.4;
+  background: var(--accent-dim);
 }
 
-.plan-draft__row--over td {
+/* The drop line: where the dragged row will land, between two rows. */
+.plan-draft__row--drop-before td {
   box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.plan-draft__row--drop-after td {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* A remap row already draws its accent edge on the left; keep it under the line. */
+.plan-draft__remap.plan-draft__row--drop-before td.plan-draft__remap-cell {
+  box-shadow:
+    inset 0 2px 0 var(--accent),
+    inset 2px 0 0 var(--accent);
 }
 
 .plan-draft__issue {
@@ -2184,6 +2401,85 @@ details.clone-block > p {
 .plan-draft__issue--order {
   border-color: var(--warn);
   color: var(--warn);
+}
+
+/* A remap point: a thin divider row above the skill it precedes. Everything
+   below it (to the next one) is priced at its attributes, so it reads as a
+   break in the queue rather than as another skill. */
+.plan-draft tbody tr.plan-draft__remap {
+  cursor: default;
+}
+
+.plan-draft td.plan-draft__remap-cell {
+  width: auto;
+  padding: 0.2rem 0.4rem;
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.plan-draft__remap-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+}
+
+.plan-draft__remap-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.plan-draft__remap-body label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.plan-draft__remap-body input {
+  width: 3.2rem;
+  padding: 0.05rem 0.25rem;
+}
+
+.plan-draft__remap-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.plan-draft__remap-actions button {
+  padding: 0.05rem 0.4rem;
+}
+
+/* Auto remap's result: one compact row per remap point, the attributes to set
+   there, with the ones that change called out. Points moved away from aren't a
+   problem, so they get no warning colour — only the raised ones get the accent. */
+.auto-remap .auto-remap__table {
+  font-size: 0.82rem;
+}
+
+.auto-remap__table th,
+.auto-remap__table td {
+  padding: 0.25rem 0.5rem;
+}
+
+.auto-remap__attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.8rem;
+}
+
+.auto-remap__attr {
+  white-space: nowrap;
+}
+
+.auto-remap__attr--up {
+  color: var(--accent);
+}
+
+.auto-remap__delta {
+  font-size: 0.72rem;
+  opacity: 0.8;
 }
 
 /* Section header carrying a right-aligned action (bulk-tag on fit/plan buckets). */

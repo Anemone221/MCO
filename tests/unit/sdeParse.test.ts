@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Readable } from 'node:stream';
 import {
+  decodeDescription,
   parseBlueprints,
   parseNamedFile,
   parseSolarSystems,
@@ -72,6 +73,7 @@ describe('parseTypesStream', () => {
         marketGroupId: null,
         metaGroupId: null,
         volume: null,
+        descriptionSource: null,
       },
       {
         id: 34,
@@ -81,6 +83,7 @@ describe('parseTypesStream', () => {
         marketGroupId: null,
         metaGroupId: null,
         volume: null,
+        descriptionSource: null,
       },
     ]);
   });
@@ -131,6 +134,86 @@ describe('parseTypesStream', () => {
     );
     const rows = await parseTypesStream(Readable.from(yaml));
     expect(rows).toEqual([]);
+  });
+
+  it('keeps the English description, wrapped and quoted, past the other languages', async () => {
+    // Laid out exactly as types.yaml writes Gunnery and Small Hybrid Turret.
+    const yaml = [
+      '3300:',
+      '  basePrice: 30000.0',
+      '  description:',
+      "    de: 'Grundkenntniss zur Bedienung von Geschütztürmen.",
+      '',
+      '',
+      "      2% Bonus auf die Feuergeschwindigkeit von Geschütztürmen je Skillstufe.'",
+      "    en: Basic turret operation skill. 2% Bonus to weapon turrets' rate of fire per",
+      '      skill level.',
+      '    es: Habilidad de operación de torreta básica.',
+      '  groupID: 255',
+      '  name:',
+      '    en: Gunnery',
+      '  published: true',
+      '3301:',
+      '  description:',
+      "    en: 'Operation of small hybrid turrets.",
+      '',
+      '',
+      "      5% Bonus to small hybrid turret damage per level.'",
+      '  groupID: 255',
+      '  name:',
+      '    en: Small Hybrid Turret',
+      '  published: true',
+      '34:',
+      '  groupID: 18',
+      '  name:',
+      '    en: Tritanium',
+      '',
+    ].join('\n');
+
+    const rows = await parseTypesStream(Readable.from(yaml));
+    expect(rows.map((r) => r.name)).toEqual(['Gunnery', 'Small Hybrid Turret', 'Tritanium']);
+    expect(decodeDescription(rows[0]!.descriptionSource!)).toBe(
+      "Basic turret operation skill. 2% Bonus to weapon turrets' rate of fire per skill level.",
+    );
+    expect(decodeDescription(rows[1]!.descriptionSource!)).toBe(
+      'Operation of small hybrid turrets.\n\n5% Bonus to small hybrid turret damage per level.',
+    );
+    expect(rows[2]!.descriptionSource).toBeNull();
+  });
+
+  it('closes a description that is the last thing in its block', async () => {
+    const yaml = [
+      '1:',
+      '  groupID: 2',
+      '  name:',
+      '    en: A',
+      '  description:',
+      '    en: Last.',
+      '2:',
+      '  groupID: 2',
+      '  name:',
+      '    en: B',
+      '',
+    ].join('\n');
+    const rows = await parseTypesStream(Readable.from(yaml));
+    expect(decodeDescription(rows[0]!.descriptionSource!)).toBe('Last.');
+    expect(rows[1]!.descriptionSource).toBeNull();
+  });
+});
+
+describe('decodeDescription', () => {
+  it('strips client markup and decodes entities, keeping link text', () => {
+    expect(
+      decodeDescription(
+        "en: '<b>Bonus:</b> 5% to <a href=showinfo:3300>Gunnery</a> &amp; more<br>Next'",
+      ),
+    ).toBe('Bonus: 5% to Gunnery & more\nNext');
+  });
+
+  it('is null for an empty or unparseable description', () => {
+    expect(decodeDescription("en: ''")).toBeNull();
+    expect(decodeDescription("en: '<b></b>'")).toBeNull();
+    expect(decodeDescription('en: [unclosed')).toBeNull();
   });
 });
 

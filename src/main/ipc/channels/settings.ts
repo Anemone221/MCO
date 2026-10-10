@@ -12,6 +12,7 @@ import {
   getBackgroundModeSettings,
   setCloseToTray,
 } from '../../services/backgroundMode';
+import { isLiveTrackingEnabled, setLiveTrackingEnabled } from '../../services/liveTracking';
 import { handle } from '../handle';
 
 export function registerSettingsChannels(getWindow: () => BrowserWindow | null): void {
@@ -25,4 +26,8 @@ export function registerSettingsChannels(getWindow: () => BrowserWindow | null):
   handle(IpcChannel.settingsBackgroundMode, () => getBackgroundModeSettings());
   handle(IpcChannel.settingsSetCloseToTray, (_event, enabled: boolean) => setCloseToTray(enabled));
   handle(IpcChannel.settingsRunInBackground, () => enterBackgroundNow());
+  handle(IpcChannel.settingsLiveTracking, () => isLiveTrackingEnabled());
+  handle(IpcChannel.settingsSetLiveTracking, (_event, enabled: boolean) =>
+    setLiveTrackingEnabled(enabled),
+  );
 }

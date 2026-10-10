@@ -3,6 +3,8 @@ import { listPlans, removePlan } from '../../db/repositories/plans';
 import {
   analyzePlanById,
   importPlan,
+  listRosterPlanProgress,
+  setPlanRosterVisibilityById,
   setPlanSheetVisibilityById,
   updatePlanById,
 } from '../../services/planService';
@@ -27,6 +29,10 @@ export function registerPlanChannels(): void {
   handle(IpcChannel.plansSetSheetVisibility, (_event, planId: number, show: boolean) =>
     setPlanSheetVisibilityById(planId, show),
   );
+  handle(IpcChannel.plansSetRosterVisibility, (_event, planId: number, show: boolean) =>
+    setPlanRosterVisibilityById(planId, show),
+  );
+  handle(IpcChannel.plansRosterProgress, () => listRosterPlanProgress());
   handle(IpcChannel.plansAnalyze, (_event, planId: number) => analyzePlanById(planId));
 
   // The creator's own channels: the skill catalogue it browses, and the three

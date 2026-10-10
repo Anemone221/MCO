@@ -163,17 +163,24 @@ export default function Settings() {
 
   const { data, error, loading, reload, setData, setError } = useMcoData(
     async () => {
-      const [status, esi, info, background] = await Promise.all([
+      const [status, esi, info, background, liveTracking] = await Promise.all([
         mco.settings.syncStatus(),
         mco.settings.esiActivity(),
         mco.system.appInfo(),
         mco.settings.backgroundMode(),
+        mco.settings.liveTracking(),
       ]);
-      return { status, esi, info, background };
+      return { status, esi, info, background, liveTracking };
     },
     { onCharactersChanged: true },
   );
-  const { status = null, esi = null, info = null, background = null } = data ?? {};
+  const {
+    status = null,
+    esi = null,
+    info = null,
+    background = null,
+    liveTracking = null,
+  } = data ?? {};
 
   // Loaded separately: the release check may go out to GitHub, and the rest of
   // the page must not wait behind a network round trip to render.
@@ -274,6 +281,16 @@ export default function Settings() {
     if (!background) return;
     try {
       applyBackground(await mco.settings.setCloseToTray(!background.closeToTray));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  async function toggleLiveTracking(): Promise<void> {
+    if (liveTracking === null) return;
+    try {
+      const next = await mco.settings.setLiveTracking(!liveTracking);
+      setData((prev) => (prev ? { ...prev, liveTracking: next } : prev));
     } catch (e) {
       setError(errorMessage(e));
     }
@@ -480,6 +497,22 @@ export default function Settings() {
             data-testid="close-to-tray-toggle"
           />{' '}
           Keep syncing in the tray when I close the window
+        </label>
+        <p className="muted">
+          Live tracking checks who is online every 2 minutes, and refreshes online
+          characters' location and implants every ~20 seconds — this is what raises the
+          critical-clone undock warning. Off, online status and location update with the
+          hourly sweep only.
+        </p>
+        <label className="muted">
+          <input
+            type="checkbox"
+            checked={liveTracking ?? false}
+            disabled={liveTracking === null}
+            onChange={() => void toggleLiveTracking()}
+            data-testid="live-tracking-toggle"
+          />{' '}
+          Live-track online characters
         </label>
         <div className="settings-actions">
           <button

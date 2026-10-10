@@ -6,7 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { Link } from 'react-router-dom';
-import type { RosterEntry } from '@shared/types';
+import type { GroupObjectiveStatus, RosterEntry, RosterPlanColumn } from '@shared/types';
 import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import { formatDate, formatIsk, formatSp, formatTimeUntil, romanLevel } from '../lib/format';
@@ -17,16 +17,20 @@ import {
   filterRoster,
   loadColumnVisibility,
   NO_ROSTER_FILTERS,
+  planSortKey,
   ROSTER_COLUMNS,
   saveColumnVisibility,
   sortRoster,
   summarizeRoster,
+  type PlanProgressLookup,
+  type PlanSortKey,
   type RosterColumnKey,
   type RosterFilters,
   type RosterSort,
   type RosterSortKey,
 } from '../lib/rosterView';
 import { summarizeQueue } from '../lib/groupView';
+import { formatCost, loadCostView } from '../lib/costView';
 import { ALL_TAGS, memberIdSet, tagsForCharacter, type TagFilter } from '../lib/tags';
 import CharacterAvatar from '../components/CharacterAvatar';
 import TagSelect from '../components/TagSelect';
@@ -104,6 +108,36 @@ function CloneJumpCell({ entry }: { entry: RosterEntry }) {
   );
 }
 
+/**
+ * One character's progress toward a roster-visible plan: a thin red→green bar
+ * and the share held, with the remaining cost (in the system chosen on the
+ * plan's detail page) on hover. Kept to a bar and a number so several plan
+ * columns still fit a 90-row table.
+ */
+function PlanCell({ planId, status }: { planId: number; status: GroupObjectiveStatus | undefined }) {
+  if (!status) return <span className="muted">—</span>;
+  if (status.complete) return <span className="objective-done">Complete</span>;
+  const pct = status.progress * 100;
+  const system = loadCostView('plan', planId).system;
+  const timeUnknown = system === 'time' && status.timeGapMinutes === null;
+  const costText = timeUnknown ? formatSp(status.spGap) : formatCost(system, status);
+  return (
+    <span className="roster-plan" title={`${costText} left`}>
+      <span className="plan-progress__bar roster-plan__bar">
+        <span
+          className="plan-progress__fill"
+          style={{
+            width: `${pct}%`,
+            // Hue tracks completion: pure red at 0%, through amber, pure green at 100%.
+            background: `color-mix(in hsl, var(--ok) ${pct}%, var(--danger))`,
+          }}
+        />
+      </span>
+      {Math.floor(pct)}%
+    </span>
+  );
+}
+
 export default function Roster() {
   const [tagFilter, setTagFilter] = useState<TagFilter>(ALL_TAGS);
   const [tagMenu, setTagMenu] = useState<TagMenuState | null>(null);
@@ -124,17 +158,19 @@ export default function Roster() {
   // Refreshes on mount and when a background sync sweep updates character data.
   const { data, error, reload, setError } = useMcoData(
     async () => {
-      const [roster, accounts, tags, groups] = await Promise.all([
+      const [roster, accounts, tags, groups, planProgress] = await Promise.all([
         mco.characters.roster(),
         mco.accounts.list(),
         mco.tags.list(),
         mco.groups.list(),
+        mco.plans.rosterProgress(),
       ]);
-      return { roster, accounts, tags, groups };
+      return { roster, accounts, tags, groups, planProgress };
     },
     { onCharactersChanged: true },
   );
-  const { roster = [], accounts = [], tags = [], groups = [] } = data ?? {};
+  const { roster = [], accounts = [], tags = [], groups = [], planProgress } = data ?? {};
+  const planColumns = useMemo<RosterPlanColumn[]>(() => planProgress?.plans ?? [], [planProgress]);
 
   async function run(key: string, action: () => Promise<unknown>): Promise<void> {
     // The pin only services back-to-back account assignments; any other action
@@ -193,11 +229,13 @@ export default function Roster() {
     });
   }
 
-  function toggleSort(key: RosterSortKey): void {
+  function toggleSort(key: RosterSortKey | PlanSortKey): void {
+    // Bigger-is-better columns open descending: most SP, most ISK, furthest along a plan.
+    const descFirst = key === 'sp' || key === 'wallet' || key.startsWith('plan:');
     setSort((prev) =>
       prev.key === key
         ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
-        : { key, dir: key === 'sp' || key === 'wallet' ? 'desc' : 'asc' },
+        : { key, dir: descFirst ? 'desc' : 'asc' },
     );
   }
 
@@ -211,15 +249,26 @@ export default function Roster() {
     }
     return map;
   }, [roster, tags]);
+  const planShares = useMemo<PlanProgressLookup>(
+    () =>
+      new Map(
+        planColumns.map((col) => [
+          col.planId,
+          new Map(Object.entries(col.statuses).map(([id, s]) => [Number(id), s.progress])),
+        ]),
+      ),
+    [planColumns],
+  );
   const visible = useMemo(() => {
     if (pinnedOrder) return applyPinnedOrder(roster, pinnedOrder);
     const tagIds = memberIdSet(tags, tagFilter);
     const base = tagIds === null ? roster : roster.filter((e) => tagIds.has(e.character.id));
-    return sortRoster(filterRoster(base, filters, tagNames), sort, tagNames);
-  }, [roster, tags, tagFilter, filters, sort, tagNames, pinnedOrder]);
+    return sortRoster(filterRoster(base, filters, tagNames), sort, tagNames, planShares);
+  }, [roster, tags, tagFilter, filters, sort, tagNames, planShares, pinnedOrder]);
   const filtered = visible.length !== roster.length;
-  // Character column + visible optional columns + the actions column.
-  const colCount = 1 + ROSTER_COLUMNS.filter((col) => columns[col.key]).length + 1;
+  // Character column + visible optional columns + plan columns + the actions column.
+  const colCount =
+    1 + ROSTER_COLUMNS.filter((col) => columns[col.key]).length + planColumns.length + 1;
 
   return (
     <section className="page page--fill">
@@ -318,6 +367,12 @@ export default function Roster() {
         </div>
       )}
 
+      {planProgress?.needsSkillData && (
+        <p className="muted" data-testid="roster-plans-need-sde">
+          Skill plan columns need static skill data — re-import static data to show them.
+        </p>
+      )}
+
       {error && (
         <div className="error-box" data-testid="roster-error">
           {error}
@@ -369,6 +424,30 @@ export default function Roster() {
                     )}
                   </th>
                 ))}
+                {planColumns.map((col) => {
+                  const key = planSortKey(col.planId);
+                  return (
+                    <th
+                      key={key}
+                      className="sortable roster-plan-head"
+                      title={`Skill plan: ${col.planName}`}
+                      aria-sort={
+                        sort.key === key
+                          ? sort.dir === 'asc'
+                            ? 'ascending'
+                            : 'descending'
+                          : undefined
+                      }
+                      onClick={() => toggleSort(key)}
+                      data-testid={`roster-plan-head-${col.planId}`}
+                    >
+                      {col.planName}
+                      {sort.key === key && (
+                        <span className="sort-arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>
+                      )}
+                    </th>
+                  );
+                })}
                 <th aria-label="actions" />
               </tr>
             </thead>
@@ -485,6 +564,11 @@ export default function Roster() {
                   {columns.sync && (
                     <td className="muted">{formatDate(entry.character.refreshedAt)}</td>
                   )}
+                  {planColumns.map((col) => (
+                    <td key={col.planId}>
+                      <PlanCell planId={col.planId} status={col.statuses[entry.character.id]} />
+                    </td>
+                  ))}
                   <td className="row-actions">
                     <button
                       type="button"

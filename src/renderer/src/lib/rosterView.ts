@@ -29,10 +29,18 @@ export type RosterSortKey =
   | 'wallet'
   | 'sync';
 
+/** Sort by one roster-visible skill plan's column (see `plans.rosterProgress`). */
+export type PlanSortKey = `plan:${number}`;
+
+export const planSortKey = (planId: number): PlanSortKey => `plan:${planId}`;
+
 export interface RosterSort {
-  key: RosterSortKey;
+  key: RosterSortKey | PlanSortKey;
   dir: 'asc' | 'desc';
 }
+
+/** planId → characterId → 0..1 share of the plan the character holds. */
+export type PlanProgressLookup = Map<number, Map<number, number>>;
 
 /**
  * Toggleable roster columns — every column except the always-on Character column
@@ -205,20 +213,33 @@ export function cloneJumpRemainingMs(entry: RosterEntry, now = Date.now()): numb
 
 /**
  * Tag data lives outside RosterEntry, so sorting by the Tags column takes a
- * lookup of characterId → the character's tag names joined in display order.
+ * lookup of characterId → the character's tag names joined in display order;
+ * plan columns likewise take a {@link PlanProgressLookup}.
  */
 export function sortRoster(
   entries: RosterEntry[],
   sort: RosterSort,
   tagNames?: Map<number, string>,
+  planProgress?: PlanProgressLookup,
 ): RosterEntry[] {
   const flip = sort.dir === 'desc' ? -1 : 1;
   const byName = (a: RosterEntry, b: RosterEntry) =>
     a.character.name.localeCompare(b.character.name);
+  const planId = sort.key.startsWith('plan:') ? Number(sort.key.slice('plan:'.length)) : null;
+  const planShares = planId !== null ? planProgress?.get(planId) : undefined;
 
   return [...entries].sort((a, b) => {
     let cmp: number;
-    switch (sort.key) {
+    if (planId !== null) {
+      // Characters with no analysis (added since the last load) group at the end.
+      const ap = planShares?.get(a.character.id);
+      const bp = planShares?.get(b.character.id);
+      if ((ap === undefined) !== (bp === undefined)) return ap === undefined ? 1 : -1;
+      cmp = (ap ?? 0) - (bp ?? 0);
+      if (cmp === 0) cmp = byName(a, b);
+      return cmp * flip;
+    }
+    switch (sort.key as RosterSortKey) {
       case 'name':
         cmp = byName(a, b);
         break;
