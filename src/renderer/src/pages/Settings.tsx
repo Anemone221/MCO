@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { NOTIFICATION_KINDS, type NotificationKind } from '@shared/notifications';
 import type {
   BackgroundModeSettings,
+  BackupInfo,
   CharacterSyncState,
   SdeUpdateStatus,
   UpdateStatus,
@@ -10,11 +12,19 @@ import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import { isDemoMode, setDemoMode } from '../lib/demo';
 import { formatDate } from '../lib/format';
+import {
+  afterSignIn,
+  afterSkip,
+  reauthQueue,
+  reauthReason,
+  type ReauthEntry,
+} from '../lib/reauthQueue';
 import { THEMES, type ThemeId } from '../lib/theme';
 import { applyTheme, getStoredTheme } from '../theme';
 import StatusSquare from '../components/StatusSquare';
 import EsiActivityPanel from '../components/EsiActivityPanel';
 import {
+  BellIcon,
   ChevronIcon,
   DatabaseIcon,
   DownloadIcon,
@@ -66,6 +76,16 @@ const STATE_ORDER: Record<CharacterSyncState, number> = {
   due: 2,
   ok: 3,
 };
+
+const BACKUP_KIND_LABEL: Record<BackupInfo['kind'], string> = {
+  auto: 'Weekly',
+  'pre-migration': 'Before an update',
+  'before-restore': 'Before the last restore',
+};
+
+function formatMegabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function SyncStateChip({ state }: { state: CharacterSyncState }) {
   return <span className={STATE_CHIP[state]}>{STATE_LABEL[state]}</span>;
@@ -160,17 +180,31 @@ export default function Settings() {
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [checkingSde, setCheckingSde] = useState(false);
+  // The re-authorize run: who is being asked for now, how far along it is, and
+  // anything worth saying about the last sign-in.
+  const [reauth, setReauth] = useState<{
+    current: ReauthEntry;
+    done: number;
+    total: number;
+    note: string | null;
+  } | null>(null);
+  const [reauthNote, setReauthNote] = useState<string | null>(null);
+  // Skip and Stop both cancel the pending sign-in; this tells the run which.
+  const reauthStopping = useRef(false);
 
   const { data, error, loading, reload, setData, setError } = useMcoData(
     async () => {
-      const [status, esi, info, background, liveTracking] = await Promise.all([
+      const [status, esi, info, background, liveTracking, notifications, backups] =
+        await Promise.all([
         mco.settings.syncStatus(),
         mco.settings.esiActivity(),
         mco.system.appInfo(),
         mco.settings.backgroundMode(),
         mco.settings.liveTracking(),
+        mco.notifications.preferences(),
+        mco.settings.backups(),
       ]);
-      return { status, esi, info, background, liveTracking };
+      return { status, esi, info, background, liveTracking, notifications, backups };
     },
     { onCharactersChanged: true },
   );
@@ -180,6 +214,8 @@ export default function Settings() {
     info = null,
     background = null,
     liveTracking = null,
+    notifications = null,
+    backups = [],
   } = data ?? {};
 
   // Loaded separately: the release check may go out to GitHub, and the rest of
@@ -277,6 +313,49 @@ export default function Settings() {
     }
   }
 
+  /**
+   * Step through every character that needs a new sign-in, one SSO page after
+   * another. The user picks the character on CCP's page, so each step says who
+   * MCO is waiting for and copes with getting someone else back.
+   */
+  async function runReauth(entries: ReauthEntry[]): Promise<void> {
+    const total = entries.length;
+    let remaining = entries;
+    let note: string | null = null;
+    reauthStopping.current = false;
+    setReauthNote(null);
+    try {
+      while (remaining.length > 0 && !reauthStopping.current) {
+        const current = remaining[0]!;
+        setReauth({ current, done: total - remaining.length, total, note });
+        const result = await mco.characters.reauthorize(current.characterId);
+        if (result.outcome === 'cancelled') {
+          if (reauthStopping.current) break;
+          ({ remaining, note } = afterSkip(remaining));
+          continue;
+        }
+        ({ remaining, note } = afterSignIn(remaining, result.character));
+        // Keeps the table below in step; the run itself goes by `remaining`.
+        void reload();
+      }
+      setReauthNote(
+        remaining.length === 0
+          ? 'Re-authorization run finished.'
+          : `Stopped with ${remaining.length} of ${total} still to do.`,
+      );
+    } catch (e) {
+      setReauthNote(errorMessage(e));
+    } finally {
+      setReauth(null);
+      await reload();
+    }
+  }
+
+  function endReauthStep(stop: boolean): void {
+    reauthStopping.current = stop;
+    void mco.characters.cancelLogin();
+  }
+
   async function toggleCloseToTray(): Promise<void> {
     if (!background) return;
     try {
@@ -293,6 +372,35 @@ export default function Settings() {
       setData((prev) => (prev ? { ...prev, liveTracking: next } : prev));
     } catch (e) {
       setError(errorMessage(e));
+    }
+  }
+
+  async function toggleNotification(kind: NotificationKind): Promise<void> {
+    if (notifications === null) return;
+    try {
+      const next = await mco.notifications.setPreference(kind, !notifications[kind]);
+      setData((prev) => (prev ? { ...prev, notifications: next } : prev));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  async function onRestoreBackup(backup: BackupInfo): Promise<void> {
+    const ok = await mco.system.confirm(
+      `Restore the backup from ${formatDate(backup.createdAt)}?
+
+` +
+        'MCO will restart and replace its database with this snapshot. Everything recorded ' +
+        'since then is set aside as "Before the last restore", so this can be undone.',
+      'Restore and restart',
+    );
+    if (!ok) return;
+    setBackupStatus(null);
+    try {
+      // Does not come back on success: the app restarts to make the swap.
+      await mco.settings.restoreBackup(backup.fileName);
+    } catch (e) {
+      setBackupStatus(errorMessage(e));
     }
   }
 
@@ -331,6 +439,7 @@ export default function Settings() {
           a.characterName.localeCompare(b.characterName),
       )
     : [];
+  const needsReauth = status ? reauthQueue(status.characters) : [];
 
   return (
     <section className="page" data-testid="settings-page">
@@ -406,7 +515,12 @@ export default function Settings() {
               <div>
                 <span className="muted">Background sync</span>
                 {status.scheduler.running
-                  ? `hourly · last sweep ${formatDate(status.scheduler.lastSweepAt)} · next ${formatDate(status.scheduler.nextSweepAt)}`
+                  ? `hourly · last sweep ${formatDate(status.scheduler.lastSweepAt)} · next ${formatDate(status.scheduler.nextSweepAt)}` +
+                    (status.scheduler.network === 'offline'
+                      ? ' · offline, waiting for the network'
+                      : status.scheduler.network === 'paused'
+                        ? ` · network unreachable, paused until ${formatDate(status.scheduler.networkPausedUntil)}`
+                        : '')
                   : 'not running'}
               </div>
               <div>
@@ -436,6 +550,66 @@ export default function Settings() {
               {sdeUpdate && <SdeUpdateSummary status={sdeUpdate} />}
             </div>
 
+            {(needsReauth.length > 0 || reauth !== null || reauthNote !== null) && (
+              <div className="reauth-panel" data-testid="reauth-panel">
+                {reauth ? (
+                  <>
+                    <div className="settings-actions">
+                      <span>
+                        Sign in as <strong>{reauth.current.characterName}</strong> in your
+                        browser
+                        <span className="muted">
+                          {' '}
+                          · {reauth.done + 1} of {reauth.total} · {reauthReason(reauth.current)}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost btn-sm"
+                        onClick={() => endReauthStep(false)}
+                        data-testid="reauth-skip"
+                      >
+                        Skip
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={() => endReauthStep(true)}
+                        data-testid="reauth-stop"
+                      >
+                        Stop
+                      </button>
+                    </div>
+                    {reauth.note && <p className="muted">{reauth.note}</p>}
+                  </>
+                ) : (
+                  <div className="settings-actions">
+                    {needsReauth.length > 0 && (
+                      <>
+                        <span>
+                          <strong>{needsReauth.length}</strong> character
+                          {needsReauth.length === 1 ? ' needs' : 's need'} a new EVE sign-in
+                          <span className="muted">
+                            {' '}
+                            · an expired login, or a scope added since they signed in
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-sm"
+                          onClick={() => void runReauth(needsReauth)}
+                          data-testid="reauth-start"
+                        >
+                          Re-authorize {needsReauth.length === 1 ? 'it' : `all ${needsReauth.length}`}
+                        </button>
+                      </>
+                    )}
+                    {reauthNote && <span className="muted">{reauthNote}</span>}
+                  </div>
+                )}
+              </div>
+            )}
+
             {characters.length === 0 ? (
               <p className="muted">No characters yet.</p>
             ) : (
@@ -447,6 +621,7 @@ export default function Settings() {
                     <th>Last synced</th>
                     <th>Next due</th>
                     <th>Status</th>
+                    <th aria-label="actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -467,6 +642,22 @@ export default function Settings() {
                           >
                             {c.missingScopes.length} scope(s) missing
                           </span>
+                        )}
+                      </td>
+                      <td className="row-actions">
+                        {(c.state === 'login-expired' || c.missingScopes.length > 0) && (
+                          <button
+                            type="button"
+                            className="ghost btn-sm"
+                            disabled={reauth !== null}
+                            onClick={() =>
+                              void runReauth(
+                                needsReauth.filter((e) => e.characterId === c.characterId),
+                              )
+                            }
+                          >
+                            Re-authorize
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -540,6 +731,31 @@ export default function Settings() {
 
       <div className="settings-section">
         <h3>
+          <BellIcon size={15} />
+          Notifications
+        </h3>
+        <p className="muted">
+          Which events raise a desktop notification and a row in the bell. A type that is off
+          raises neither. Dismissed notifications are removed after 30 days.
+        </p>
+        <div className="settings-checklist" data-testid="notification-preferences">
+          {NOTIFICATION_KINDS.map((k) => (
+            <label key={k.kind} className="muted">
+              <input
+                type="checkbox"
+                checked={notifications?.[k.kind] ?? true}
+                disabled={notifications === null}
+                onChange={() => void toggleNotification(k.kind)}
+                data-testid={`notify-toggle-${k.kind}`}
+              />{' '}
+              <strong>{k.label}</strong> — {k.description}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h3>
           <PaletteIcon size={15} />
           Appearance
         </h3>
@@ -595,8 +811,9 @@ export default function Settings() {
           Logs
         </h3>
         <p className="muted">
-          If something looks wrong, export a diagnostics file (app info plus this session's
-          activity log) and attach it to a bug report.
+          If something looks wrong, export a diagnostics file (app info plus the activity log,
+          which reaches back over earlier sessions) and attach it to a bug report. The log itself
+          is kept in the <code>logs</code> folder of the data folder, capped at about 4 MB.
         </p>
         <div className="settings-actions">
           <button type="button" className="ghost" onClick={() => void onExportLogs()}>
@@ -612,8 +829,48 @@ export default function Settings() {
           Backup
         </h3>
         <p className="muted">
-          Saves a snapshot of the database — characters, accounts, groups, tags, fits, plans and
-          imported SDE data. To restore after a reinstall: quit MCO, copy the backup over{' '}
+          MCO snapshots its database — characters, accounts, groups, tags, fits, plans, banked
+          wallet and mining history, and imported SDE data — once a week (the last five are kept)
+          and before any update that changes the database. They are listed below and live in the{' '}
+          <code>backups</code> folder of the data folder.
+        </p>
+        {backups.length === 0 ? (
+          <p className="muted" data-testid="backups-empty">
+            No automatic backup yet — the first is taken shortly after MCO starts.
+          </p>
+        ) : (
+          <table className="data-table" data-testid="backups-table">
+            <thead>
+              <tr>
+                <th>Taken</th>
+                <th>Kind</th>
+                <th className="num">Size</th>
+                <th aria-label="actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {backups.map((b) => (
+                <tr key={b.fileName}>
+                  <td>{formatDate(b.createdAt)}</td>
+                  <td>{BACKUP_KIND_LABEL[b.kind]}</td>
+                  <td className="num">{formatMegabytes(b.sizeBytes)}</td>
+                  <td className="row-actions">
+                    <button
+                      type="button"
+                      className="ghost btn-sm"
+                      onClick={() => void onRestoreBackup(b)}
+                    >
+                      Restore…
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted">
+          "Back up database…" saves a copy wherever you choose, for moving to another machine. To
+          use one after a reinstall: quit MCO, copy it over{' '}
           <code>{info?.dbPath ?? 'mco.sqlite'}</code>, and start MCO again. Character logins are
           encrypted for this OS user, so on a new machine you will need to re-add characters
           (everything else survives).

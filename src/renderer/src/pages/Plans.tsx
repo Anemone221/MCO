@@ -86,6 +86,11 @@ export default function Plans() {
               {showImport ? 'Hide import' : 'Import plan…'}
             </button>
           )}
+          {plans.length >= 2 && (
+            <Link to="/plans/compare" className="link-btn" data-testid="compare-plans">
+              Compare plans…
+            </Link>
+          )}
           <Link to="/plans/new" className="link-btn" data-testid="create-plan">
             Create plan…
           </Link>

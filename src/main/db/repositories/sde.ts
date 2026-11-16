@@ -19,6 +19,18 @@ export interface SdeTypeRow extends SdeNamedRow {
   volume: number | null;
 }
 
+/**
+ * Run `apply` — a series of the `replaceX` calls below — as one transaction.
+ *
+ * Each `replaceX` is a transaction of its own, which better-sqlite3 turns into
+ * a savepoint when it runs inside another. So wrapping a whole import in this
+ * makes it all-or-nothing without the individual functions changing: a throw
+ * anywhere inside rolls every table back to the build that was there before.
+ */
+export function inSdeTransaction(apply: () => void): void {
+  getDb().transaction(apply)();
+}
+
 export function replaceCategories(rows: SdeNamedRow[]): void {
   const db = getDb();
   const ins = db.prepare('INSERT OR REPLACE INTO sde_categories (id, name, published) VALUES (?, ?, ?)');

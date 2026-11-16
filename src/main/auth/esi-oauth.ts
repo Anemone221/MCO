@@ -47,11 +47,52 @@ const RESULT_PAGE = (message: string): string =>
    <p style="color:#8b949e">You can close this window and return to MCO.</p></div>
    </body></html>`;
 
+/**
+ * The user called off a sign-in that was waiting on the browser. A
+ * `UserFacingError` so a caller that does not special-case it still shows a
+ * plain sentence; the Roster and the re-authorize queue treat it as "stop",
+ * not as a failure.
+ */
+export class LoginCancelledError extends UserFacingError {
+  constructor() {
+    super('Sign-in cancelled.');
+    this.name = 'LoginCancelledError';
+  }
+}
+
 interface PendingCallback {
   /** Resolves with the authorization code once SSO redirects to the listener. */
   code: Promise<string>;
   /** Tear the listener down early, e.g. when the browser never opened. */
   close: () => void;
+  /** Tear the listener down and reject `code` with {@link LoginCancelledError}. */
+  cancel: () => void;
+}
+
+/**
+ * The sign-in currently waiting on the browser, if any. There can only be one:
+ * the callback port is fixed by the app registration, so a second listener
+ * could not start anyway — this turns that into a sentence instead of an
+ * EADDRINUSE, and gives {@link cancelLogin} something to reach.
+ */
+let pendingLogin: PendingCallback | null = null;
+
+/** True while a sign-in is waiting on the browser. */
+export function isLoginPending(): boolean {
+  return pendingLogin !== null;
+}
+
+/**
+ * Call off the sign-in that is waiting on the browser: frees the callback port
+ * at once rather than at the five-minute timeout, and rejects the pending
+ * {@link startLogin} with {@link LoginCancelledError}. Returns whether there
+ * was one to cancel. A login that has already received its code is past the
+ * point of cancelling and finishes normally.
+ */
+export function cancelLogin(): boolean {
+  if (pendingLogin === null) return false;
+  pendingLogin.cancel();
+  return true;
 }
 
 /**
@@ -64,6 +105,7 @@ interface PendingCallback {
  */
 function awaitCallback(expectedState: string): PendingCallback {
   let close = (): void => {};
+  let cancel = (): void => {};
 
   const code = new Promise<string>((resolve, reject) => {
     let done = false;
@@ -107,6 +149,16 @@ function awaitCallback(expectedState: string): PendingCallback {
       done = true;
       clearTimeout(timer);
       server.close();
+      // A browser tab left open on the callback keeps its connection alive,
+      // and `close()` alone waits for it — holding the port the next sign-in
+      // needs straight away.
+      server.closeAllConnections();
+    };
+
+    cancel = () => {
+      if (done) return;
+      close();
+      reject(new LoginCancelledError());
     };
 
     server.on('error', (err) => {
@@ -116,7 +168,7 @@ function awaitCallback(expectedState: string): PendingCallback {
     server.listen(ESI_CALLBACK_PORT, '127.0.0.1');
   });
 
-  return { code, close };
+  return { code, close: () => close(), cancel: () => cancel() };
 }
 
 async function postToken(body: Record<string, string>): Promise<TokenResponse> {
@@ -210,6 +262,12 @@ export async function startLogin(
     );
   }
 
+  if (pendingLogin !== null) {
+    throw new UserFacingError(
+      'A sign-in is already waiting in your browser. Finish it there, or cancel it first.',
+    );
+  }
+
   const { verifier, challenge } = createPkcePair();
   const state = createState();
   const scopes = [...new Set([...ESI_SCOPES, ...extraScopes])];
@@ -229,15 +287,25 @@ export async function startLogin(
   // that never opens would otherwise leave it holding the port until the
   // five-minute timeout.
   const pending = awaitCallback(state);
+  pendingLogin = pending;
+  // `code` can settle while the browser hand-off below is still awaited (a
+  // cancel, or the port being taken); it is awaited afterwards, and until then
+  // a rejection must not count as unhandled.
+  pending.code.catch(() => {});
+  let code: string;
   try {
-    await shell.openExternal(authorizeUrl.toString());
-  } catch (err) {
-    pending.close();
-    throw new UserFacingError(
-      `MCO could not open your browser to sign in to EVE SSO: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    try {
+      await shell.openExternal(authorizeUrl.toString());
+    } catch (err) {
+      pending.close();
+      throw new UserFacingError(
+        `MCO could not open your browser to sign in to EVE SSO: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    code = await pending.code;
+  } finally {
+    pendingLogin = null;
   }
-  const code = await pending.code;
 
   const token = await postToken({
     grant_type: 'authorization_code',

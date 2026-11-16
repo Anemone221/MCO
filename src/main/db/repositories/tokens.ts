@@ -1,4 +1,5 @@
-import { getDb } from '../index';
+import { mirrorTokenToProd } from '../devTokens';
+import { getDb, getProdMirrorDb } from '../index';
 
 export interface StoredToken {
   characterId: number;
@@ -31,6 +32,19 @@ export function saveToken(input: {
          invalid_at = NULL`,
     )
     .run(input);
+
+  // On the dev database, prod holds the same token family and SSO has just
+  // retired the token prod has — hand it the new one (see `db/devTokens.ts`).
+  try {
+    const prod = getProdMirrorDb();
+    if (prod) mirrorTokenToProd(prod, input);
+  } catch (err) {
+    console.error(
+      `[db] could not write character ${input.characterId}'s refreshed login through to the ` +
+        'production database; it will read "login expired" there:',
+      err,
+    );
+  }
 }
 
 /** Record that a character's refresh token was rejected by SSO (expired/revoked). */
@@ -67,6 +81,22 @@ export function getToken(characterId: number): StoredToken | null {
     accessToken: row.access_token,
     accessExpiresAt: row.access_expires_at,
   };
+}
+
+/** What decides each character's granted scopes, for every stored token in one query. */
+export function listTokenScopes(): Array<{
+  characterId: number;
+  scopes: string;
+  accessToken: string | null;
+}> {
+  const rows = getDb()
+    .prepare('SELECT character_id, scopes, access_token FROM tokens')
+    .all() as Array<{ character_id: number; scopes: string; access_token: string | null }>;
+  return rows.map((r) => ({
+    characterId: r.character_id,
+    scopes: r.scopes,
+    accessToken: r.access_token,
+  }));
 }
 
 export function updateAccessToken(

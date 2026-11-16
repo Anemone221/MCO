@@ -73,6 +73,33 @@ export function getQueue(characterId: number): QueueRow[] {
   }));
 }
 
+/**
+ * Every character's skill queue in one read, each in position order. The
+ * roster and the notification checks need all of them at once; one query
+ * grouped in JS replaces one per character.
+ */
+export function getAllQueues(): Map<number, QueueRow[]> {
+  const rows = getDb()
+    .prepare(
+      `SELECT character_id, position, skill_type_id, finish_level, start_date, finish_date
+       FROM skill_queue ORDER BY character_id, position`,
+    )
+    .all() as Array<QueueDbRow & { character_id: number }>;
+  const map = new Map<number, QueueRow[]>();
+  for (const r of rows) {
+    const list = map.get(r.character_id) ?? [];
+    list.push({
+      position: r.position,
+      skillTypeId: r.skill_type_id,
+      finishLevel: r.finish_level,
+      startDate: r.start_date,
+      finishDate: r.finish_date,
+    });
+    map.set(r.character_id, list);
+  }
+  return map;
+}
+
 /** SP one rank of a skill is worth when trained to level V (rank 1 = 256,000 SP). */
 const SP_PER_RANK_AT_V = spForLevel(1, 5);
 
@@ -119,6 +146,14 @@ export function getTotalSp(characterId: number): number {
     .prepare('SELECT COALESCE(SUM(sp), 0) AS total FROM character_skills WHERE character_id = ?')
     .get(characterId) as { total: number };
   return row.total;
+}
+
+/** Total SP of every character that has skills stored, in one query. Absent = 0. */
+export function getTotalSpByCharacter(): Map<number, number> {
+  const rows = getDb()
+    .prepare('SELECT character_id, SUM(sp) AS total FROM character_skills GROUP BY character_id')
+    .all() as Array<{ character_id: number; total: number }>;
+  return new Map(rows.map((r) => [r.character_id, r.total]));
 }
 
 /** Active level of one skill for one character (0 when not injected). */

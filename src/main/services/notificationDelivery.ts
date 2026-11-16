@@ -2,6 +2,7 @@ import { Notification, type BrowserWindow } from 'electron';
 import { IpcChannel } from '@shared/ipc';
 import { createNotification, markRead } from '../db/repositories/notifications';
 import { openWindow } from './backgroundMode';
+import { isNotificationKindEnabled } from './notificationPreferences';
 
 /** How a caller reaches the main window, which may not exist in tray-only mode. */
 export type GetWindow = () => BrowserWindow | null;
@@ -25,7 +26,8 @@ export interface PendingNotification {
 }
 
 /**
- * The delivery half of the notification pipeline: dedupe-keyed insert, one
+ * The delivery half of the notification pipeline: the per-kind switch from
+ * Settings (`notificationPreferences.ts`), dedupe-keyed insert, one
  * `notificationsChanged` ping, and an OS toast for each notification that was
  * actually new. Returns how many were delivered.
  *
@@ -40,9 +42,14 @@ export function deliverNotifications(
   pending: PendingNotification[],
   getWindow: GetWindow,
 ): number {
+  // A kind switched off in Settings is dropped here, before the insert: no row,
+  // so nothing in the bell either. Its occurrence stays unrecorded, which means
+  // one that is still current when the kind is switched back on is raised then.
+  const wanted = pending.filter((n) => isNotificationKindEnabled(n.kind));
+
   // A key already in the table means a previous sweep (or a previous run)
   // reported this occurrence: no row, no toast, no ping.
-  const created = pending.map(createNotification).filter((n) => n !== null);
+  const created = wanted.map(createNotification).filter((n) => n !== null);
   if (created.length === 0) return 0;
 
   // One ping for the batch, not one per notification: the bell reloads the whole

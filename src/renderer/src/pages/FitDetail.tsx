@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { FitCharacterResult } from '@shared/types';
 import { mco } from '../lib/ipc';
@@ -79,8 +79,25 @@ export default function FitDetail() {
     [fitId],
   );
 
+  // Set by Re-analyse: the next load pulls fresh skills from ESI first, so a
+  // skill trained since the last sweep counts. Fresh ESI cache entries are
+  // served locally, so repeat clicks cost nothing. Route changes skip the sync.
+  const syncFirst = useRef(false);
+  const [syncing, setSyncing] = useState(false);
+
   const { data, error, loading, reload, setData, setError } = useMcoData(
     async () => {
+      if (syncFirst.current) {
+        syncFirst.current = false;
+        setSyncing(true);
+        try {
+          // Per-character failures come back as results, never a throw: the
+          // analysis still runs on whatever was stored.
+          await mco.characters.syncAll();
+        } finally {
+          setSyncing(false);
+        }
+      }
       const [analysis, groups, tags] = await Promise.all([
         mco.fits.analyze(fitId),
         mco.groups.list(),
@@ -131,8 +148,17 @@ export default function FitDetail() {
           </Link>
           {analysis ? ` · ${analysis.fit.name}` : ''}
         </h2>
-        <button type="button" className="ghost" onClick={() => void reload()} disabled={loading}>
-          {loading ? 'Analysing…' : 'Re-analyse'}
+        <button
+          type="button"
+          className="ghost"
+          onClick={() => {
+            syncFirst.current = true;
+            void reload();
+          }}
+          disabled={loading}
+          title="Sync every character's skills from ESI, then re-run the analysis"
+        >
+          {syncing ? 'Syncing skills…' : loading ? 'Analysing…' : 'Re-analyse'}
         </button>
       </div>
 

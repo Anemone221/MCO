@@ -13,8 +13,7 @@ EVE Online players managing a large character roster. Start with
 | [features.md](features.md) | Every page and feature, plus the skill-requirement analysis engine shared by fits and plans |
 | [development.md](development.md) | Setup, npm scripts, environment variables, testing strategy, CI, packaging & the background-sync installer shortcut |
 | [code-style.md](code-style.md) | The conventions the codebase already follows: formatting, naming, the ESI/SQL⇄app boundary, layering, comments, testing, security posture |
-| [improvement-plan.md](improvement-plan.md) | Prioritized path to shippable `.exe`s (icon, signing, CI packaging) plus hardening and test-gap follow-ups |
-| [optimization.md](optimization.md) | Performance headroom for large rosters: N+1 read batching, prepared-statement hoisting, renderer code-splitting |
+| [Possible Improvements.md](../Possible%20Improvements.md) | The open-work list: scored improvements (bulk workflows, safety nets, performance, hardening) and which are done |
 
 The repo root's [CLAUDE.md](../CLAUDE.md) is the condensed operating manual (stack,
 invariants, organization model, UI conventions); these docs carry the detail.

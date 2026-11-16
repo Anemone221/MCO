@@ -60,6 +60,19 @@ esi-corporations.read_blueprints.v1
    token. An initial full sync is attempted right away (failure is fine — the scheduler
    retries).
 
+One sign-in at a time: the callback port is fixed by the app registration, so
+`startLogin` refuses a second while one is waiting. `cancelLogin()` ends the waiting
+one — it closes the listener (and any connection a browser tab left open on it) and
+rejects `startLogin` with `LoginCancelledError`. A login that already has its code is
+past cancelling and finishes.
+
+The UI reaches this through `services/loginService.ts`, never `startLogin` directly:
+`addCharacter` and `reauthorizeCharacter` turn a cancel into a `LoginResult` of
+`cancelled` rather than an error, and can defer the first sync so the next SSO page of a
+run opens without waiting on a dozen ESI requests. `reauthorizeCharacter` adds the
+opt-in scopes the character currently holds to the request (see below), because a new
+login replaces the whole token family.
+
 There is no "log in as user" concept — each character is its own token; an account is
 just a local grouping bucket (ESI never exposes account membership).
 
@@ -132,7 +145,7 @@ error message.
   [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts)).
 - **Invalidation**: a 4xx from the token endpoint means the refresh token is dead
   (expired/revoked/family invalidated). `markTokenInvalid` stamps `tokens.invalid_at`;
-  the UI surfaces this as a calm "login expired — re-add the character" state rather
+  the UI surfaces this as a calm "login expired — re-authorize it in Settings" state rather
   than an error. A later successful refresh clears the flag.
 
 ### Scope truth (`grantedScopes`)
@@ -152,8 +165,8 @@ may be missing, used by boards like Clones:
 | --- | --- |
 | `ok` | Data has synced. |
 | `pending` | Scopes granted, first sync hasn't happened yet. |
-| `scope-missing` | Token lacks required scope(s) — character must be re-added. |
-| `login-expired` | SSO rejected the refresh token — character must be re-added. |
+| `scope-missing` | Token lacks required scope(s) — the character must sign in again (Settings → Sync status → Re-authorize). |
+| `login-expired` | SSO rejected the refresh token — the character must sign in again (same place). |
 
 ## The HTTP client (`esi/client.ts`)
 
@@ -170,13 +183,16 @@ against ESI directly. `esiGet` provides:
   or refreshes it. On a `401` it refreshes once and retries.
 - **Versioning**: every request carries `X-Compatibility-Date: <ESI_COMPATIBILITY_DATE>`
   (the modern replacement for `/latest`-style path versioning).
-- **Throttle handling**: `420` (legacy error limit) **and** `429` (new floating-window
-  bucket) open a shared backoff — from the `Retry-After` header when present, else 60 s —
-  and retry on a *separate* budget (`MAX_THROTTLE_WAITS`) that does **not** consume the
+- **Throttle handling**: a `429` (floating-window bucket) blocks only that route group's
+  bucket for the requesting character; a `420` (legacy error limit, per IP) — or a `429`
+  on a route whose group is unknown — opens the app-wide backoff. Either waits for
+  `Retry-After` when present, else 60 s, and retries on a *separate* budget (`MAX_THROTTLE_WAITS`) that does **not** consume the
   transient-error retries. Being throttled isn't the request's fault, so waiting out a
   fleet-wide backoff must not fail the request.
-- **5xx / network / timeout**: linear backoff retry, up to `MAX_RETRIES` (3) total. Every
-  request has a 30 s `AbortController` timeout so a stalled socket can't pin a slot.
+- **5xx / network / timeout**: linear backoff retry, up to `MAX_RETRIES` (3) total. The
+  retry delay is slept *after* the concurrency slot is released, so a retrying request
+  doesn't hold a slot while it waits. Every request has a 30 s `AbortController` timeout
+  so a stalled socket can't pin a slot.
 
 ### Paginated routes (`esiGetPaged`)
 
@@ -211,12 +227,14 @@ ESI runs **two** limiters (see the [rate-limiting doc](https://developers.eveonl
 - **Legacy error limit** — at most ~100 non-2xx/3xx responses per rolling 60 s window,
   advertised via `X-ESI-Error-Limit-Remain` / `-Reset`. Exceeding it earns **420** for
   everyone from your IP. Only *errors* count — successful requests are free.
-- **Floating-window bucket** (rolling out per route) — a token bucket keyed by
-  `applicationID:characterID` (authed) or source IP (public). Costs are **2 tokens per
-  2xx**, 1 per 3xx, 5 per 4xx, 0 per 5xx; over budget returns **429** with `Retry-After`
-  and `X-Ratelimit-*` headers. Note that even *successful* requests spend tokens here.
+- **Floating-window bucket** (rolling out per route) — one token bucket per **route
+  group** and `applicationID:characterID` (authed) or source IP (public). Costs are
+  **2 tokens per 2xx**, 1 per 3xx, 5 per 4xx, 0 per 5xx; over budget returns **429** with
+  `Retry-After`. Every response on such a route carries `X-Ratelimit-Group`,
+  `X-Ratelimit-Limit` (e.g. `150/15m`), `X-Ratelimit-Remaining` and `X-Ratelimit-Used`.
+  Note that even *successful* requests spend tokens here.
 
-The singleton `RateLimiter` applies three cooperating controls:
+The singleton `RateLimiter` applies four cooperating controls:
 
 - **Concurrency cap** — at most **20** (`DEFAULT_MAX_CONCURRENCY`) requests in flight; a
   ceiling on burst width.
@@ -227,13 +245,44 @@ The singleton `RateLimiter` applies three cooperating controls:
   the "offset requests" behaviour a large fleet needs.
 - **Backoff window** — `observe()` pauses everyone when the error-limit `remain` drops to
   **10 or below** (`ERROR_LIMIT_FLOOR`); `forceBackoff` / `backoffFromHeaders` open a
-  window on an actual 420/429 (honouring `Retry-After`). Backoff only ever extends, and is
-  honoured by the pacer before any dispatch.
+  window on an actual 420, or a 429 with no known route group (honouring `Retry-After`).
+  Backoff only ever extends, and is honoured by the pacer before any dispatch.
+- **Route buckets** — `observeRoute()` reads the `X-Ratelimit-*` headers, learns which
+  group each route belongs to (keyed by `routePattern`, the path with ids and query
+  stripped) and tracks each `group|character` bucket's remaining tokens. Once a bucket
+  is at or below 10 % of its limit (never fewer than 4 tokens), requests to *that bucket
+  only* are spaced at its sustainable rate — `window × 2 / tokens`, one request per 12 s
+  for `150/15m` — which is ESI's "start to slow down as Remaining approaches zero". A
+  reading older than a full window counts as refilled. A 429 sets `blockRoute()`, which
+  holds just that bucket for `Retry-After`; other characters and other routes keep
+  going. The bucket wait happens *before* a concurrency slot is taken, so a held-back
+  request doesn't occupy a slot. The transition to low is logged once as a `backoff`
+  event in the ESI activity log.
 
 Sweeps also **wave**: `syncCharacterList` processes characters in jittered batches of 8
 (`SWEEP_WAVE_SIZE` in `services/characterSync.ts`) rather than one fleet-wide
 `Promise.allSettled`, so any errors spread across the sweep instead of concentrating the
 whole error budget into one minute.
+
+## Connectivity (`esi/connectivity.ts`)
+
+Whether *background* work should go to the network at all. Nothing here blocks a
+request — a sync the user clicks still runs — but the hourly sweep, live tracking and
+the waves of a fleet sync ask the gate before starting, so a laptop that is offline
+stays quiet instead of spending every character's retry budget and filling the log with
+"sync failed". Two signals close it:
+
+- **The OS's view** — Electron's `net.isOnline()`, injected by the scheduler. False means
+  no route to anything.
+- **A run of failures with no response between them** — `esiGet` reports every network
+  error or timeout (`noteNetworkFailure`) and every response of any status
+  (`noteResponse`). Eight consecutive failures (`PAUSE_AFTER_FAILURES`, two requests'
+  worth of retries) pause background work for five minutes (`PAUSE_MS`); the first
+  response — a 403 included — clears it. This catches the network the OS thinks is up
+  but that leads nowhere: a captive portal, a dropped VPN.
+
+The gate logs once per change of state, not once per tick, and its state shows in
+Settings → Background sync ("offline, waiting for the network" / "paused until …").
 
 ## ESI diagnostics log (`esi/esiLog.ts`)
 
@@ -285,7 +334,7 @@ Thin, typed wrappers — one function per route, no logic:
 | `getPlanet` | `/universe/planets/{id}` | public |
 | `getCorporationBlueprints` | `/corporations/{id}/blueprints` | scoped **+ Director role** (403 otherwise), paginated |
 | `getCorporationPublic` | `/corporations/{id}` | public |
-| `getStation` | `/universe/stations/{id}` | public |
+| `getStation` | `/universe/stations/{id}` | public; read through `esiGetImmutable` — any stored response serves, whatever its age, since a station's name doesn't change |
 | `getPublicStructureIds` | `/universe/structures` | public |
 | `getStructure` | `/universe/structures/{id}` | scoped + on the structure's ACL (403 otherwise) |
 | `getServerStatus` | `/status/` | public |
@@ -394,6 +443,7 @@ copy, a positive number a stack of copies. Only originals tick the checklist.
 
 Adding a scope to `ESI_SCOPES` only affects **newly added** characters. Existing tokens
 keep their original grant — sync skips the new call for them (`hasGrantedScope`) and the
-relevant board shows `scope-missing` with the exact missing scopes until the user re-adds
-the character. Also update the app registration at developers.eveonline.com to include
+relevant board shows `scope-missing` with the exact missing scopes until the character
+signs in again. Settings → Sync status lists every such character and steps through them
+in one run (see [features.md](features.md#settings-settings-pagessettingstsx)). Also update the app registration at developers.eveonline.com to include
 the new scope, or SSO will refuse the authorize request.

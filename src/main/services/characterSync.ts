@@ -2,11 +2,11 @@ import type {
   CharacterSummary,
   RosterEntry,
   SkillQueueEntry,
+  SyncProgress,
   SyncResult,
   TrainingStatus,
 } from '@shared/types';
 import {
-  ESI_BASE_URL,
   SCOPE_READ_ACTIVITIES,
   SCOPE_READ_BLUEPRINTS,
   SCOPE_READ_CHARACTER_STRUCTURES,
@@ -18,8 +18,10 @@ import {
   SCOPE_READ_WALLET,
 } from '../config';
 import { grantedScopes } from '../auth/token-store';
+import { connectivity } from '../esi/connectivity';
 import { recordEvent } from '../esi/esiLog';
 import {
+  skillsCacheUrl,
   getCharacterAttributes,
   getCharacterClones,
   getCharacterFatigue,
@@ -60,11 +62,12 @@ import { listCharacterWallets, upsertCharacterWallet } from '../db/repositories/
 import { upsertCharacterOnline } from '../db/repositories/characterOnline';
 import { isTrackedRefType, upsertJournalEntries } from '../db/repositories/characterWalletJournal';
 import { upsertMiningEntries } from '../db/repositories/characterMining';
-import { getCached, isFresh } from '../db/repositories/esiCache';
+import { getCached, getCachedMany, isFresh } from '../db/repositories/esiCache';
 import {
   getActiveSkillLevels,
+  getAllQueues,
   getQueue,
-  getTotalSp,
+  getTotalSpByCharacter,
   replaceQueue,
   replaceSkills,
   type QueueRow,
@@ -440,6 +443,18 @@ const SWEEP_WAVE_JITTER_MS = 400;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * Where a multi-character sync reports how far it has got. One listener, set
+ * by the IPC layer, which forwards it to the window: a full fleet takes
+ * minutes, and without this the only sign of life is a button that says
+ * "Syncing…".
+ */
+let syncProgressListener: ((progress: SyncProgress) => void) | null = null;
+
+export function setSyncProgressListener(listener: (progress: SyncProgress) => void): void {
+  syncProgressListener = listener;
+}
+
+/**
  * Sync a list of characters in small waves. Failures are captured per-character,
  * never aborting the batch. Firing all 90+ characters at once dumped ~1k requests
  * into ESI in a single burst — enough transient errors landing inside one 60 s
@@ -451,6 +466,7 @@ async function syncCharacterList(characters: CharacterSummary[]): Promise<SyncRe
   if (characters.length === 0) return [];
   recordEvent({ kind: 'sweep', detail: `start: ${characters.length} character(s)` });
   const results: SyncResult[] = [];
+  syncProgressListener?.({ done: 0, total: characters.length });
   for (let start = 0; start < characters.length; start += SWEEP_WAVE_SIZE) {
     const wave = characters.slice(start, start + SWEEP_WAVE_SIZE);
     const settled = await Promise.allSettled(
@@ -467,7 +483,22 @@ async function syncCharacterList(characters: CharacterSummary[]): Promise<SyncRe
           : { characterId, ok: false, error: String(outcome.reason) },
       );
     });
+    syncProgressListener?.({ done: results.length, total: characters.length });
     if (start + SWEEP_WAVE_SIZE < characters.length) {
+      // A wave that found no network is the signal to stop, not to send the
+      // next 80 characters down the same hole: their cache is still expired,
+      // so they are still due at the next sweep.
+      const blocked = connectivity.blockedReason();
+      if (blocked !== null) {
+        const rest = characters.slice(start + SWEEP_WAVE_SIZE);
+        for (const c of rest) {
+          results.push({ characterId: c.id, ok: false, error: `skipped: network ${blocked}` });
+        }
+        console.warn(`[sync] network ${blocked}; ${rest.length} character(s) left for the next sweep`);
+        recordEvent({ kind: 'sweep', detail: `cut short: network ${blocked}, ${rest.length} skipped` });
+        syncProgressListener?.({ done: results.length, total: characters.length });
+        break;
+      }
       await sleep(Math.random() * SWEEP_WAVE_JITTER_MS);
     }
   }
@@ -482,34 +513,58 @@ export function syncAllCharacters(): Promise<SyncResult[]> {
 }
 
 /**
+ * Sync a chosen set of characters — the Roster's "Sync selected". Same waves
+ * and progress reporting as a full sweep; ids MCO does not track are skipped.
+ */
+export function syncCharacters(characterIds: number[]): Promise<SyncResult[]> {
+  const wanted = new Set(characterIds);
+  return syncCharacterList(listCharacters().filter((c) => wanted.has(c.id)));
+}
+
+/**
  * A character is "due" once its cached skills data has expired. ESI sets the
  * cache window via the Expires header, so this tracks each character's own
  * per-endpoint cache window rather than a fixed clock.
  */
 export function isCharacterDue(characterId: number): boolean {
-  const skillsUrl = `${ESI_BASE_URL}/characters/${characterId}/skills`;
-  return !isFresh(getCached(skillsUrl));
+  return !isFresh(getCached(skillsCacheUrl(characterId)));
 }
 
 /** Sync only the characters whose ESI cache window has elapsed. */
 export function syncDueCharacters(): Promise<SyncResult[]> {
-  return syncCharacterList(listCharacters().filter((c) => isCharacterDue(c.id)));
+  const characters = listCharacters();
+  const cached = getCachedMany(characters.map((c) => skillsCacheUrl(c.id)));
+  return syncCharacterList(
+    characters.filter((c) => !isFresh(cached.get(skillsCacheUrl(c.id)) ?? null)),
+  );
 }
 
 /** Derive the currently-training skill from a character's stored skill queue. */
 export function getTrainingStatus(characterId: number): TrainingStatus {
-  return trainingStatusFromQueue(pendingQueue(getQueue(characterId)));
+  const queue = pendingQueue(getQueue(characterId));
+  const head = trainingHead(queue);
+  return trainingStatusFromQueue(queue, head ? getTypeNames([head.skillTypeId]) : new Map());
 }
 
 /**
- * Same as {@link getTrainingStatus} for a queue the caller already loaded.
- * Expects a {@link pendingQueue} — finished entries must already be gone, or
- * the head is a completed skill and the character reads as idle. A head with no
+ * The queue entry a character is training now, or null when idle. Expects a
+ * {@link pendingQueue} — finished entries must already be gone, or the head is
+ * a completed skill and the character reads as training it. A head with no
  * finish date means the queue is paused: skills are lined up, none is training.
  */
-function trainingStatusFromQueue(queue: QueueRow[]): TrainingStatus {
+function trainingHead(queue: QueueRow[]): QueueRow | null {
   const head = queue[0];
-  if (!head || !head.finishDate) {
+  return head?.finishDate ? head : null;
+}
+
+/**
+ * Same as {@link getTrainingStatus} for a queue the caller already loaded,
+ * with the skill names already looked up — so a roster of 90 resolves its
+ * training names in one SDE query rather than one per character.
+ */
+function trainingStatusFromQueue(queue: QueueRow[], names: Map<number, string>): TrainingStatus {
+  const head = trainingHead(queue);
+  if (!head) {
     return {
       isTraining: false,
       currentSkillTypeId: null,
@@ -518,13 +573,12 @@ function trainingStatusFromQueue(queue: QueueRow[]): TrainingStatus {
       finishDate: null,
     };
   }
-  const name = getTypeNames([head.skillTypeId]).get(head.skillTypeId) ?? null;
   return {
     isTraining: true,
     currentSkillTypeId: head.skillTypeId,
-    currentSkillName: name,
+    currentSkillName: names.get(head.skillTypeId) ?? null,
     currentFinishLevel: head.finishLevel,
-    finishDate: head.finishDate,
+    finishDate: head.finishDate!,
   };
 }
 
@@ -546,31 +600,48 @@ export function getSkillQueue(characterId: number): SkillQueueEntry[] {
  * Build the roster view: every character with account label, total SP, training
  * and skill-queue status, and its last-known location system and ship
  * (name-resolved via the SDE).
+ *
+ * A fixed number of queries whatever the roster size: every per-character
+ * table is read once and joined in JS. This runs on every `characters:changed`
+ * event — after each sweep and each live-tracking change — so it is the read
+ * path that scales with roster size times event rate.
  */
 export function buildRoster(): RosterEntry[] {
+  const characters = listCharacters();
   const accounts = new Map(listAccounts().map((a) => [a.id, a.label]));
   const locations = new Map(listCharacterLocations().map((l) => [l.characterId, l]));
   const fatigue = new Map(listCharacterFatigue().map((f) => [f.characterId, f]));
   const wallets = new Map(listCharacterWallets().map((w) => [w.characterId, w.balance]));
   const cloneMeta = getAllCloneMeta();
+  const totalSp = getTotalSpByCharacter();
   const infomorphLevels = getActiveSkillLevels(INFOMORPH_SYNCHRONIZING_TYPE_ID);
   const values = [...locations.values()];
   const systems = getSystems(distinct(values.map((l) => l.solarSystemId)));
   const shipNames = getTypeNames(distinct(values.map((l) => l.shipTypeId)));
 
-  return listCharacters().map((character) => {
+  // One queue read feeds the training status and the queue totals of everyone,
+  // and one name lookup covers every skill in training.
+  const now = Date.now();
+  const allQueues = getAllQueues();
+  const queues = new Map(
+    characters.map((c) => [c.id, pendingQueue(allQueues.get(c.id) ?? [], now)]),
+  );
+  const trainingNames = getTypeNames(
+    distinct([...queues.values()].map((queue) => trainingHead(queue)?.skillTypeId ?? null)),
+  );
+
+  return characters.map((character) => {
     const loc = locations.get(character.id);
     const system = loc?.solarSystemId != null ? systems.get(loc.solarSystemId) : undefined;
     const fat = fatigue.get(character.id);
     const clones = cloneMeta.get(character.id);
-    // One queue read feeds both the training status and the queue totals.
-    const queue = pendingQueue(getQueue(character.id));
+    const queue = queues.get(character.id) ?? [];
     return {
       character,
       accountLabel:
         character.accountId !== null ? (accounts.get(character.accountId) ?? null) : null,
-      totalSp: getTotalSp(character.id),
-      training: trainingStatusFromQueue(queue),
+      totalSp: totalSp.get(character.id) ?? 0,
+      training: trainingStatusFromQueue(queue, trainingNames),
       queueLength: queue.length,
       queueEndDate: queue.length > 0 ? (queue[queue.length - 1]!.finishDate ?? null) : null,
       systemName: system?.name ?? null,

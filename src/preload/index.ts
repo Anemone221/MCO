@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import { IpcChannel, type IpcChannelName, type McoApi } from '@shared/ipc';
 import { cleanIpcErrorMessage } from '@shared/ipcError';
-import type { SdeProgress, StructureImportProgress } from '@shared/types';
+import type { SdeProgress, StructureImportProgress, SyncProgress } from '@shared/types';
 
 /**
  * Every request/response call goes through here, so a handler that rejected
@@ -53,12 +53,17 @@ const api: McoApi = {
   characters: {
     roster: call(IpcChannel.charactersRoster),
     add: call(IpcChannel.charactersAdd),
+    reauthorize: call(IpcChannel.charactersReauthorize),
+    cancelLogin: call(IpcChannel.charactersCancelLogin),
     remove: call(IpcChannel.charactersRemove),
     sync: call(IpcChannel.charactersSync),
     syncAll: call(IpcChannel.charactersSyncAll),
+    syncMany: call(IpcChannel.charactersSyncMany),
     assignAccount: call(IpcChannel.charactersAssignAccount),
+    assignAccounts: call(IpcChannel.charactersAssignAccounts),
     detail: call(IpcChannel.charactersDetail),
     onChanged: subscribe(IpcChannel.charactersChanged),
+    onSyncProgress: subscribe<SyncProgress>(IpcChannel.charactersSyncProgress),
   },
   accounts: {
     list: call(IpcChannel.accountsList),
@@ -82,6 +87,8 @@ const api: McoApi = {
     remove: call(IpcChannel.groupsRemove),
     addMember: call(IpcChannel.groupsAddMember),
     removeMember: call(IpcChannel.groupsRemoveMember),
+    addMembers: call(IpcChannel.groupsAddMembers),
+    removeMembers: call(IpcChannel.groupsRemoveMembers),
   },
   tags: {
     list: call(IpcChannel.tagsList),
@@ -92,6 +99,7 @@ const api: McoApi = {
     addMember: call(IpcChannel.tagsAddMember),
     addMembers: call(IpcChannel.tagsAddMembers),
     removeMember: call(IpcChannel.tagsRemoveMember),
+    removeMembers: call(IpcChannel.tagsRemoveMembers),
   },
   sde: {
     status: call(IpcChannel.sdeStatus),
@@ -161,6 +169,8 @@ const api: McoApi = {
     markAllRead: call(IpcChannel.notificationsMarkAllRead),
     dismiss: call(IpcChannel.notificationsDismiss),
     dismissAll: call(IpcChannel.notificationsDismissAll),
+    preferences: call(IpcChannel.notificationsPreferences),
+    setPreference: call(IpcChannel.notificationsSetPreference),
     onChanged: subscribe(IpcChannel.notificationsChanged),
   },
   system: {
@@ -180,6 +190,8 @@ const api: McoApi = {
     esiActivity: call(IpcChannel.settingsEsiActivity),
     exportLogs: call(IpcChannel.settingsExportLogs),
     exportBackup: call(IpcChannel.settingsExportBackup),
+    backups: call(IpcChannel.settingsBackups),
+    restoreBackup: call(IpcChannel.settingsRestoreBackup),
     openDataFolder: call(IpcChannel.settingsOpenDataFolder),
     backgroundMode: call(IpcChannel.settingsBackgroundMode),
     setCloseToTray: call(IpcChannel.settingsSetCloseToTray),

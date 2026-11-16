@@ -1,4 +1,5 @@
-import { esiGet, esiGetPaged } from './client';
+import { ESI_BASE_URL } from '../config';
+import { esiGet, esiGetImmutable, esiGetPaged } from './client';
 import type { PagingOptions } from './paging';
 
 export interface EsiCharacterPublic {
@@ -46,8 +47,19 @@ export function getCharacterPublic(characterId: number): Promise<EsiCharacterPub
   return esiGet<EsiCharacterPublic>(`/characters/${characterId}`);
 }
 
+const skillsPath = (characterId: number): string => `/characters/${characterId}/skills`;
+
+/**
+ * The `esi_cache` key of a character's skills response. The sweep's "is this
+ * character due" check and the Settings sync table both read the cache entry
+ * this route writes, and the three must agree to the character: if a hand-built
+ * copy of the path drifted, every character would be due every hour, silently.
+ */
+export const skillsCacheUrl = (characterId: number): string =>
+  `${ESI_BASE_URL}${skillsPath(characterId)}`;
+
 export function getCharacterSkills(characterId: number): Promise<EsiSkills> {
-  return esiGet<EsiSkills>(`/characters/${characterId}/skills`, { characterId });
+  return esiGet<EsiSkills>(skillsPath(characterId), { characterId });
 }
 
 export function getCharacterSkillQueue(characterId: number): Promise<EsiSkillQueueItem[]> {
@@ -245,8 +257,9 @@ export interface EsiStation {
 }
 
 /** Public NPC-station info — no authorization required. */
+/** NPC stations never move or rename, so any stored response serves (see `esiGetImmutable`). */
 export function getStation(stationId: number): Promise<EsiStation> {
-  return esiGet<EsiStation>(`/universe/stations/${stationId}`);
+  return esiGetImmutable<EsiStation>(`/universe/stations/${stationId}`);
 }
 
 /**

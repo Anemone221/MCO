@@ -30,6 +30,7 @@
     "playwright.config.ts",
     "playwright.packaged.config.ts",
     "vitest.config.ts",
+    "vitest.db.config.ts",
     "tests/**/*"
   ],
   "exclude": ["tests/unit/renderer/**"]

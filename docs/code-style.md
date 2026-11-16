@@ -39,7 +39,7 @@ shared) and `tsconfig.web.json` (renderer + shared). `npm run typecheck` runs bo
 
 ## 2. Naming
 
-- **Files:** `camelCase.ts` for modules (`characterSync.ts`, `rateLimiter.ts`),
+- **Files:** `camelCase.ts` for modules (`characterSync.ts`, `queueDrain.ts`),
   `PascalCase.tsx` for React components (`Roster.tsx`, `CharacterAvatar.tsx`). Hooks are
   `useX.ts` (`useAmChart.ts`, `useCountUp.ts`).
 - **Types/interfaces:** `PascalCase`, no `I` prefix (`RosterEntry`, `EsiDataStatus`).
@@ -123,7 +123,7 @@ Good comment shapes seen throughout:
 
 JSDoc `/** … */` on every exported function/type; short `//` notes inline for the tricky
 step. If a number is tuned, a comment says what it's tuned against. Leave a `TODO:` only
-with a concrete follow-up (there is exactly one in the tree — the JWT-signature note).
+with a concrete follow-up (there are none in the tree today).
 
 ---
 
@@ -216,14 +216,19 @@ Rules that keep this intact:
   `costView.ts`). Pages `useMemo` over those pure functions.
 - **Import `mco` from `lib/ipc.ts`, not `window.mco`.** The `lib/ipc` wrapper applies the
   demo-mode scrub; a page that reaches for `window.mco` bypasses it.
-- **Subscribe + reload for background updates.** The `onChanged`/`onProgress` channels
-  return an unsubscribe function; call it from the `useEffect` cleanup. Pattern:
+- **Load through `useMcoData`** (`lib/useMcoData.ts`), never a hand-rolled
+  `useState`/`useEffect`/try-catch. It owns data/error/loading, `errorMessage()`, the
+  optional reload on `characters:changed`, and discarding superseded requests:
   ```ts
-  useEffect(() => {
-    void load().catch((e: unknown) => setError(String(e)));
-    return mco.characters.onChanged(() => void load().catch(…));
-  }, [load]);
+  const { data, error, loading, reload } = useMcoData(
+    () => mco.dashboard.summary(),
+    { onCharactersChanged: true },
+  );
   ```
+  A component that *streams* (`NotificationBell`, `SdeBanner`, `ActivityIndicator`)
+  subscribes itself; the `onChanged`/`onProgress` channels return an unsubscribe
+  function — call it from the `useEffect` cleanup. Format a caught error with
+  `errorMessage(e)`, never `String(e)`.
 - **One `busy` string, one `error` string** per page for action state (`busy === 'add'`),
   rather than a boolean per button. Disable actions while `busy !== null`.
 - **Never `window.confirm`.** Use `mco.system.confirm` — the synchronous native dialog
@@ -242,10 +247,13 @@ Rules that keep this intact:
 ## 10. Testing conventions
 
 - **Unit tests target pure modules only** — no Electron, no SQLite. That's why parsers,
-  analysis, view logic, and formatting live in dependency-free files. 262 tests currently
-  run in ~1s because nothing boots a runtime.
-- **Test the logic, mock nothing.** If a test would need to mock the DB or ESI, the logic
-  under test is in the wrong layer — extract it to a pure module first.
+  analysis, view logic, and formatting live in dependency-free files. About 800 tests
+  run in a few seconds because nothing boots a runtime.
+- **Test the logic, mock nothing.** If a unit test would need to mock the DB or ESI, the
+  logic under test is in the wrong layer — extract it to a pure module first.
+- **SQL, sync tasks, migrations and the login flow are tested in `tests/db/`**
+  (`npm run test:db`) against real SQLite, with only Electron and the network stood in
+  (`tests/db/support/`). Changing a query or a sync task means a test there.
 - **E2E (Playwright `_electron`)** drives the real packaged-ish app against a throwaway
   profile for flows that cross the whole stack.
 - Name tests after the module (`rosterView.test.ts` ↔ `rosterView.ts`).
@@ -257,7 +265,10 @@ Rules that keep this intact:
 - `BrowserWindow` uses `sandbox: true`, `contextIsolation: true`, `nodeIntegration:
   false`. Never relax these.
 - `setWindowOpenHandler` denies in-app navigation and routes external URLs to the OS
-  browser. New link behavior goes through `shell.openExternal`.
+  browser. New link behavior goes through `shell.openExternal`. What may be opened or
+  navigated to is decided by the pure predicates in `main/webSecurity.ts`
+  (unit-tested); `will-navigate` is blocked for anything but the app's own document,
+  and every renderer permission request is refused.
 - OAuth is PKCE (public client_id, no secret); `state` is validated on the loopback
   callback; refresh tokens are encrypted at rest via `safeStorage`.
 - One process per profile (single-instance lock) — required for token-family safety.
@@ -276,4 +287,5 @@ Rules that keep this intact:
 - [ ] Nullable/absent fields documented with what absent means; reused `EsiDataStatus`
       where the reason matters.
 - [ ] Renderer imports `mco` from `lib/ipc`, uses `data-testid`, no `window.confirm`.
-- [ ] `npm run typecheck && npm run lint && npm run test:unit` green.
+- [ ] `npm run typecheck && npm run lint && npm run test:unit` green — plus
+      `npm run test:db` when SQL, a sync task or a migration changed.

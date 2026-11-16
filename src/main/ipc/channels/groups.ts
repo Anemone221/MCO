@@ -3,12 +3,14 @@ import {
   addGroupPodIgnore,
   addGroupPodSystem,
   addMember,
+  addMembers,
   createGroup,
   listGroups,
   removeGroup,
   removeGroupPodIgnore,
   removeGroupPodSystem,
   removeMember,
+  removeMembers,
   renameGroup,
   setGroupHomeStation,
   setGroupPriorityFit,
@@ -55,6 +57,12 @@ export function registerGroupChannels(): void {
   handle(IpcChannel.groupsRemove, (_event, id: number) => removeGroup(id));
   handle(IpcChannel.groupsAddMember, (_event, groupId: number, characterId: number) =>
     addMember(groupId, characterId),
+  );
+  handle(IpcChannel.groupsAddMembers, (_event, groupId: number, characterIds: number[]) =>
+    addMembers(groupId, characterIds),
+  );
+  handle(IpcChannel.groupsRemoveMembers, (_event, groupId: number, characterIds: number[]) =>
+    removeMembers(groupId, characterIds),
   );
   handle(IpcChannel.groupsRemoveMember, (_event, groupId: number, characterId: number) =>
     removeMember(groupId, characterId),

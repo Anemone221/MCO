@@ -26,6 +26,7 @@ import CharacterAvatar from '../components/CharacterAvatar';
 import StatTile from '../components/StatTile';
 import TypeIcon from '../components/TypeIcon';
 import { useCharacterContextMenu } from '../components/useCharacterContextMenu';
+import SortHeader from '../components/SortHeader';
 
 /**
  * How far back the page looks. Day-grained, because the ledger is: ESI reports
@@ -266,24 +267,15 @@ export default function Mining() {
               <thead>
                 <tr>
                   {columns.map((col) => (
-                    <th
+                    <SortHeader
                       key={col.key}
-                      className={col.numeric ? 'sortable num' : 'sortable'}
+                      label={col.label}
+                      active={sort.key === col.key}
+                      dir={sort.dir}
+                      numeric={col.numeric}
                       title={col.title}
-                      aria-sort={
-                        sort.key === col.key
-                          ? sort.dir === 'asc'
-                            ? 'ascending'
-                            : 'descending'
-                          : undefined
-                      }
-                      onClick={() => setSort((prev) => nextMiningSort(prev, col.key))}
-                    >
-                      {col.label}
-                      {sort.key === col.key && (
-                        <span className="sort-arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>
-                      )}
-                    </th>
+                      onSort={() => setSort((prev) => nextMiningSort(prev, col.key))}
+                    />
                   ))}
                 </tr>
               </thead>
@@ -404,13 +396,13 @@ function MiningNotices({ summary }: { summary: MiningSummary }) {
           {scopeGap.length === total ? (
             <>
               No character can report mining yet. The mining ledger needs a scope added after
-              these characters were, so each one has to be re-added once (Roster → Add
-              character, same character) to grant it.
+              these characters signed in, so each one has to sign in once more to grant it —
+              Settings → Sync status steps through them all.
             </>
           ) : (
             <>
               {scopeGap.length} of {total} characters lack the mining scope, so their mining is
-              missing here — re-add each one to grant it:{' '}
+              missing here — re-authorize them in Settings to grant it:{' '}
               {scopeGap.slice(0, 8).map((c, index) => (
                 <span key={c.characterId}>
                   {index > 0 && ', '}
@@ -426,7 +418,7 @@ function MiningNotices({ summary }: { summary: MiningSummary }) {
       {expired.length > 0 && (
         <div className="creator-notice" data-testid="mining-expired-notice">
           {expired.length} character{expired.length === 1 ? "'s" : "s'"} login has expired, so
-          their mining stopped updating — re-add them to resume.
+          their mining stopped updating — re-authorize them in Settings to resume.
         </div>
       )}
 

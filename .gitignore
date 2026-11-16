@@ -20,3 +20,4 @@ mco-crash-*.txt
 playwright-report
 test-results
 coverage
+CHANGELOG.md

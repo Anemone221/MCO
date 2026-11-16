@@ -176,6 +176,12 @@ export interface CharacterDetail {
   skillGroups: SkillGroupSp[];
   location: { solarSystemId: number; solarSystemName: string | null } | null;
   ship: { typeId: number; typeName: string | null; name: string } | null;
+  /**
+   * When `location` and `ship` were last stored (by sync, or by live tracking
+   * every 20 s while the character is online); null if never.
+   */
+  locationUpdatedAt: string | null;
+  /** Active-clone implants as of the last sync. */
   implants: ImplantInfo[];
   /** The active clone (`implants`) is wearing a critical implant set. */
   implantsCritical: boolean;
@@ -397,6 +403,28 @@ export interface NearestBoard {
    * one there is.
    */
   unmeasuredClones: number;
+}
+
+/**
+ * How a sign-in started from the UI ended. Cancelling one is an outcome, not
+ * an error: the user pressed Cancel, Done or Skip, and nothing needs reporting.
+ */
+export type LoginResult =
+  | {
+      outcome: 'signed-in';
+      /**
+       * Whoever signed in on CCP's page — SSO picks the character, so after a
+       * re-authorization this is not necessarily the one that was asked for.
+       */
+      character: CharacterSummary;
+    }
+  | { outcome: 'cancelled' };
+
+/** How far a multi-character sync has got, pushed as each wave of it lands. */
+export interface SyncProgress {
+  /** Characters finished so far, whether they synced or failed. */
+  done: number;
+  total: number;
 }
 
 export interface SyncResult {
@@ -706,6 +734,20 @@ export interface PodIgnoredEntry {
   ignoredAt: string;
 }
 
+/** One snapshot of the database that MCO took on its own. */
+export interface BackupInfo {
+  /** File name inside the profile's `backups` folder; what a restore is asked for by. */
+  fileName: string;
+  /**
+   * Why it was taken: `auto` is the weekly snapshot, `pre-migration` the copy
+   * made before an update changed the schema, `before-restore` the database a
+   * restore replaced (so a restore can itself be undone).
+   */
+  kind: 'auto' | 'pre-migration' | 'before-restore';
+  createdAt: string;
+  sizeBytes: number;
+}
+
 export interface AppNotification {
   id: number;
   kind: string;
@@ -893,6 +935,13 @@ export interface SyncStatusReport {
     lastSweepAt: string | null;
     /** Estimated next hourly sweep. */
     nextSweepAt: string | null;
+    /**
+     * Why background work is waiting: the OS reports no network, or a run of
+     * requests got no response and the loops are pausing. Null when it is not.
+     */
+    network: 'offline' | 'paused' | null;
+    /** When a `paused` pause ends; null otherwise. */
+    networkPausedUntil: string | null;
   };
   sde: SdeStatus;
   structures: { total: number; resolved: number };

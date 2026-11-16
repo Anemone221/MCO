@@ -3,8 +3,27 @@ import {
   type NeuralAttributes,
   type SkillTrainingAttributes,
 } from '../fits/cost';
-import { getSkillAttributes } from '../db/repositories/sde';
+import { spForLevel } from '../fits/analyze';
+import { getSkillAttributes, getSkillRanks } from '../db/repositories/sde';
 import { getCharacterAttributesRow } from '../db/repositories/characterAttributes';
+import { getCharacterSkillMap, getQueue } from '../db/repositories/skills';
+import { withFinishedQueue, type TrainedSkill } from '../skills/queue';
+
+/**
+ * A character's trained skills as the in-game client sees them: the stored
+ * `/skills` snapshot plus every queue entry that has since finished (see
+ * {@link withFinishedQueue}). Fit and plan analysis read this, never the raw
+ * snapshot, so a skill that finished between syncs counts as trained.
+ */
+export function getEffectiveSkillMap(characterId: number): Map<number, TrainedSkill> {
+  const skills = getCharacterSkillMap(characterId);
+  const queue = getQueue(characterId);
+  if (queue.length === 0) return skills;
+  const ranks = getSkillRanks([...new Set(queue.map((q) => q.skillTypeId))]);
+  return withFinishedQueue(skills, queue, (id, level) =>
+    spForLevel(ranks.get(id) ?? 1, level),
+  );
+}
 
 /**
  * Training attributes for the given skills, keyed by skill type id. Skills the

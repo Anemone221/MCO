@@ -34,7 +34,7 @@ import {
   draftIssues,
   draftText,
   draftTotals,
-  dropEntry,
+  dropEntries,
   entryAttributes,
   entryKey,
   entrySpCosts,
@@ -44,6 +44,7 @@ import {
   groupSkills,
   ISSUE_LABEL,
   lowerSkill,
+  magic14Requirements,
   MAX_LEVEL,
   mergeSkills,
   moveEntry,
@@ -55,6 +56,7 @@ import {
   removeEntry,
   removeFromLevel,
   setRemap,
+  shiftEntries,
   sortByPrereqs,
   type SkillGroup,
   type SkillMap,
@@ -403,16 +405,85 @@ function BrowserSkill({
   );
 }
 
+/**
+ * "Magic 14" button: opens a small menu of levels I–V; picking one adds every
+ * Magic 14 skill up to that level. Closes on outside click or Escape, like the
+ * Roster's column picker.
+ */
+function Magic14Picker({
+  disabled,
+  onAdd,
+}: {
+  disabled: boolean;
+  onAdd: (level: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: MouseEvent): void {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', onPointerDown, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="column-picker magic14-picker" ref={ref}>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Add the Magic 14 core skills to a chosen level"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="open-magic14"
+      >
+        Magic 14 ▾
+      </button>
+      {open && (
+        <div className="column-picker__panel" role="menu">
+          {Array.from({ length: MAX_LEVEL }, (_, i) => i + 1).map((level) => (
+            <button
+              key={level}
+              type="button"
+              role="menuitem"
+              className="context-menu__item context-menu__item--button"
+              onClick={() => {
+                setOpen(false);
+                onAdd(level);
+              }}
+              data-testid={`magic14-level-${level}`}
+            >
+              All to {romanLevel(level)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Pull a whole fit's skill requirements in — either a saved one or pasted EFT. */
 function FitImporter({
   fits,
   disabled,
+  onAddMagic14,
   onOpenShips,
   onAddFit,
   onAddEft,
 }: {
   fits: Fit[];
   disabled: boolean;
+  onAddMagic14: (level: number) => void;
   onOpenShips: () => void;
   onAddFit: (fitId: number) => void;
   onAddEft: (eftText: string) => void;
@@ -424,6 +495,7 @@ function FitImporter({
   return (
     <div className="creator-source">
       <div className="toolbar__actions">
+        <Magic14Picker disabled={disabled} onAdd={onAddMagic14} />
         <button
           type="button"
           disabled={disabled}
@@ -519,6 +591,13 @@ export default function PlanCreator() {
   /** The queue's scroll box — what a drag hit-tests against and auto-scrolls. */
   const queueRef = useRef<HTMLDivElement>(null);
   const [autoRemapCount, setAutoRemapCount] = useState(1);
+  /**
+   * Rows picked for a group move (Ctrl/⌘-click, Shift-click for a range), by
+   * entry key so the pick survives reordering. `anchor` is where a Shift range
+   * starts.
+   */
+  const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
   /**
    * The last auto remap, with the queue it replaced (for Undo). Shown only
    * while the queue is still exactly what it produced — any edit retires it.
@@ -714,6 +793,22 @@ export default function PlanCreator() {
     );
   }
 
+  /** Every Magic 14 skill up to `level`, prerequisites first. */
+  function addMagic14(level: number): void {
+    const { requirements, missing } = magic14Requirements(skills, level);
+    const grown = addRequirements(entries, requirements, skills);
+    const added = grown.length - entries.length;
+    setEntries(grown);
+    if (name.trim() === '') setName(`Magic 14 ${romanLevel(level)}`);
+    const tail = missing.length > 0 ? ` No skill data for: ${missing.join(', ')}.` : '';
+    setNotice(
+      (added === 0
+        ? `The Magic 14 to ${romanLevel(level)} is already in the plan.`
+        : `Added ${added} level${added === 1 ? '' : 's'} for the Magic 14 to ${romanLevel(level)}.`) +
+        tail,
+    );
+  }
+
   async function addSource(load: () => Promise<PlanDraftSource>): Promise<void> {
     setError(null);
     setBusy(true);
@@ -738,6 +833,63 @@ export default function PlanCreator() {
 
   function move(from: number, to: number): void {
     setEntries((prev) => moveEntry(prev, from, to));
+  }
+
+  /** Queue indices of the selected rows, top to bottom; rows since removed drop out. */
+  const selectedIndices = useMemo(() => {
+    const out: number[] = [];
+    entries.forEach((entry, i) => {
+      if (selection.has(entryKey(entry))) out.push(i);
+    });
+    return out;
+  }, [entries, selection]);
+  const groupSelected = selectedIndices.length > 1;
+
+  /** The rows a move on `index` acts on: the whole selection if it's part of one. */
+  const moveSet = useCallback(
+    (index: number): number[] =>
+      selectedIndices.length > 1 && selectedIndices.includes(index) ? selectedIndices : [index],
+    [selectedIndices],
+  );
+
+  /**
+   * A click on a queue row. Ctrl/⌘ toggles it in the selection, Shift selects
+   * the range from the last clicked row; a plain click clears the selection
+   * and reveals the skill, as before.
+   */
+  function clickRow(e: ReactMouseEvent, index: number): void {
+    const entry = entries[index];
+    if (!entry) return;
+    const key = entryKey(entry);
+    if (e.shiftKey) {
+      const from = entries.findIndex((row) => entryKey(row) === anchor);
+      const start = from === -1 ? index : from;
+      const [lo, hi] = start <= index ? [start, index] : [index, start];
+      const range = entries.slice(lo, hi + 1).map(entryKey);
+      setSelection((prev) => new Set(e.ctrlKey || e.metaKey ? [...prev, ...range] : range));
+      if (from === -1) setAnchor(key);
+      return;
+    }
+    setAnchor(key);
+    if (e.ctrlKey || e.metaKey) {
+      setSelection((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      return;
+    }
+    setSelection(new Set());
+    reveal(entry.skillTypeId);
+  }
+
+  function shiftSelection(direction: -1 | 1): void {
+    setEntries((prev) => shiftEntries(prev, selectedIndices, direction));
+  }
+
+  function dropSelection(index: number): void {
+    setEntries((prev) => dropEntries(prev, selectedIndices, { index, underRemap: false }));
   }
 
   /**
@@ -767,8 +919,14 @@ export default function PlanCreator() {
   }
   const closeInfo = useCallback(() => setInfo(null), []);
 
+  // Dragging a row that is part of a multi-row selection carries the whole
+  // selection; any other row moves on its own.
   const drag = useRowDrag(queueRef, entries.length, (from, target) =>
-    setEntries((prev) => dropEntry(prev, from, target)),
+    setEntries((prev) => dropEntries(prev, moveSet(from), target)),
+  );
+  const dragging = useMemo(
+    () => (drag.active ? new Set(moveSet(drag.active.from)) : null),
+    [drag.active, moveSet],
   );
 
   /**
@@ -777,11 +935,11 @@ export default function PlanCreator() {
    */
   const dropAt = useMemo(() => {
     if (!drag.active?.target) return null;
-    const { from, target } = drag.active;
-    // dropEntry keeps every row object it doesn't change, so identity says it all.
-    const after = dropEntry(entries, from, target);
+    const { target } = drag.active;
+    // dropEntries keeps every row object it doesn't change, so identity says it all.
+    const after = dropEntries(entries, [...(dragging ?? [])], target);
     return after.every((entry, i) => entry === entries[i]) ? null : target;
-  }, [drag.active, entries]);
+  }, [drag.active, dragging, entries]);
 
   async function save(asNew: boolean): Promise<void> {
     const planName = name.trim();
@@ -1019,6 +1177,62 @@ export default function PlanCreator() {
             )}
           </div>
 
+          {selectedIndices.length > 0 && (
+            <div className="plan-select-bar" data-testid="creator-selection-bar">
+              <span>
+                <strong>{selectedIndices.length}</strong> selected
+              </span>
+              <button
+                type="button"
+                className="btn-sm"
+                title="Move the selected rows to the top of the plan"
+                onClick={() => dropSelection(0)}
+                data-testid="selection-top"
+              >
+                ⤒ Top
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                title="Move the selected rows up one"
+                onClick={() => shiftSelection(-1)}
+                data-testid="selection-up"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                title="Move the selected rows down one"
+                onClick={() => shiftSelection(1)}
+                data-testid="selection-down"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                title="Move the selected rows to the bottom of the plan"
+                onClick={() => dropSelection(entries.length)}
+                data-testid="selection-bottom"
+              >
+                ⤓ Bottom
+              </button>
+              <button
+                type="button"
+                className="ghost btn-sm"
+                onClick={() => setSelection(new Set())}
+                data-testid="selection-clear"
+              >
+                Clear
+              </button>
+              <span className="muted">
+                Drag a selected row to move them all · Ctrl-click to add/remove · Shift-click for
+                a range
+              </span>
+            </div>
+          )}
+
           {unresolved.length > 0 && (
             <p className="muted" data-testid="creator-unresolved">
               No static data for: {unresolved.join(', ')}
@@ -1061,6 +1275,8 @@ export default function PlanCreator() {
                     const cost = costs[index];
                     const minutes = times[index];
                     const remap = entry.remapBefore;
+                    // The row's ↑ / ↓ move the whole selection when it's part of one.
+                    const inGroup = groupSelected && selection.has(key);
                     return (
                       <Fragment key={key}>
                         {remap && (
@@ -1083,13 +1299,14 @@ export default function PlanCreator() {
                             if (drag.consumeClick()) return;
                             // The row's own controls are not a reveal.
                             if ((e.target as HTMLElement).closest('button, select')) return;
-                            reveal(entry.skillTypeId);
+                            clickRow(e, index);
                           }}
                           onContextMenu={(e) => openInfo(e, entry.skillTypeId)}
                           data-drag-row={index}
                           data-has-remap={remap ? '' : undefined}
                           className={[
-                            drag.active?.from === index ? 'plan-draft__row--dragging' : '',
+                            dragging?.has(index) ? 'plan-draft__row--dragging' : '',
+                            selection.has(key) ? 'plan-draft__row--selected' : '',
                             dropAt &&
                             dropAt.index === index &&
                             (dropAt.underRemap || !remap)
@@ -1101,6 +1318,7 @@ export default function PlanCreator() {
                           ]
                             .join(' ')
                             .trim()}
+                          aria-selected={selection.has(key)}
                           data-testid={`creator-row-${index}`}
                         >
                           <td className="num muted">{index + 1}</td>
@@ -1181,9 +1399,9 @@ export default function PlanCreator() {
                             <button
                               type="button"
                               className="btn-sm"
-                              disabled={index === 0}
-                              title="Move up"
-                              onClick={() => move(index, index - 1)}
+                              disabled={moveSet(index)[0] === 0}
+                              title={inGroup ? 'Move the selected rows up' : 'Move up'}
+                              onClick={() => (inGroup ? shiftSelection(-1) : move(index, index - 1))}
                               data-testid={`creator-up-${index}`}
                             >
                               ↑
@@ -1191,9 +1409,9 @@ export default function PlanCreator() {
                             <button
                               type="button"
                               className="btn-sm"
-                              disabled={index === entries.length - 1}
-                              title="Move down"
-                              onClick={() => move(index, index + 1)}
+                              disabled={moveSet(index).at(-1) === entries.length - 1}
+                              title={inGroup ? 'Move the selected rows down' : 'Move down'}
+                              onClick={() => (inGroup ? shiftSelection(1) : move(index, index + 1))}
                               data-testid={`creator-down-${index}`}
                             >
                               ↓
@@ -1233,6 +1451,7 @@ export default function PlanCreator() {
           <FitImporter
             fits={fits}
             disabled={busy}
+            onAddMagic14={addMagic14}
             onOpenShips={() => setShipBrowserOpen(true)}
             onAddFit={(fitId) => void addSource(() => mco.plans.draftFromFit(fitId))}
             onAddEft={(eftText) => void addSource(() => mco.plans.draftFromEft(eftText))}

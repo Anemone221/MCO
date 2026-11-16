@@ -31,8 +31,11 @@ import {
   resolveTypeIdsByName,
 } from '../db/repositories/sde';
 import { listCharacters } from '../db/repositories/characters';
-import { getCharacterSkillMap } from '../db/repositories/skills';
-import { getNeuralAttributes, getSkillTrainingAttributes } from './trainingData';
+import {
+  getEffectiveSkillMap,
+  getNeuralAttributes,
+  getSkillTrainingAttributes,
+} from './trainingData';
 
 /** Parse a skill plan to validate it, then persist the raw text. */
 export function importPlan(name: string, planText: string): SkillPlan {
@@ -124,7 +127,7 @@ export function analyzePlanById(planId: number): PlanAnalysis {
   const characters: AnalysisCharacter[] = listCharacters().map((c) => ({
     characterId: c.id,
     characterName: c.name,
-    skills: getCharacterSkillMap(c.id),
+    skills: getEffectiveSkillMap(c.id),
     attributes: getNeuralAttributes(c.id),
   }));
 
@@ -159,7 +162,7 @@ export function listPlanProgressForCharacter(characterId: number): {
   if (plans.length === 0) return { needsSkillData: false, plans: [] };
   if (!getSdeStatus().hasSkillData) return { needsSkillData: true, plans: [] };
 
-  const skills = getCharacterSkillMap(characterId);
+  const skills = getEffectiveSkillMap(characterId);
   const attributes = getNeuralAttributes(characterId);
   const progress = plans.map((plan) => {
     const entries = parseSkillPlan(plan.planText);
@@ -232,7 +235,7 @@ export function planObjectiveStatus(
     ...characterIds.map((id) => ({
       characterId: id,
       characterName: '',
-      skills: getCharacterSkillMap(id),
+      skills: getEffectiveSkillMap(id),
       attributes: getNeuralAttributes(id),
     })),
   ];

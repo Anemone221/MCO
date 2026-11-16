@@ -478,7 +478,9 @@ export async function parseTypeDogmaStream(
       }
     }
     processed += 1;
-    if (processed % 10_000 === 0) onProgress?.({ typesProcessed: processed });
+    // Often: this file is most of an import's running time (~17 s of ~25 s for
+    // ~27k entries), and it is these events that keep the progress readout moving.
+    if (processed % 1_000 === 0) onProgress?.({ typesProcessed: processed });
   };
 
   for await (const line of rl) {

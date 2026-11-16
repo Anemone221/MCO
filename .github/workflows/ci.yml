@@ -32,6 +32,12 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+      # Real SQLite under Electron's own Node (the native module is built for
+      # Electron, not for the runner's Node), with Electron and the network
+      # stubbed. No display needed: Electron never opens a window in this mode.
+      - name: Database tests
+        run: npm run test:db
+
       - name: Build
         run: npm run build
 

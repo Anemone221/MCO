@@ -165,6 +165,12 @@ Remaps are saved with the plan and left out of the copy for EVE. Right-click any
 queued or in the browser, for an info card: what it does, rank, attributes, training time
 per level, what it needs and what it unlocks.
 
+**Compare plans** puts two plans side by side, skill by skill: what each asks for that
+the other doesn't, where they want different levels, and how much SP a character who has
+finished one still needs for the other. Prerequisites count by default, so the
+comparison reflects what training each plan actually takes. **Copy A → B** copies that
+missing training as a ready-to-import plan.
+
 ### Clones
 Active implants and every jump clone — custom name, location, implant set — per
 character, plus the medical (home) clone. Each row shows clone-jump readiness: the 24h
@@ -322,7 +328,7 @@ Scopes requested when you add a character:
 | `esi-activities.read_character.v1` | The tactical operations standing at those dens |
 
 The last two are new in 0.5.0. A character added before it keeps working exactly as it
-did, but needs re-adding once to grant them — until then the Mercenary Dens page names
+did, but needs re-authorizing once (Settings → Sync status) to grant them — until then the Mercenary Dens page names
 it as missing coverage rather than quietly showing no dens.
 
 **Not** in that grant: `esi-corporations.read_blueprints.v1`. It's the one corporation
@@ -380,8 +386,12 @@ a release lands and links to it, but the new DMG is a manual download.
 git clone https://github.com/Anemone221/MCO.git
 cd MCO
 npm ci        # postinstall rebuilds better-sqlite3 against Electron
-npm run dev   # launch with hot reload
+npm run dev   # launch with hot reload, on a blank dev database
 ```
+
+`npm run dev` never touches your real profile; `npm run dev:copy` starts from a copy of
+it and `npm run dev:prod` opens it directly — see
+[docs/development.md](docs/development.md#dev-and-prod-databases-dbdbmodets-dbdevtokensts).
 
 To build a real installer: `npm run dist` (output in `release/`). On Windows this
 can trip over an electron-builder toolchain symlink error — see the fix in
@@ -410,12 +420,16 @@ In Electron's `userData` directory for MCO (`%APPDATA%\MCO` on Windows,
 **Open data folder** takes you there:
 
 - `mco.sqlite` — everything: characters, encrypted tokens, skills, SDE, caches.
+- `backups/` — the snapshots MCO takes on its own: weekly, and before any database
+  upgrade.
+- `logs/mco.log` — the session log that Settings → **Export logs…** saves.
 - `sde-cache/sde.zip` — the downloaded static-data archive.
 
-Settings → **Back up database…** writes a consistent snapshot while the app keeps running.
-To restore, quit MCO and copy the file back. Note that refresh tokens are encrypted per OS
-user, so a backup restored on another machine keeps all your data but needs the characters
-re-added.
+Settings → **Backup** lists those snapshots with a **Restore…** button (MCO restarts to
+swap the file in, and keeps the database it replaced). **Back up database…** also writes
+a snapshot wherever you choose while the app keeps running; to use one of those, quit MCO
+and copy the file back. Note that refresh tokens are encrypted per OS user, so a backup
+restored on another machine keeps all your data but needs the characters re-added.
 
 ### Using your own EVE application
 
@@ -435,6 +449,7 @@ electron-vite, tested with vitest and Playwright.
 
 ```bash
 npm run typecheck && npm run lint && npm run test:unit   # fast checks
+npm run test:db                                          # real SQLite: migrations, sync, login
 npm run test:e2e                                         # real-app tests
 ```
 
@@ -453,8 +468,7 @@ live in [`docs/`](docs/README.md):
 | [features.md](docs/features.md) | Every page in depth + the skill-analysis engine |
 | [development.md](docs/development.md) | Scripts, env vars, testing, CI, packaging |
 | [code-style.md](docs/code-style.md) | Conventions the codebase already follows |
-| [improvement-plan.md](docs/improvement-plan.md) | Path to shippable binaries, hardening, test gaps |
-| [optimization.md](docs/optimization.md) | Performance headroom for large rosters |
+| [Possible Improvements.md](Possible%20Improvements.md) | Scored list of open improvements and what's done |
 
 Issues and PRs go to [github.com/Anemone221/MCO](https://github.com/Anemone221/MCO).
 

@@ -10,9 +10,7 @@ import { listCharacters } from '../db/repositories/characters';
 import { getFit } from '../db/repositories/fits';
 import { getPlan } from '../db/repositories/plans';
 import { getSdeStatus, getSystems } from '../db/repositories/sde';
-import { getQueue } from '../db/repositories/skills';
-import { pendingQueue } from '../skills/queue';
-import { listTagsForCharacter } from '../db/repositories/tags';
+import { listTagsByCharacter } from '../db/repositories/tags';
 import { getAllActiveImplants, getAllCloneMeta, getAllJumpClones } from '../db/repositories/clones';
 import { listCharacterLocations } from '../db/repositories/characterLocation';
 import { getStructures } from '../db/repositories/structures';
@@ -109,18 +107,18 @@ export async function buildGroupDetail(groupId: number): Promise<GroupDetail> {
     };
   };
 
+  const tags = listTagsByCharacter();
   const members: GroupMemberStatus[] = entries.map((entry) => {
-    const queue = pendingQueue(getQueue(entry.character.id));
     return {
       character: entry.character,
       accountLabel: entry.accountLabel,
       totalSp: entry.totalSp,
       training: entry.training,
-      queueLength: queue.length,
-      queueEndDate: queue.length > 0 ? queue[queue.length - 1]!.finishDate : null,
+      queueLength: entry.queueLength,
+      queueEndDate: entry.queueEndDate,
       systemName: entry.systemName,
       shipTypeName: entry.shipTypeName,
-      tags: listTagsForCharacter(entry.character.id),
+      tags: tags.get(entry.character.id) ?? [],
       medicalClone: medicalCloneOf(entry.character.id),
       fitStatus: fitStatuses?.get(entry.character.id) ?? null,
       planStatus: planStatuses?.get(entry.character.id) ?? null,

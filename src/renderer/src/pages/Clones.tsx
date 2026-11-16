@@ -1,11 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { CloneBoardEntry, EsiDataStatus, ImplantInfo, JumpCloneEntry } from '@shared/types';
+import type { CloneBoardEntry, EsiDataStatus, ImplantInfo } from '@shared/types';
 import { errorMessage, mco } from '../lib/ipc';
 import { useMcoData } from '../lib/useMcoData';
 import { formatDate, formatTimeUntil } from '../lib/format';
 import CharacterAvatar from '../components/CharacterAvatar';
 import CriticalCloneToggle from '../components/CriticalCloneToggle';
+import {
+  allClones,
+  type CloneAtLocation,
+  cloneLocationLabel,
+  cloneLocations,
+  clonesAtLocation,
+} from '../lib/cloneLocationView';
 
 /** Calm, actionable copy for each non-ok ESI-data state — feature-agnostic. */
 function statusLabel(status: EsiDataStatus, missingScopes: string[]): string | null {
@@ -15,9 +22,9 @@ function statusLabel(status: EsiDataStatus, missingScopes: string[]): string | n
     case 'pending':
       return 'Not synced yet';
     case 'scope-missing':
-      return `ESI scope required (${missingScopes.join(', ')}) — re-add this character to grant it`;
+      return `ESI scope required (${missingScopes.join(', ')}) — re-authorize it in Settings to grant it`;
     case 'login-expired':
-      return 'Login expired — re-add this character';
+      return 'Login expired — re-authorize it in Settings';
   }
 }
 
@@ -30,17 +37,6 @@ function ImplantList({ implants }: { implants: ImplantInfo[] }) {
       ))}
     </ul>
   );
-}
-
-function cloneLocation(
-  clone: Pick<JumpCloneEntry, 'locationId' | 'locationType' | 'locationName'>,
-): string {
-  if (clone.locationName) return clone.locationName;
-  if (clone.locationType === 'structure' && clone.locationId !== null) {
-    return `Structure ${clone.locationId}`;
-  }
-  if (clone.locationId !== null) return `Location ${clone.locationId}`;
-  return 'Unknown location';
 }
 
 function CloneRow({
@@ -134,14 +130,14 @@ function CloneRow({
             <>
               <h4>Medical clone</h4>
               <p className="muted" data-testid={`med-clone-${entry.characterId}`}>
-                {entry.medicalClone ? cloneLocation(entry.medicalClone) : '—'}
+                {entry.medicalClone ? cloneLocationLabel(entry.medicalClone) : '—'}
               </p>
               {entry.clones.map((clone) => (
                 <div key={clone.jumpCloneId} className="clone-block">
                   <h4 className="clone-heading">
                     <span>
                       {clone.name ?? 'Jump clone'}
-                      <span className="muted"> · {cloneLocation(clone)}</span>
+                      <span className="muted"> · {cloneLocationLabel(clone)}</span>
                     </span>
                     <CriticalCloneToggle
                       implants={clone.implants}
@@ -167,8 +163,87 @@ function CloneRow({
   );
 }
 
+function LocationResults({ rows }: { rows: CloneAtLocation[] }) {
+  return (
+    <table className="data-table" data-testid="clones-location-table">
+      <thead>
+        <tr>
+          <th>Character</th>
+          <th>Clone</th>
+          <th>Location</th>
+          <th>Implants</th>
+          <th>JC</th>
+          <th>Account</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && (
+          <tr>
+            <td colSpan={6} className="no-matches">
+              No clones at a matching location.
+            </td>
+          </tr>
+        )}
+        {rows.map((row) => {
+          const cooldown =
+            row.nextCloneJumpAt !== null && new Date(row.nextCloneJumpAt).getTime() > Date.now();
+          return (
+            <tr
+              key={`${row.characterId}-${row.jumpCloneId ?? 'medical'}`}
+              data-testid={`clone-at-${row.characterId}-${row.jumpCloneId ?? 'medical'}`}
+            >
+              <td>
+                <span className="cell-name">
+                  <CharacterAvatar characterId={row.characterId} />
+                  <Link to={`/character/${row.characterId}`}>{row.characterName}</Link>
+                </span>
+              </td>
+              <td>
+                {row.kind === 'medical' ? (
+                  <span className="muted">Medical clone</span>
+                ) : (
+                  (row.cloneName ?? 'Jump clone')
+                )}
+                {row.critical && (
+                  <>
+                    {' '}
+                    <span className="chip chip--danger" title="Critical implant set">
+                      Critical
+                    </span>
+                  </>
+                )}
+              </td>
+              <td>{row.location}</td>
+              <td
+                title={
+                  row.implants.length > 0
+                    ? row.implants.map((i) => i.typeName ?? `Implant ${i.typeId}`).join('\n')
+                    : undefined
+                }
+              >
+                {row.kind === 'medical' ? '—' : row.implants.length}
+              </td>
+              <td>
+                {cooldown ? (
+                  <span className="chip chip--fatigue">
+                    {formatTimeUntil(row.nextCloneJumpAt).replace(/^in /, '')}
+                  </span>
+                ) : (
+                  'Ready'
+                )}
+              </td>
+              <td>{row.accountLabel ?? '—'}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 export default function Clones() {
   const [search, setSearch] = useState('');
+  const [locationSearch, setLocationSearch] = useState('');
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -178,6 +253,14 @@ export default function Clones() {
     onCharactersChanged: true,
   });
   const board: CloneBoardEntry[] = data ?? [];
+
+  const clones = useMemo(() => allClones(board), [board]);
+  const locationOptions = useMemo(() => cloneLocations(clones), [clones]);
+  const atLocation = useMemo(
+    () => clonesAtLocation(clones, locationSearch),
+    [clones, locationSearch],
+  );
+  const locationActive = locationSearch.trim() !== '';
 
   const needsAttention = useMemo(
     () => board.filter((e) => e.status === 'scope-missing' || e.status === 'login-expired').length,
@@ -254,6 +337,21 @@ export default function Clones() {
             onChange={(e) => setSearch(e.target.value)}
             data-testid="clones-search"
           />
+          <input
+            type="search"
+            placeholder="Find clones at location…"
+            list="clone-locations"
+            value={locationSearch}
+            onChange={(e) => setLocationSearch(e.target.value)}
+            data-testid="clones-location-search"
+          />
+          <datalist id="clone-locations">
+            {locationOptions.map((o) => (
+              <option key={o.location} value={o.location}>
+                {`${o.count} clone${o.count === 1 ? '' : 's'}`}
+              </option>
+            ))}
+          </datalist>
           <label className="muted">
             <input
               type="checkbox"
@@ -274,7 +372,11 @@ export default function Clones() {
             {allVisibleExpanded ? 'Collapse all' : 'Expand all'}
           </button>
           <span className="filter-bar__count">
-            {visible.length !== board.length
+            {locationActive
+              ? `${atLocation.length} clone${atLocation.length === 1 ? '' : 's'} · ${
+                  new Set(atLocation.map((c) => c.characterId)).size
+                } characters`
+              : visible.length !== board.length
               ? `${visible.length} of ${board.length}`
               : `${board.length} characters`}
           </span>
@@ -284,7 +386,9 @@ export default function Clones() {
       {error && <div className="error-box" data-testid="clones-error">{error}</div>}
       {actionError && <div className="error-box">{actionError}</div>}
 
-      {board.length === 0 ? (
+      {board.length > 0 && locationActive ? (
+        <LocationResults rows={atLocation} />
+      ) : board.length === 0 ? (
         <div className="empty-state">
           <h3>No characters yet</h3>
           <p>Add characters and sync them to see their clones and implants.</p>

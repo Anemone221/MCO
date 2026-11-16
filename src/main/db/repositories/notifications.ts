@@ -106,6 +106,29 @@ export function dismissAllNotifications(): number {
   return info.changes;
 }
 
+/**
+ * Delete dismissed notifications created more than `olderThanDays` days ago.
+ * Returns how many rows went.
+ *
+ * A dismissed row is kept because it is the record that its occurrence was
+ * already raised (see the v37 migration): delete it while the occurrence is
+ * still current and the next sweep raises it again. So the age is measured
+ * from `created_at`, not `dismissed_at`, and must be longer than any kind
+ * stays current — a queue-drain warning for 3 days, an elapsed timer for 24
+ * hours, an idle Omega account for the day in its key. Undismissed rows are
+ * never touched; those are the user's to clear.
+ */
+export function pruneDismissedNotifications(olderThanDays: number): number {
+  const info = getDb()
+    .prepare(
+      `DELETE FROM notifications
+        WHERE dismissed_at IS NOT NULL
+          AND created_at < datetime('now', ?)`,
+    )
+    .run(`-${olderThanDays} days`);
+  return info.changes;
+}
+
 /** Insert a notification, or return null if its dedupe_key already exists. */
 export function createNotification(input: {
   kind: string;

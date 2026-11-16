@@ -7,7 +7,7 @@
  * the whole point of this module: the consumers it replaces each invented their
  * own stopping rule — "a short page is the last page", "a 404 means the end" —
  * and the 404 rule doubled as an error handler, so a throttle give-up or a 500
- * read as "no more pages" and truncated the result (docs/release-review.md §1.5).
+ * read as "no more pages" and truncated the result.
  * Here nothing is inferred from a failure: a failed page rejects the whole read,
  * which leaves the caller's stored data alone instead of replacing it with a
  * short one.

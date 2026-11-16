@@ -881,7 +881,17 @@ export function appliedSchemaVersion(db: Database): number {
   return row.v;
 }
 
-export function runMigrations(db: Database): void {
+export interface MigrationHooks {
+  /**
+   * Called once, before the first pending migration is applied, when the
+   * database already holds data (`fromVersion` > 0). This is where the profile
+   * is snapshotted — see `db/index.ts`. A fresh profile has nothing to protect
+   * and does not call it.
+   */
+  beforeMigrate?: (fromVersion: number, toVersion: number) => void;
+}
+
+export function runMigrations(db: Database, hooks: MigrationHooks = {}): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime(\'now\')))');
 
   const current = appliedSchemaVersion(db);
@@ -892,6 +902,10 @@ export function runMigrations(db: Database): void {
   const pending = MIGRATIONS.filter((m) => m.version > current).sort(
     (a, b) => a.version - b.version,
   );
+
+  if (pending.length > 0 && current > 0) {
+    hooks.beforeMigrate?.(current, pending[pending.length - 1]!.version);
+  }
 
   for (const migration of pending) {
     const apply = db.transaction(() => {

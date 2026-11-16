@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isQueueEntryFinished, pendingQueue } from '@main/skills/queue';
+import { isQueueEntryFinished, pendingQueue, withFinishedQueue } from '@main/skills/queue';
 
 const NOW = 1_700_000_000_000;
 const HOUR = 60 * 60 * 1000;
@@ -65,5 +65,44 @@ describe('pendingQueue', () => {
 
   it('returns an empty queue unchanged', () => {
     expect(pendingQueue([], NOW)).toEqual([]);
+  });
+});
+
+describe('withFinishedQueue', () => {
+  const at = (offsetMs: number | null) =>
+    offsetMs === null ? null : new Date(NOW + offsetMs).toISOString();
+  const sp = (_id: number, level: number) => level * 1000;
+
+  it('counts a finished queue entry the /skills snapshot has not caught up with', () => {
+    const skills = new Map([[10, { sp: 0, trainedLevel: 0 }]]);
+    const queue = [{ skillTypeId: 10, finishLevel: 1, finishDate: at(-HOUR) }];
+    expect(withFinishedQueue(skills, queue, sp, NOW).get(10)).toEqual({ sp: 1000, trainedLevel: 1 });
+  });
+
+  it('adds a skill finished from zero that /skills does not list yet', () => {
+    const queue = [
+      { skillTypeId: 20, finishLevel: 1, finishDate: at(-2 * HOUR) },
+      { skillTypeId: 20, finishLevel: 2, finishDate: at(-HOUR) },
+    ];
+    expect(withFinishedQueue(new Map(), queue, sp, NOW).get(20)).toEqual({ sp: 2000, trainedLevel: 2 });
+  });
+
+  it('ignores entries still training, paused, or already reflected', () => {
+    const skills = new Map([[30, { sp: 5000, trainedLevel: 3 }]]);
+    const queue = [
+      { skillTypeId: 30, finishLevel: 3, finishDate: at(-HOUR) },
+      { skillTypeId: 40, finishLevel: 1, finishDate: at(HOUR) },
+      { skillTypeId: 50, finishLevel: 1, finishDate: null },
+    ];
+    const result = withFinishedQueue(skills, queue, sp, NOW);
+    expect(result.get(30)).toEqual({ sp: 5000, trainedLevel: 3 });
+    expect(result.has(40)).toBe(false);
+    expect(result.has(50)).toBe(false);
+  });
+
+  it('never mutates the stored map', () => {
+    const skills = new Map([[10, { sp: 0, trainedLevel: 0 }]]);
+    withFinishedQueue(skills, [{ skillTypeId: 10, finishLevel: 1, finishDate: at(-HOUR) }], sp, NOW);
+    expect(skills.get(10)).toEqual({ sp: 0, trainedLevel: 0 });
   });
 });

@@ -77,7 +77,7 @@ export default function Dashboard() {
               testId="tile-characters-online"
               hint={
                 summary.online.missingScopeCount > 0
-                  ? `${summary.online.missingScopeCount} need re-adding to grant the online-status scope`
+                  ? `${summary.online.missingScopeCount} need re-authorizing (Settings) to grant the online-status scope`
                   : undefined
               }
             >

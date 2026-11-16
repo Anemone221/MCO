@@ -1,18 +1,23 @@
 import { IpcChannel } from '@shared/ipc';
 import { SCOPE_READ_IMPLANTS, SCOPE_READ_ONLINE } from '../config';
-import { grantedScopes } from '../auth/token-store';
+import { grantedScopesByCharacter } from '../auth/token-store';
 import { findCriticalMatch, implantSetKey } from '../clones/criticalImplants';
 import { getFlag, setFlag } from '../db/repositories/appSettings';
 import { listCharacters } from '../db/repositories/characters';
 import {
+  type CharacterLocationRow,
   listCharacterLocations,
   upsertCharacterLocation,
 } from '../db/repositories/characterLocation';
 import { listCharacterOnline, upsertCharacterOnline } from '../db/repositories/characterOnline';
 import { getAllActiveImplants, replaceActiveImplants } from '../db/repositories/clones';
-import { getAllCriticalImplantSets } from '../db/repositories/criticalImplants';
+import {
+  type CriticalImplantSetRow,
+  getAllCriticalImplantSets,
+} from '../db/repositories/criticalImplants';
 import { getSystems } from '../db/repositories/sde';
 import { getInvalidTokenIds } from '../db/repositories/tokens';
+import { connectivity } from '../esi/connectivity';
 import {
   getCharacterImplants,
   getCharacterLocation,
@@ -44,6 +49,14 @@ import { resolveStructures } from './structureService';
  * is noticed within one presence interval, not at the next sweep. The whole
  * lane can be switched off in Settings ({@link LIVE_TRACKING_KEY}); the hourly
  * sweep still reads online status and location then, just hourly.
+ *
+ * Neither loop touches the network while the connectivity gate says there is
+ * none (`esi/connectivity.ts`): a laptop that is offline runs no ticks rather
+ * than one failing tick every 20 seconds.
+ *
+ * Each tick reads the database a fixed number of times — the shared tables
+ * once, before the per-character fan-out — because this loop multiplies the
+ * roster size by the highest event rate in the app.
  */
 const PRESENCE_INTERVAL_MS = 2 * 60 * 1000;
 const ACTIVE_INTERVAL_MS = 20 * 1000;
@@ -71,22 +84,19 @@ const exposures = new Map<number, ExposureState>();
 let presenceInFlight = false;
 let activeInFlight = false;
 
-function hasScope(characterId: number, scope: string): boolean {
-  return grantedScopes(characterId).includes(scope);
-}
-
-/** Characters whose token can still be refreshed. */
-function trackableCharacterIds(): number[] {
+/** Tracked characters whose token can still be refreshed, with their names. */
+function trackableCharacters(): Map<number, string> {
   const invalid = getInvalidTokenIds();
-  return listCharacters()
-    .map((c) => c.id)
-    .filter((id) => !invalid.has(id));
+  return new Map(listCharacters().filter((c) => !invalid.has(c.id)).map((c) => [c.id, c.name]));
 }
 
 /** Poll `/online` for everyone; returns true when any character's status changed. */
 async function pollPresence(): Promise<boolean> {
   const previous = new Map(listCharacterOnline().map((o) => [o.characterId, o.online]));
-  const ids = trackableCharacterIds().filter((id) => hasScope(id, SCOPE_READ_ONLINE));
+  const scopes = grantedScopesByCharacter();
+  const ids = [...trackableCharacters().keys()].filter((id) =>
+    scopes.get(id)?.includes(SCOPE_READ_ONLINE),
+  );
   let changed = false;
 
   await Promise.all(
@@ -110,18 +120,28 @@ async function pollPresence(): Promise<boolean> {
   return changed;
 }
 
+/** What one active tick needs from the database, read once for every online character. */
+interface TickSnapshot {
+  nowIso: string;
+  names: Map<number, string>;
+  scopes: Map<number, string[]>;
+  implants: Map<number, number[]>;
+  locations: Map<number, CharacterLocationRow>;
+  criticalSets: Map<number, CriticalImplantSetRow[]>;
+}
+
 /** Observe one online character; returns true when stored data changed. */
 async function observeCharacter(
   characterId: number,
+  snapshot: TickSnapshot,
   getWindow: GetWindow,
-  nowIso: string,
 ): Promise<boolean> {
   let changed = false;
 
   // Implants first: when the undock check below runs, it should see the pod
   // the character is wearing now, not the one from before a clone jump.
-  let implants = getAllActiveImplants().get(characterId) ?? [];
-  if (hasScope(characterId, SCOPE_READ_IMPLANTS)) {
+  let implants = snapshot.implants.get(characterId) ?? [];
+  if (snapshot.scopes.get(characterId)?.includes(SCOPE_READ_IMPLANTS)) {
     const fresh = await getCharacterImplants(characterId);
     if (implantSetKey(fresh) !== implantSetKey(implants)) {
       replaceActiveImplants(characterId, fresh);
@@ -142,7 +162,7 @@ async function observeCharacter(
     shipTypeId: ship.ship_type_id,
     shipName: ship.ship_name,
   };
-  const prev = listCharacterLocations().find((l) => l.characterId === characterId);
+  const prev = snapshot.locations.get(characterId);
   if (
     !prev ||
     prev.solarSystemId !== next.solarSystemId ||
@@ -157,10 +177,10 @@ async function observeCharacter(
   }
 
   const docked = next.stationId !== null || next.structureId !== null;
-  const state = observeDocking(exposures.get(characterId), docked, nowIso);
+  const state = observeDocking(exposures.get(characterId), docked, snapshot.nowIso);
   exposures.set(characterId, state);
   if (state.exposureStart !== null) {
-    warnIfCritical(characterId, implants, next.solarSystemId, state.exposureStart, getWindow);
+    warnIfCritical(characterId, implants, next.solarSystemId, state.exposureStart, snapshot, getWindow);
   }
 
   return changed;
@@ -172,9 +192,10 @@ function warnIfCritical(
   implants: number[],
   solarSystemId: number,
   exposureStart: string,
+  snapshot: TickSnapshot,
   getWindow: GetWindow,
 ): void {
-  const sets = getAllCriticalImplantSets().get(characterId) ?? [];
+  const sets = snapshot.criticalSets.get(characterId) ?? [];
   if (sets.length === 0) return;
   const matchKey = findCriticalMatch(
     implants,
@@ -182,8 +203,7 @@ function warnIfCritical(
   );
   if (matchKey === null) return;
 
-  const character = listCharacters().find((c) => c.id === characterId);
-  const name = character?.name ?? `Character ${characterId}`;
+  const name = snapshot.names.get(characterId) ?? `Character ${characterId}`;
   const label = sets.find((s) => s.implantKey === matchKey)?.label ?? null;
   const system = getSystems([solarSystemId]).get(solarSystemId)?.name ?? null;
   const pod = label ? `critical clone "${label}"` : 'a critical clone';
@@ -206,6 +226,7 @@ function warnIfCritical(
 
 async function runPresenceTick(getWindow: GetWindow): Promise<void> {
   if (presenceInFlight) return;
+  if (connectivity.shouldSkip('presence polling')) return;
   presenceInFlight = true;
   try {
     if (await pollPresence()) getWindow()?.webContents.send(IpcChannel.charactersChanged);
@@ -218,17 +239,25 @@ async function runPresenceTick(getWindow: GetWindow): Promise<void> {
 
 async function runActiveTick(getWindow: GetWindow): Promise<void> {
   if (activeInFlight) return;
+  if (connectivity.shouldSkip('live tracking')) return;
   activeInFlight = true;
   try {
-    const trackable = new Set(trackableCharacterIds());
+    const trackable = trackableCharacters();
     const online = listCharacterOnline()
       .filter((o) => o.online && trackable.has(o.characterId))
       .map((o) => o.characterId);
     if (online.length === 0) return;
 
-    const nowIso = new Date().toISOString();
+    const snapshot: TickSnapshot = {
+      nowIso: new Date().toISOString(),
+      names: trackable,
+      scopes: grantedScopesByCharacter(),
+      implants: getAllActiveImplants(),
+      locations: new Map(listCharacterLocations().map((l) => [l.characterId, l])),
+      criticalSets: getAllCriticalImplantSets(),
+    };
     const results = await Promise.allSettled(
-      online.map((id) => observeCharacter(id, getWindow, nowIso)),
+      online.map((id) => observeCharacter(id, snapshot, getWindow)),
     );
     let changed = false;
     for (const [i, r] of results.entries()) {
@@ -282,6 +311,16 @@ export function setLiveTrackingEnabled(enabled: boolean): boolean {
 export function startLiveTracking(getWindow: GetWindow): void {
   currentGetWindow = getWindow;
   if (isLiveTrackingEnabled()) armLoops(getWindow);
+}
+
+/**
+ * A presence poll now, outside the cadence — the scheduler's catch-up after
+ * the system wakes, so characters that logged off during the sleep leave the
+ * active loop before it polls them. A no-op while the loops are not armed.
+ */
+export function runPresenceNow(): Promise<void> {
+  if (!presenceTimer || !currentGetWindow) return Promise.resolve();
+  return runPresenceTick(currentGetWindow);
 }
 
 export function stopLiveTracking(): void {

@@ -37,3 +37,48 @@ export function isQueueEntryFinished(entry: QueueTiming, now: number = Date.now(
 export function pendingQueue<T extends QueueTiming>(queue: T[], now: number = Date.now()): T[] {
   return queue.filter((entry) => !isQueueEntryFinished(entry, now));
 }
+
+/** A queue entry as far as {@link withFinishedQueue} needs it. */
+export interface FinishedQueueEntry extends QueueTiming {
+  skillTypeId: number;
+  finishLevel: number;
+}
+
+/** A trained skill as the analysis engine reads it. */
+export interface TrainedSkill {
+  sp: number;
+  trainedLevel: number;
+}
+
+/**
+ * A character's trained skills with every finished queue entry applied.
+ *
+ * ESI's `/skills` lags the queue: a skill that finished training keeps its old
+ * level there (often until the character next logs in or the queue is
+ * touched), while the queue still carries the entry with a past
+ * `finish_date`. The in-game client already counts that skill as trained, so
+ * fit and plan analysis must too — otherwise a character who just finished a
+ * skill reads as still missing it, no matter how often it is re-synced.
+ *
+ * `spForLevel(skillTypeId, level)` gives the total SP a skill holds at a
+ * level; a raised skill's SP is lifted to at least that. Never lowers
+ * anything, and returns a new map.
+ */
+export function withFinishedQueue<S extends TrainedSkill>(
+  skills: Map<number, S>,
+  queue: FinishedQueueEntry[],
+  spForLevel: (skillTypeId: number, level: number) => number,
+  now: number = Date.now(),
+): Map<number, TrainedSkill> {
+  const result = new Map<number, TrainedSkill>(skills);
+  for (const entry of queue) {
+    if (!isQueueEntryFinished(entry, now)) continue;
+    const have = result.get(entry.skillTypeId);
+    if (have && have.trainedLevel >= entry.finishLevel) continue;
+    result.set(entry.skillTypeId, {
+      trainedLevel: entry.finishLevel,
+      sp: Math.max(have?.sp ?? 0, spForLevel(entry.skillTypeId, entry.finishLevel)),
+    });
+  }
+  return result;
+}

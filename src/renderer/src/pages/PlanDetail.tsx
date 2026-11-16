@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { PlanCharacterResult } from '@shared/types';
 import { errorMessage, mco } from '../lib/ipc';
@@ -79,8 +79,25 @@ export default function PlanDetail() {
     [planId],
   );
 
+  // Set by Re-analyse: the next load pulls fresh skills from ESI first, so a
+  // skill trained since the last sweep counts. Fresh ESI cache entries are
+  // served locally, so repeat clicks cost nothing. Route changes skip the sync.
+  const syncFirst = useRef(false);
+  const [syncing, setSyncing] = useState(false);
+
   const { data, error, loading, reload, setData, setError } = useMcoData(
     async () => {
+      if (syncFirst.current) {
+        syncFirst.current = false;
+        setSyncing(true);
+        try {
+          // Per-character failures come back as results, never a throw: the
+          // analysis still runs on whatever was stored.
+          await mco.characters.syncAll();
+        } finally {
+          setSyncing(false);
+        }
+      }
       const [analysis, groups, tags] = await Promise.all([
         mco.plans.analyze(planId),
         mco.groups.list(),
@@ -198,8 +215,24 @@ export default function PlanDetail() {
           <Link to={`/plans/${planId}/edit`} className="link-btn" data-testid="edit-plan">
             Edit plan
           </Link>
-          <button type="button" className="ghost" onClick={() => void reload()} disabled={loading}>
-            {loading ? 'Analysing…' : 'Re-analyse'}
+          <Link
+            to={`/plans/compare?a=${planId}`}
+            className="link-btn"
+            data-testid="compare-plan"
+          >
+            Compare…
+          </Link>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => {
+              syncFirst.current = true;
+              void reload();
+            }}
+            disabled={loading}
+            title="Sync every character's skills from ESI, then re-run the analysis"
+          >
+            {syncing ? 'Syncing skills…' : loading ? 'Analysing…' : 'Re-analyse'}
           </button>
         </div>
       </div>

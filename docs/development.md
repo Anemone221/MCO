@@ -10,7 +10,9 @@
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | electron-vite dev server with hot reload |
+| `npm run dev` | electron-vite dev server with hot reload, on the **dev** database (`--db=dev`) |
+| `npm run dev:copy` | Same, after replacing the dev database with a copy of prod (`--db=dev --copy-prod`) |
+| `npm run dev:prod` | Same, on the real profile database (`--db=prod`) |
 | `npm run build` | Build main/preload/renderer into `out/` |
 | `npm run start` / `preview` | Run the built app |
 | `npm run start:background` | Run the built app tray-only (background sync mode) |
@@ -18,20 +20,67 @@
 | `npm run lint` | eslint (flat config, `eslint.config.mjs`) |
 | `npm run format` | prettier --write |
 | `npm run test:unit` / `test:unit:watch` | vitest |
+| `npm run test:db` | The database-backed suite (`tests/db/`), run inside Electron's Node |
 | `npm run test:e2e` | `electron-vite build` then Playwright against the built app |
 | `npm run test:packaged` | `dist:dir` then Playwright against the **packaged** binary |
 | `npm run dist` | Build + electron-builder installer into `release/` |
 | `npm run dist:dir` | Same but unpacked directory (fast, for smoke-testing packaging) |
+
+## Dev and prod databases (`db/dbMode.ts`, `db/devTokens.ts`)
+
+A build run from source shares the installed app's profile folder, so without care a
+half-written migration lands on real data. Two launch arguments choose the database:
+
+| Argument | Database |
+| --- | --- |
+| *(none)* or `--db=prod` | The profile database, `<userData>/mco.sqlite`. What the installed app uses. |
+| `--db=dev` | A scratch database, `<userData>/dev/mco.sqlite`. Starts blank; keeps what dev launches put in it. |
+| `--db=dev --copy-prod` | Replaces the dev database with a straight copy of prod, then opens it. Later `--db=dev` launches carry on with that copy. |
+
+`npm run dev`, `dev:copy` and `dev:prod` pass these for you. The built app takes them
+after npm's `--`:
+
+```
+npm run start -- -- --db=dev
+npm run start:background -- --db=dev --copy-prod
+```
+
+An unrecognised `--db` value, or `--copy-prod` without `--db=dev`, refuses to start
+rather than falling back to prod.
+
+- **Testing a migration on real data** is `npm run dev:copy`: the copy is migrated, prod
+  is not opened for it. The dev database has its own `dev/backups/` and restore marker,
+  so nothing done on dev rotates out a real backup. Logs and the SDE download are shared.
+- **A source build asks before it migrates prod.** Migrations only move forward and a
+  build refuses a database newer than it understands, so once a dev build has migrated
+  prod, the installed release can no longer open it. An unpackaged build on the prod
+  database therefore shows a "Migrate the production database?" prompt first; declining
+  quits with the database untouched. A packaged build never asks — its migrations arrive
+  through the updater and must run on an unattended tray launch. Either way the
+  pre-migration snapshot is taken.
+- **One at a time.** The dev database lives inside the same profile folder, so the
+  single-instance lock covers both: launching with a different `--db` while MCO is
+  running (tray included) focuses the running instance and says which database it is on.
+- **Logins stay in step.** A copied database holds prod's refresh tokens, and EVE SSO
+  retires a refresh token when it is used. A token refreshed on dev is written through
+  to the same character in prod, and a dev launch that is not a fresh copy first takes
+  prod's current tokens — so neither side is left presenting a consumed token. A
+  character signed in on a blank dev database is a separate login and never appears in
+  prod.
+
+Settings → About shows the path of the database in use.
 
 ## Environment variables
 
 | Variable | Effect |
 | --- | --- |
 | `MCO_ESI_CLIENT_ID` | Override the committed EVE developer app client_id (`src/main/config.ts`). |
+| `MCO_ESI_COMPAT_DATE` | Override the pinned `X-Compatibility-Date` sent with every ESI request (see [esi.md](esi.md#configuration-srcmainconfigts)). |
 | `MCO_SDE_URL` | Import this exact SDE zip instead of the build CCP's catalogue names. Also stands the SDE update check down. |
 | `MCO_SDE_CHECK` | `0` disables the check for a newer SDE build. Default: on everywhere. |
 | `MCO_UPDATE_CHECK` | `1` enables the GitHub release check in a dev build, `0` disables it in a packaged one. Default: packaged builds only. Governs the *automatic* check only — Settings → "Check for updates" is answered in every build — and sits above the user's own on/off preference. |
 | `ELECTRON_RENDERER_URL` | Set by electron-vite dev — main loads the dev server instead of the built `index.html`. |
+| `MCO_TEST_LOG` | Test-only: `1` lets `tests/db/scheduler.test.ts` print the scheduler's log lines it otherwise silences. |
 
 To use your own EVE application: register at https://developers.eveonline.com/ with
 callback URL `http://localhost:8765/callback` and the scopes listed in `ESI_SCOPES`
@@ -39,20 +88,56 @@ callback URL `http://localhost:8765/callback` and the scopes listed in `ESI_SCOP
 
 ## Testing strategy
 
-Three layers, deliberately:
+Four layers, deliberately:
 
 - **Unit (vitest, `tests/unit/`)** — pure logic only, no Electron/DB/network. This is
   why parsers, analysis math, filtering/sorting, scope classification, and queue-drain
-  detection live in dependency-free modules. Current suites: `eft`, `fitAnalyze`,
-  `skillPlanParse`, `planAnalyze`, `sdeParse`, `rateLimiter`, `pkce`, `scopeStatus`,
-  `queueDrain`, `launchMode`, `format`, `rosterView`, `groups`, `tags`, `updateCheck`,
-  `routing`, `nearestView`.
+  detection live in dependency-free modules. One suite per module, named after it
+  (`eft.test.ts` ↔ `fits/eft.ts`, `rosterView.test.ts` ↔ `lib/rosterView.ts`); about 70
+  files, so the directory listing is the index rather than a list here.
   - `tests/unit/renderer/` is the one exception: tests whose subject touches **DOM
     globals** (`window`, and the `lib/ipc.ts` demo wrapper hanging off it). Everything
     under `tests/` is type-checked by `tsconfig.node.json`, which has no DOM lib, so
     that directory is excluded there and included by `tsconfig.web.json` instead.
     vitest runs both the same way. Put a test here only when it needs the DOM types —
     pure logic stays in `tests/unit/`.
+- **Database-backed (vitest, `tests/db/`, `npm run test:db`)** — real SQLite, real
+  migrations, real repositories and services; only Electron and the network are
+  stand-ins. This is the layer that runs `syncCharacter`, the login flow and every
+  migration, which the pure unit tests cannot reach.
+  - **Why its own command.** better-sqlite3 is a native module and `npm install` builds
+    it for Electron's ABI, so plain Node cannot load it. `scripts/test-db.mjs` starts
+    vitest with the Electron binary in `ELECTRON_RUN_AS_NODE` mode instead: no second
+    build, no rebuild step, and the suite exercises the binary the app ships. Config:
+    `vitest.db.config.ts`. Extra arguments pass through
+    (`npm run test:db -- tests/db/login.test.ts`).
+  - **`tests/db/support/electron.ts`** is aliased in for the `electron` module: a
+    profile folder, reversible "encryption" for `safeStorage`, a `shell.openExternal`
+    that records the URL instead of opening a browser, a `dialog.showMessageBoxSync`
+    whose answer a test sets (`setMessageBoxChoice`), `net.isOnline()` behind
+    `setOnline()`, and a `powerMonitor` a test can make emit `resume`.
+  - **`support/profile.ts` → `useFreshProfile()`** gives each test an empty profile
+    folder, so `getDb()` creates a database and runs every migration on it.
+  - **`support/fakeEve.ts` → `useFakeEve()`** replaces the global `fetch` with a fake
+    EVE SSO and ESI. The real ESI client runs on top of it — caching, ETags, token
+    refresh, paging — and tokens are signed with a throwaway RSA key the fake JWKS
+    endpoint serves, so signature and claim verification run for real too. Anything a
+    test did not answer is a 404 from ESI and an error elsewhere: a test cannot reach the
+    network by omission. `seedCharacter()` leaves what a finished login leaves;
+    `answerCharacter()` answers every route a full-scope sync reads.
+  - `support/setup.ts` turns the ESI request pacer off (it is only waiting, against a
+    fake). The concurrency cap and backoff windows are the real ones.
+  - Suites: `migrations` (every migration applies; upgrading from *each* earlier version
+    reaches the same schema as a fresh install; the pre-migration snapshot),
+    `repositories`, `characterSync` (scope gating, the critical/best-effort split, cache
+    and ETag behaviour, token refresh and rotation, a failed blueprint page, a fleet
+    sync cut short by a dead network), `login` (the SSO round trip over the real
+    loopback listener, cancelling, re-authorizing), `dbMode` (the dev/prod switch, the
+    prod copy, the migration prompt, token mirroring), `batchReads` (the batched
+    repository reads agree with their per-character originals) and `scheduler` (the
+    real scheduler under a fake clock: startup sweep, offline skip, sleep/wake
+    catch-up, the no-response pause). The login suite binds the real callback port,
+    8765.
 - **E2E (Playwright, `tests/e2e/app.spec.ts`)** — launches the **built** app
   (`out/main/index.js`) via Playwright's `_electron` against a throwaway temp
   `userData` dir per test, so tests are hermetic and don't touch your real profile.
@@ -80,7 +165,8 @@ Node and no window appears.
 On push to `main` and PRs, two jobs run in parallel:
 
 - **verify** — matrix over ubuntu / windows / macos:
-  typecheck → lint → unit tests → build → e2e (under `xvfb-run` on Linux).
+  typecheck → lint → unit tests → database tests → build → e2e (under `xvfb-run` on
+  Linux; the database tests need no display, Electron opens no window in that mode).
 - **package** — matrix over `windows-latest` / `macos-latest`: `npm run test:packaged`,
   i.e. `electron-builder --dir` plus the packaged smoke test, so a packaging-config
   regression fails a push instead of waiting for someone to run `npm run dist` by hand.
@@ -281,8 +367,10 @@ convenience copies).
 > copied unmodified; the larger masters are upscales of it, and **every icon below —
 > window, exe, installer and tray — derives from it.** It is CCP hf.'s artwork, used under
 > the EVE Developer License Agreement — not ours, and not covered by this repo's MIT
-> license. See A5 in [improvement-plan.md](improvement-plan.md) before reusing it
-> anywhere, or if you ever want a mark MCO actually owns.
+> license. The DLA licenses game icons for non-commercial use *within* an application, and
+> an upscale is a derivative work that belongs to CCP — so MCO does not own its brand
+> mark, and this is the one asset that would have to change if CCP objected. Redrawing an
+> original icon would remove both concerns; keep that in mind before reusing it anywhere.
 
 Generated assets:
 
@@ -318,7 +406,7 @@ magick Clonebay_1024.png -define icon:auto-resize=256,128,64,48,32,24,16 build/i
 - **Charts**: `@amcharts/amcharts5` (devDependency, bundled into the renderer;
   free tier — the small amCharts logo on each chart is the license condition).
   Import subpaths only (`@amcharts/amcharts5`, `.../xy`, `.../hierarchy`,
-  `.../themes/Animated`) so the bundle carries just the modules in use. Every
+  `.../radar`, `.../themes/Animated`) so the bundle carries just the modules in use. Every
   chart goes through `components/charts/useAmChart.ts`, which owns root
   lifecycle (`am5.Root.new` in `useLayoutEffect`, `root.dispose()` on unmount),
   theme-palette colors, and ISK number abbreviations. Follow the amCharts5

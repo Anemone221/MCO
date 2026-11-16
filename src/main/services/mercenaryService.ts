@@ -6,7 +6,7 @@ import type {
   MercenaryOperationEntry,
 } from '@shared/types';
 import { SCOPE_READ_ACTIVITIES, SCOPE_READ_CHARACTER_STRUCTURES } from '../config';
-import { grantedScopes } from '../auth/token-store';
+import { grantedScopesByCharacter } from '../auth/token-store';
 import { classifyEsiDataStatus, missingScopes } from '../auth/scopeStatus';
 import {
   getCharacterMercenaryDens,
@@ -318,10 +318,11 @@ function compareOperations(a: MercenaryOperationEntry, b: MercenaryOperationEntr
 function mercenaryCoverage(characters: CharacterSummary[]): MercenaryCoverageEntry[] {
   const invalidTokens = getInvalidTokenIds();
   const synced = getMercenaryDenSyncedIds();
+  const scopes = grantedScopesByCharacter();
   const gaps: MercenaryCoverageEntry[] = [];
 
   for (const character of characters) {
-    const missing = missingScopes(grantedScopes(character.id), [
+    const missing = missingScopes(scopes.get(character.id) ?? [], [
       SCOPE_READ_CHARACTER_STRUCTURES,
       SCOPE_READ_ACTIVITIES,
     ]);

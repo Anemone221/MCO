@@ -2,7 +2,7 @@ import { listAccounts } from '../db/repositories/accounts';
 import { listCharacters } from '../db/repositories/characters';
 import { listCharacterFatigue } from '../db/repositories/characterFatigue';
 import { getAllCloneMeta, getAllJumpClones } from '../db/repositories/clones';
-import { getActiveSkillLevels, getQueue } from '../db/repositories/skills';
+import { getActiveSkillLevels, getAllQueues } from '../db/repositories/skills';
 import { getTypeNames } from '../db/repositories/sde';
 import { INFOMORPH_SYNCHRONIZING_TYPE_ID, nextCloneJumpDate } from '../clones/jumpCooldown';
 import { findIdleOmegaAccounts } from '../notifications/idleOmega';
@@ -48,10 +48,11 @@ function characterNames(): Map<number, string> {
  * {@link deliverNotifications} and is not this function's business.
  */
 export function checkQueueDrainWarnings(getWindow: GetWindow, now = Date.now()): void {
+  const queues = getAllQueues();
   const candidates: QueueDrainCandidate[] = listCharacters().map((c) => {
     // Finished entries linger in ESI's queue; only what is left to train counts
     // towards "nothing queued behind this skill".
-    const queue = pendingQueue(getQueue(c.id), now);
+    const queue = pendingQueue(queues.get(c.id) ?? [], now);
     const head = queue[0] ?? null;
     return {
       characterId: c.id,
@@ -103,13 +104,14 @@ export function checkIdleOmegaAccounts(getWindow: GetWindow, now = Date.now()): 
 
   const characterCounts = new Map<number, number>();
   const trainingCounts = new Map<number, number>();
+  const queues = getAllQueues();
   for (const character of listCharacters()) {
     const accountId = character.accountId;
     if (accountId === null) continue;
     characterCounts.set(accountId, (characterCounts.get(accountId) ?? 0) + 1);
     // Finished entries linger in ESI's queue and a paused queue's head carries
     // no finish date; neither is a character that is training.
-    const head = pendingQueue(getQueue(character.id), now)[0] ?? null;
+    const head = pendingQueue(queues.get(character.id) ?? [], now)[0] ?? null;
     if (head?.finishDate) trainingCounts.set(accountId, (trainingCounts.get(accountId) ?? 0) + 1);
   }
 

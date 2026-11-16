@@ -1,12 +1,12 @@
 import type { DashboardCharacterEntry, DashboardSummary, ServerStatus } from '@shared/types';
 import { SCOPE_READ_ONLINE } from '../config';
-import { hasGrantedScope } from '../auth/token-store';
+import { grantedScopesByCharacter } from '../auth/token-store';
 import { getServerStatus } from '../esi/endpoints';
 import { rateLimiter } from '../esi/rate-limiter';
 import { listCharacters } from '../db/repositories/characters';
 import { listCharacterOnline } from '../db/repositories/characterOnline';
 import { sumWalletTotalsBetween } from '../db/repositories/characterWalletJournal';
-import { getTotalSp } from '../db/repositories/skills';
+import { getTotalSpByCharacter } from '../db/repositories/skills';
 import { currentMonthBoundsUtc } from '../wallet/monthIncome';
 
 /** Bounds a promise so one slow/hung external call can't stall the whole dashboard. */
@@ -33,6 +33,8 @@ async function buildServerStatus(): Promise<ServerStatus> {
 export async function buildDashboardSummary(): Promise<DashboardSummary> {
   const characters = listCharacters();
   const onlineRows = new Map(listCharacterOnline().map((o) => [o.characterId, o]));
+  const scopes = grantedScopesByCharacter();
+  const spByCharacter = getTotalSpByCharacter();
 
   const serverStatus = await buildServerStatus();
   const esiHealth = {
@@ -45,8 +47,8 @@ export async function buildDashboardSummary(): Promise<DashboardSummary> {
   let totalSp = 0;
   const characterEntries: DashboardCharacterEntry[] = characters.map((character) => {
     if (onlineRows.get(character.id)?.online) onlineCount += 1;
-    if (!hasGrantedScope(character.id, SCOPE_READ_ONLINE)) missingScopeCount += 1;
-    const characterSp = getTotalSp(character.id);
+    if (!scopes.get(character.id)?.includes(SCOPE_READ_ONLINE)) missingScopeCount += 1;
+    const characterSp = spByCharacter.get(character.id) ?? 0;
     totalSp += characterSp;
     return { characterId: character.id, characterName: character.name, totalSp: characterSp };
   });

@@ -239,6 +239,28 @@ export function addMember(groupId: number, characterId: number): void {
     .run(groupId, characterId);
 }
 
+/** Add many characters to one group in a single transaction; existing members are ignored. */
+export function addMembers(groupId: number, characterIds: number[]): void {
+  const db = getDb();
+  const stmt = db.prepare(
+    'INSERT OR IGNORE INTO character_group_members (group_id, character_id) VALUES (?, ?)',
+  );
+  db.transaction((ids: number[]) => {
+    for (const characterId of ids) stmt.run(groupId, characterId);
+  })(characterIds);
+}
+
+/** Take many characters out of one group in a single transaction. */
+export function removeMembers(groupId: number, characterIds: number[]): void {
+  const db = getDb();
+  const stmt = db.prepare(
+    'DELETE FROM character_group_members WHERE group_id = ? AND character_id = ?',
+  );
+  db.transaction((ids: number[]) => {
+    for (const characterId of ids) stmt.run(groupId, characterId);
+  })(characterIds);
+}
+
 export function removeMember(groupId: number, characterId: number): void {
   getDb()
     .prepare('DELETE FROM character_group_members WHERE group_id = ? AND character_id = ?')

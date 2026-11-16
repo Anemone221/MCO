@@ -1,12 +1,13 @@
+import type { NotificationKind, NotificationPreferences } from './notifications';
 import type {
   AccountBucket,
   AppInfo,
   AppNotification,
   BackgroundModeSettings,
+  BackupInfo,
   BlueprintBoard,
   CharacterDetail,
   CharacterGroup,
-  CharacterSummary,
   CloneBoardEntry,
   DashboardSummary,
   EsiActivitySummary,
@@ -14,6 +15,7 @@ import type {
   FitAnalysis,
   GroupDetail,
   LocationEntry,
+  LoginResult,
   MercenaryBoard,
   MiningSummary,
   NearestBoard,
@@ -29,6 +31,7 @@ import type {
   SkillPlan,
   StructureImportProgress,
   StructureSearchResult,
+  SyncProgress,
   SyncResult,
   SyncStatusReport,
   SystemSearchResult,
@@ -40,12 +43,17 @@ import type {
 export const IpcChannel = {
   charactersRoster: 'characters:roster',
   charactersAdd: 'characters:add',
+  charactersReauthorize: 'characters:reauthorize',
+  charactersCancelLogin: 'characters:cancelLogin',
   charactersRemove: 'characters:remove',
   charactersSync: 'characters:sync',
   charactersSyncAll: 'characters:syncAll',
+  charactersSyncMany: 'characters:syncMany',
   charactersAssignAccount: 'characters:assignAccount',
+  charactersAssignAccounts: 'characters:assignAccounts',
   charactersDetail: 'characters:detail',
   charactersChanged: 'characters:changed',
+  charactersSyncProgress: 'characters:syncProgress',
   accountsList: 'accounts:list',
   accountsCreate: 'accounts:create',
   accountsRename: 'accounts:rename',
@@ -64,7 +72,9 @@ export const IpcChannel = {
   groupsUnignorePod: 'groups:unignorePod',
   groupsRemove: 'groups:remove',
   groupsAddMember: 'groups:addMember',
+  groupsAddMembers: 'groups:addMembers',
   groupsRemoveMember: 'groups:removeMember',
+  groupsRemoveMembers: 'groups:removeMembers',
   tagsList: 'tags:list',
   tagsCreate: 'tags:create',
   tagsRename: 'tags:rename',
@@ -73,6 +83,7 @@ export const IpcChannel = {
   tagsAddMember: 'tags:addMember',
   tagsAddMembers: 'tags:addMembers',
   tagsRemoveMember: 'tags:removeMember',
+  tagsRemoveMembers: 'tags:removeMembers',
   sdeStatus: 'sde:status',
   sdeImport: 'sde:import',
   sdeCheckUpdate: 'sde:checkUpdate',
@@ -116,6 +127,8 @@ export const IpcChannel = {
   notificationsMarkAllRead: 'notifications:markAllRead',
   notificationsDismiss: 'notifications:dismiss',
   notificationsDismissAll: 'notifications:dismissAll',
+  notificationsPreferences: 'notifications:preferences',
+  notificationsSetPreference: 'notifications:setPreference',
   notificationsChanged: 'notifications:changed',
   systemClientConfigured: 'system:clientConfigured',
   systemAppInfo: 'system:appInfo',
@@ -131,6 +144,8 @@ export const IpcChannel = {
   settingsEsiActivity: 'settings:esiActivity',
   settingsExportLogs: 'settings:exportLogs',
   settingsExportBackup: 'settings:exportBackup',
+  settingsBackups: 'settings:backups',
+  settingsRestoreBackup: 'settings:restoreBackup',
   settingsOpenDataFolder: 'settings:openDataFolder',
   settingsBackgroundMode: 'settings:backgroundMode',
   settingsSetCloseToTray: 'settings:setCloseToTray',
@@ -150,6 +165,7 @@ export type IpcChannelName = (typeof IpcChannel)[keyof typeof IpcChannel];
  */
 export const IPC_EVENT_CHANNELS: readonly IpcChannelName[] = [
   IpcChannel.charactersChanged,
+  IpcChannel.charactersSyncProgress,
   IpcChannel.sdeProgress,
   IpcChannel.structuresImportProgress,
   IpcChannel.notificationsChanged,
@@ -174,14 +190,43 @@ export interface StructureImportSummary {
 export interface McoApi {
   characters: {
     roster: () => Promise<RosterEntry[]>;
-    add: () => Promise<CharacterSummary>;
+    /**
+     * Sign a character in through EVE SSO and store it. Resolves once the
+     * browser round trip is over — with `cancelled` if `cancelLogin` ended it.
+     *
+     * `deferSync` returns as soon as the login is stored and lets the first
+     * sync finish in the background (announced on `onChanged`), so the next
+     * sign-in of a run can start without waiting for it.
+     */
+    add: (deferSync?: boolean) => Promise<LoginResult>;
+    /**
+     * Run SSO again for a tracked character whose login expired or whose token
+     * lacks a scope, keeping any opt-in scope it holds. The first sync is
+     * deferred. Check the returned character's id: the user chooses the
+     * character on CCP's page, and may have chosen another.
+     */
+    reauthorize: (characterId: number) => Promise<LoginResult>;
+    /**
+     * Call off the sign-in that is waiting on the browser, freeing the callback
+     * port at once. Resolves to whether there was one.
+     */
+    cancelLogin: () => Promise<boolean>;
     remove: (characterId: number) => Promise<void>;
     sync: (characterId: number) => Promise<void>;
     syncAll: () => Promise<SyncResult[]>;
+    /** Sync a chosen set of characters, reporting on `onSyncProgress` like "Sync all". */
+    syncMany: (characterIds: number[]) => Promise<SyncResult[]>;
     assignAccount: (characterId: number, accountId: number | null) => Promise<void>;
+    /** Move many characters into one account (null = unassigned) in one transaction. */
+    assignAccounts: (characterIds: number[], accountId: number | null) => Promise<void>;
     detail: (characterId: number) => Promise<CharacterDetail>;
     /** Subscribe to background-sync updates. Returns an unsubscribe function. */
     onChanged: (callback: () => void) => () => void;
+    /**
+     * Subscribe to the progress of a multi-character sync — "Sync all" or a
+     * background sweep. Returns an unsubscribe function.
+     */
+    onSyncProgress: (callback: (progress: SyncProgress) => void) => () => void;
   };
   accounts: {
     list: () => Promise<AccountBucket[]>;
@@ -217,6 +262,9 @@ export interface McoApi {
     remove: (groupId: number) => Promise<void>;
     addMember: (groupId: number, characterId: number) => Promise<void>;
     removeMember: (groupId: number, characterId: number) => Promise<void>;
+    /** Add many characters to one group at once (Roster bulk bar). */
+    addMembers: (groupId: number, characterIds: number[]) => Promise<void>;
+    removeMembers: (groupId: number, characterIds: number[]) => Promise<void>;
   };
   tags: {
     list: () => Promise<Tag[]>;
@@ -228,6 +276,7 @@ export interface McoApi {
     /** Attach one tag to many characters at once (bulk fit/plan section tagging). */
     addMembers: (tagId: number, characterIds: number[]) => Promise<void>;
     removeMember: (tagId: number, characterId: number) => Promise<void>;
+    removeMembers: (tagId: number, characterIds: number[]) => Promise<void>;
   };
   sde: {
     status: () => Promise<SdeStatus>;
@@ -368,6 +417,13 @@ export interface McoApi {
     dismiss: (id: number) => Promise<void>;
     /** Dismiss every listed notification. Resolves with how many were cleared. */
     dismissAll: () => Promise<number>;
+    /** Which notification kinds are switched on (Settings → Notifications). */
+    preferences: () => Promise<NotificationPreferences>;
+    /**
+     * Switch one kind on or off. A kind that is off raises neither a toast nor
+     * a bell row. Resolves to every kind's resulting state.
+     */
+    setPreference: (kind: NotificationKind, enabled: boolean) => Promise<NotificationPreferences>;
     /** Subscribe to new/updated notifications. Returns an unsubscribe function. */
     onChanged: (callback: () => void) => () => void;
   };
@@ -423,6 +479,18 @@ export interface McoApi {
     exportLogs: () => Promise<string | null>;
     /** Save a SQLite backup via a save dialog; resolves to the path, or null if cancelled. */
     exportBackup: () => Promise<string | null>;
+    /**
+     * The snapshots MCO took on its own — weekly, before a schema migration and
+     * before a restore — newest first. They live in the profile's `backups`
+     * folder.
+     */
+    backups: () => Promise<BackupInfo[]>;
+    /**
+     * Replace the database with one of those snapshots. MCO restarts to do it:
+     * the swap happens before the database is opened, never under a running
+     * sync. Does not resolve on success — the app is on its way out.
+     */
+    restoreBackup: (fileName: string) => Promise<void>;
     /** Open the profile's data folder (where mco.sqlite lives) in the OS file manager. */
     openDataFolder: () => Promise<void>;
     /** Tray residency: whether sync keeps running once the window is closed. */

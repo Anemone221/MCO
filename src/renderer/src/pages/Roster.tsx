@@ -36,6 +36,14 @@ import CharacterAvatar from '../components/CharacterAvatar';
 import TagSelect from '../components/TagSelect';
 import ColumnPicker from '../components/ColumnPicker';
 import CharacterContextMenu from '../components/CharacterContextMenu';
+import BulkMembershipMenu from '../components/BulkMembershipMenu';
+import {
+  clickSelection,
+  headerSelection,
+  resolveSelection,
+  toggleAllVisible,
+} from '../lib/rosterSelection';
+import SortHeader from '../components/SortHeader';
 
 interface TagMenuState {
   x: number;
@@ -142,6 +150,9 @@ export default function Roster() {
   const [tagFilter, setTagFilter] = useState<TagFilter>(ALL_TAGS);
   const [tagMenu, setTagMenu] = useState<TagMenuState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // A sign-in run in progress: one character, or "several" — where each
+  // finished sign-in opens the next SSO page until the user says they're done.
+  const [adding, setAdding] = useState<{ several: boolean; added: number } | null>(null);
   const [filters, setFilters] = useState<RosterFilters>(NO_ROSTER_FILTERS);
   const [sort, setSort] = useState<RosterSort>({ key: 'name', dir: 'asc' });
   const [columns, setColumns] = useState(loadColumnVisibility);
@@ -150,6 +161,11 @@ export default function Roster() {
   // (the row would otherwise re-sort away or drop out of an "Unassigned"
   // filter mid-bulk-assignment). Cleared when sort or any filter changes.
   const [pinnedOrder, setPinnedOrder] = useState<number[] | null>(null);
+  // Rows ticked for a bulk action, and the last one clicked (where a
+  // shift-click range starts). The selection outlives filter changes, so it can
+  // be built up across several searches; the bulk bar says how many are hidden.
+  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
+  const [anchor, setAnchor] = useState<number | null>(null);
 
   useEffect(() => {
     setPinnedOrder(null);
@@ -184,6 +200,34 @@ export default function Roster() {
     } catch (e) {
       setError(errorMessage(e));
     } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Sign characters in. With `several`, each finished sign-in is followed
+   * straight away by the next SSO page — the first sync is left to finish in
+   * the background — so onboarding a roster is one visit to the browser
+   * rather than one round trip per character. The run ends when the user
+   * presses Done (which cancels the sign-in then waiting) or one fails.
+   */
+  async function addCharacters(several: boolean): Promise<void> {
+    setPinnedOrder(null);
+    setBusy('add');
+    setError(null);
+    setAdding({ several, added: 0 });
+    try {
+      for (;;) {
+        const result = await mco.characters.add(several);
+        if (result.outcome === 'cancelled') break;
+        await reload();
+        setAdding((prev) => (prev ? { ...prev, added: prev.added + 1 } : prev));
+        if (!several) break;
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setAdding(null);
       setBusy(null);
     }
   }
@@ -266,23 +310,81 @@ export default function Roster() {
     return sortRoster(filterRoster(base, filters, tagNames), sort, tagNames, planShares);
   }, [roster, tags, tagFilter, filters, sort, tagNames, planShares, pinnedOrder]);
   const filtered = visible.length !== roster.length;
-  // Character column + visible optional columns + plan columns + the actions column.
+  const visibleIds = useMemo(() => visible.map((e) => e.character.id), [visible]);
+  const selection = useMemo(
+    () =>
+      resolveSelection(
+        selected,
+        roster.map((e) => e.character.id),
+        visibleIds,
+      ),
+    [selected, roster, visibleIds],
+  );
+  const headerState = headerSelection(selected, visibleIds);
+
+  /** One bulk action on the selection: one IPC call, one transaction, one reload. */
+  function bulk(key: string, action: (ids: number[]) => Promise<unknown>): void {
+    const ids = selection.ids;
+    if (ids.length === 0) return;
+    void run(key, () => action(ids));
+  }
+
+  function bulkAssignAccount(value: string): void {
+    // Same hold as the per-row dropdown: the rows just moved must not re-sort
+    // or drop out of an "Unassigned" filter while they are still selected.
+    setPinnedOrder((prev) => prev ?? visibleIds);
+    bulk('account', (ids) =>
+      mco.characters.assignAccounts(ids, value === 'none' ? null : Number(value)),
+    );
+  }
+
+  // Selection column + character column + visible optional columns + plan
+  // columns + the actions column.
   const colCount =
-    1 + ROSTER_COLUMNS.filter((col) => columns[col.key]).length + planColumns.length + 1;
+    2 + ROSTER_COLUMNS.filter((col) => columns[col.key]).length + planColumns.length + 1;
 
   return (
     <section className="page page--fill">
       <div className="toolbar">
         <h2>Roster</h2>
         <div className="toolbar__actions">
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => void run('add', () => mco.characters.add())}
-            data-testid="add-character"
-          >
-            {busy === 'add' ? 'Waiting for EVE SSO…' : 'Add character'}
-          </button>
+          {adding ? (
+            <>
+              <span className="muted login-status" data-testid="add-status">
+                {adding.several
+                  ? `${adding.added} added — sign in to the next one in your browser`
+                  : 'Waiting for EVE SSO in your browser…'}
+              </span>
+              <button
+                type="button"
+                onClick={() => void mco.characters.cancelLogin()}
+                data-testid="add-cancel"
+              >
+                {adding.several ? 'Done' : 'Cancel'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={() => void addCharacters(false)}
+                data-testid="add-character"
+              >
+                Add character
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                disabled={busy !== null}
+                title="Keep signing characters in, one after another, until you press Done"
+                onClick={() => void addCharacters(true)}
+                data-testid="add-several"
+              >
+                Add several…
+              </button>
+            </>
+          )}
           <button
             type="button"
             className="ghost"
@@ -367,6 +469,74 @@ export default function Roster() {
         </div>
       )}
 
+      {selection.ids.length > 0 && (
+        <div className="bulk-bar" data-testid="bulk-bar">
+          <span className="bulk-bar__count" data-testid="bulk-count">
+            <strong>{selection.ids.length}</strong> selected
+            {selection.hidden > 0 && (
+              <span className="muted"> · {selection.hidden} hidden by filters</span>
+            )}
+          </span>
+          <select
+            value=""
+            disabled={busy !== null}
+            onChange={(e) => bulkAssignAccount(e.target.value)}
+            aria-label="Assign selected characters to an account"
+            data-testid="bulk-account"
+          >
+            <option value="" disabled>
+              Assign account…
+            </option>
+            <option value="none">Unassigned</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+          <BulkMembershipMenu
+            label="Tags"
+            items={tags}
+            emptyText="No tags yet — create some on the Tags page."
+            characterIds={selection.ids}
+            busy={busy !== null}
+            onAdd={(tagId) => bulk('tag', (ids) => mco.tags.addMembers(tagId, ids))}
+            onRemove={(tagId) => bulk('tag', (ids) => mco.tags.removeMembers(tagId, ids))}
+            testId="bulk-tags"
+          />
+          <BulkMembershipMenu
+            label="Groups"
+            items={groups}
+            emptyText="No groups yet — create some on the Groups page."
+            characterIds={selection.ids}
+            busy={busy !== null}
+            onAdd={(groupId) => bulk('group', (ids) => mco.groups.addMembers(groupId, ids))}
+            onRemove={(groupId) => bulk('group', (ids) => mco.groups.removeMembers(groupId, ids))}
+            testId="bulk-groups"
+          />
+          <button
+            type="button"
+            className="ghost btn-sm"
+            disabled={busy !== null}
+            onClick={() => bulk('syncSelected', (ids) => mco.characters.syncMany(ids))}
+            data-testid="bulk-sync"
+          >
+            {busy === 'syncSelected' ? 'Syncing…' : 'Sync selected'}
+          </button>
+          <button
+            type="button"
+            className="ghost btn-sm"
+            onClick={() => {
+              setSelected(new Set());
+              setAnchor(null);
+            }}
+            data-testid="bulk-clear"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {planProgress?.needsSkillData && (
         <p className="muted" data-testid="roster-plans-need-sde">
           Skill plan columns need static skill data — re-import static data to show them.
@@ -382,70 +552,59 @@ export default function Roster() {
       {roster.length === 0 ? (
         <div className="empty-state">
           <h3>No characters yet</h3>
-          <p>Click “Add character” to sign in with EVE SSO.</p>
+          <p>
+            Click “Add character” to sign in with EVE SSO, or “Add several…” to sign in one
+            character after another without coming back here in between.
+          </p>
         </div>
       ) : (
         <div className="table-scroll">
           <table className="data-table" data-testid="roster-table">
             <thead>
               <tr>
-                <th
-                  className="sortable"
-                  aria-sort={
-                    sort.key === 'name'
-                      ? sort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : undefined
-                  }
-                  onClick={() => toggleSort('name')}
-                >
-                  Character
-                  {sort.key === 'name' && (
-                    <span className="sort-arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>
-                  )}
+                <th className="select-cell">
+                  <input
+                    type="checkbox"
+                    checked={headerState === 'all'}
+                    ref={(el) => {
+                      if (el) el.indeterminate = headerState === 'some';
+                    }}
+                    disabled={visible.length === 0}
+                    onChange={() => setSelected((prev) => toggleAllVisible(prev, visibleIds))}
+                    aria-label={filtered ? 'Select all shown characters' : 'Select all characters'}
+                    title={filtered ? 'Select all shown' : 'Select all'}
+                    data-testid="select-all"
+                  />
                 </th>
+                <SortHeader
+                  label="Character"
+                  active={sort.key === 'name'}
+                  dir={sort.dir}
+                  onSort={() => toggleSort('name')}
+                />
                 {ROSTER_COLUMNS.filter((col) => columns[col.key]).map((col) => (
-                  <th
+                  <SortHeader
                     key={col.key}
-                    className={col.numeric ? 'sortable num' : 'sortable'}
-                    aria-sort={
-                      sort.key === col.key
-                        ? sort.dir === 'asc'
-                          ? 'ascending'
-                          : 'descending'
-                        : undefined
-                    }
-                    onClick={() => toggleSort(col.key)}
-                  >
-                    {col.label}
-                    {sort.key === col.key && (
-                      <span className="sort-arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>
-                    )}
-                  </th>
+                    label={col.label}
+                    active={sort.key === col.key}
+                    dir={sort.dir}
+                    numeric={col.numeric}
+                    onSort={() => toggleSort(col.key)}
+                  />
                 ))}
                 {planColumns.map((col) => {
                   const key = planSortKey(col.planId);
                   return (
-                    <th
+                    <SortHeader
                       key={key}
-                      className="sortable roster-plan-head"
+                      label={col.planName}
+                      active={sort.key === key}
+                      dir={sort.dir}
+                      className="roster-plan-head"
                       title={`Skill plan: ${col.planName}`}
-                      aria-sort={
-                        sort.key === key
-                          ? sort.dir === 'asc'
-                            ? 'ascending'
-                            : 'descending'
-                          : undefined
-                      }
-                      onClick={() => toggleSort(key)}
-                      data-testid={`roster-plan-head-${col.planId}`}
-                    >
-                      {col.planName}
-                      {sort.key === key && (
-                        <span className="sort-arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>
-                      )}
-                    </th>
+                      testId={`roster-plan-head-${col.planId}`}
+                      onSort={() => toggleSort(key)}
+                    />
                   );
                 })}
                 <th aria-label="actions" />
@@ -463,8 +622,25 @@ export default function Roster() {
                 <tr
                   key={entry.character.id}
                   data-testid={`roster-row-${entry.character.id}`}
+                  className={selected.has(entry.character.id) ? 'is-selected' : undefined}
                   onContextMenu={(e) => openTagMenu(e, entry)}
                 >
+                  <td className="select-cell">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(entry.character.id)}
+                      onChange={(e) => {
+                        // The change comes from a click (or Space); shift on it
+                        // extends the selection from the last row clicked.
+                        const shift = (e.nativeEvent as MouseEvent).shiftKey === true;
+                        const id = entry.character.id;
+                        setSelected((prev) => clickSelection(prev, visibleIds, id, anchor, shift));
+                        setAnchor(id);
+                      }}
+                      aria-label={`Select ${entry.character.name}`}
+                      data-testid={`select-${entry.character.id}`}
+                    />
+                  </td>
                   <td>
                     <span className="cell-with-avatar">
                       <CharacterAvatar characterId={entry.character.id} />

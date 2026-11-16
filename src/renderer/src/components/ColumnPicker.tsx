@@ -4,7 +4,7 @@ import { ROSTER_COLUMNS, type ColumnVisibility, type RosterColumnKey } from '../
 /**
  * "Columns" dropdown for the Roster table. Lets the user show/hide any column
  * except Character, which is always shown (rendered as a disabled, checked row).
- * Closes on outside click or Escape, mirroring RosterContextMenu.
+ * Closes on outside click or Escape, mirroring CharacterContextMenu.
  */
 export default function ColumnPicker({
   visibility,

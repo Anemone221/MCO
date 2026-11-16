@@ -35,6 +35,26 @@ export function getCached(url: string): CachedResponse | null {
   };
 }
 
+/** Cached entries for many URLs in one query; URLs never fetched are simply absent. */
+export function getCachedMany(urls: string[]): Map<string, CachedResponse> {
+  const result = new Map<string, CachedResponse>();
+  if (urls.length === 0) return result;
+  const stmt = getDb().prepare(
+    `SELECT url, etag, expires_at, body, pages FROM esi_cache
+     WHERE url IN (${urls.map(() => '?').join(',')})`,
+  );
+  for (const row of stmt.all(...urls) as CacheRow[]) {
+    result.set(row.url, {
+      url: row.url,
+      etag: row.etag,
+      expiresAt: row.expires_at,
+      body: row.body,
+      pages: row.pages,
+    });
+  }
+  return result;
+}
+
 export function putCached(entry: CachedResponse): void {
   getDb()
     .prepare(

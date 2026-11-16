@@ -44,6 +44,24 @@ export function listTagsForCharacter(characterId: number): OrgRef[] {
     .all(characterId) as TagRow[];
 }
 
+/** Tags per character, each list in name order, in one query (for the group page's member rows). */
+export function listTagsByCharacter(): Map<number, OrgRef[]> {
+  const rows = getDb()
+    .prepare(
+      `SELECT ct.character_id, t.id, t.name, t.color FROM tags t
+       JOIN character_tags ct ON ct.tag_id = t.id
+       ORDER BY ct.character_id, t.name`,
+    )
+    .all() as Array<TagRow & { character_id: number }>;
+  const map = new Map<number, OrgRef[]>();
+  for (const r of rows) {
+    const list = map.get(r.character_id) ?? [];
+    list.push({ id: r.id, name: r.name, color: r.color });
+    map.set(r.character_id, list);
+  }
+  return map;
+}
+
 export function createTag(name: string, color: string | null = null): Tag {
   const info = getDb().prepare('INSERT INTO tags (name, color) VALUES (?, ?)').run(name, color);
   return { id: Number(info.lastInsertRowid), name, color, characterIds: [] };
@@ -81,6 +99,15 @@ export function addTagToCharacters(tagId: number, characterIds: number[]): void 
     for (const characterId of ids) stmt.run(tagId, characterId);
   });
   insertAll(characterIds);
+}
+
+/** Detach one tag from many characters in a single transaction. */
+export function removeTagFromCharacters(tagId: number, characterIds: number[]): void {
+  const db = getDb();
+  const stmt = db.prepare('DELETE FROM character_tags WHERE tag_id = ? AND character_id = ?');
+  db.transaction((ids: number[]) => {
+    for (const characterId of ids) stmt.run(tagId, characterId);
+  })(characterIds);
 }
 
 export function removeTagFromCharacter(tagId: number, characterId: number): void {

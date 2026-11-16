@@ -71,8 +71,8 @@ let rosterIds: number[] = [];
 vi.mock('@main/db/repositories/characters', () => ({
   listCharacters: () => rosterIds.map((id) => ({ id, name: `Pilot ${id}` })),
 }));
-vi.mock('@main/db/repositories/skills', () => ({ getCharacterSkillMap: () => new Map() }));
 vi.mock('@main/services/trainingData', () => ({
+  getEffectiveSkillMap: () => new Map(),
   getNeuralAttributes: () => undefined,
   getSkillTrainingAttributes: () => new Map(),
 }));

@@ -5,7 +5,7 @@ import type {
 } from '@shared/types';
 import { SCOPE_READ_BLUEPRINTS, SCOPE_READ_CORP_BLUEPRINTS } from '../config';
 import { startLogin } from '../auth/esi-oauth';
-import { grantedScopes, hasGrantedScope } from '../auth/token-store';
+import { grantedScopesByCharacter, hasGrantedScope } from '../auth/token-store';
 import { classifyEsiDataStatus, missingScopes } from '../auth/scopeStatus';
 import { UserFacingError } from '../errors';
 import { EsiHttpError } from '../esi/client';
@@ -237,8 +237,9 @@ export function buildBlueprintBoard(): BlueprintBoard {
 
   const syncTimes = getCharacterBlueprintSyncTimes();
   const invalid = getInvalidTokenIds();
+  const scopes = grantedScopesByCharacter();
   const coverage: BlueprintCharacterCoverage[] = characters.map((character) => {
-    const missing = missingScopes(grantedScopes(character.id), [SCOPE_READ_BLUEPRINTS]);
+    const missing = missingScopes(scopes.get(character.id) ?? [], [SCOPE_READ_BLUEPRINTS]);
     return {
       characterId: character.id,
       characterName: character.name,

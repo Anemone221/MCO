@@ -7,7 +7,8 @@ import { getAccount } from '../db/repositories/accounts';
 import { getCharacterAttributesRow } from '../db/repositories/characterAttributes';
 import { getCharacterFatigueRow } from '../db/repositories/characterFatigue';
 import { getCharacterWalletRow } from '../db/repositories/characterWallet';
-import { getCloneMeta, getJumpClones } from '../db/repositories/clones';
+import { getActiveImplants, getCloneMeta, getJumpClones } from '../db/repositories/clones';
+import { getCharacterLocationRow } from '../db/repositories/characterLocation';
 import { getInvalidTokenIds } from '../db/repositories/tokens';
 import {
   INFOMORPH_SYNCHRONIZING_TYPE_ID,
@@ -18,20 +19,22 @@ import { listTagsForCharacter } from '../db/repositories/tags';
 import { getActiveSkillLevel, getCharacterSkillGroupSp, getTotalSp } from '../db/repositories/skills';
 import { getSystems, getTypeNames } from '../db/repositories/sde';
 import { getStructureNames } from '../db/repositories/structures';
-import {
-  getCharacterImplants,
-  getCharacterLocation,
-  getCharacterShip,
-} from '../esi/endpoints';
 import { getSkillQueue, getTrainingStatus } from './characterSync';
 import { criticalKeysFor, locationDisplayName, resolveStationNames } from './cloneService';
 import { findCriticalMatch } from '../clones/criticalImplants';
 import { listPlanProgressForCharacter } from './planService';
 
 /**
- * Assemble the character detail view. Stored data (skills, queue) is read from
- * the DB; live data (location, ship, implants) is fetched from ESI, and each
- * live call is tolerated independently so one failure does not blank the page.
+ * Assemble the character detail view, entirely from stored data.
+ *
+ * Location, ship and active implants come from the rows sync and live tracking
+ * keep (`character_location`, `character_implants`) — not from live ESI. The
+ * page used to fetch them on open, which put three authed requests (and often a
+ * token refresh) on the critical path, queued behind whatever the hourly sweep
+ * or the live-tracking presence check had in the rate limiter: tens of seconds
+ * on a busy moment. Live tracking refreshes an online character every 20 s, so
+ * the stored row is current where it matters; an offline character's is as old
+ * as its last sync, which `locationUpdatedAt` reports.
  */
 export async function buildCharacterDetail(characterId: number): Promise<CharacterDetail> {
   const character = getCharacter(characterId);
@@ -41,15 +44,11 @@ export async function buildCharacterDetail(characterId: number): Promise<Charact
   const totalSp = getTotalSp(characterId);
   const skillGroups = getCharacterSkillGroupSp(characterId);
 
-  const [locationResult, shipResult, implantsResult] = await Promise.allSettled([
-    getCharacterLocation(characterId),
-    getCharacterShip(characterId),
-    getCharacterImplants(characterId),
-  ]);
+  const stored = getCharacterLocationRow(characterId);
 
   let location: CharacterDetail['location'] = null;
-  if (locationResult.status === 'fulfilled') {
-    const systemId = locationResult.value.solar_system_id;
+  const systemId = stored?.solarSystemId ?? null;
+  if (systemId !== null) {
     location = {
       solarSystemId: systemId,
       solarSystemName: getSystems([systemId]).get(systemId)?.name ?? null,
@@ -57,25 +56,21 @@ export async function buildCharacterDetail(characterId: number): Promise<Charact
   }
 
   let ship: CharacterDetail['ship'] = null;
-  if (shipResult.status === 'fulfilled') {
-    const typeName = getTypeNames([shipResult.value.ship_type_id]).get(
-      shipResult.value.ship_type_id,
-    );
+  const shipTypeId = stored?.shipTypeId ?? null;
+  if (shipTypeId !== null) {
     ship = {
-      typeId: shipResult.value.ship_type_id,
-      typeName: typeName ?? null,
-      name: shipResult.value.ship_name,
+      typeId: shipTypeId,
+      typeName: getTypeNames([shipTypeId]).get(shipTypeId) ?? null,
+      name: stored?.shipName ?? '',
     };
   }
 
-  let implants: CharacterDetail['implants'] = [];
-  if (implantsResult.status === 'fulfilled') {
-    const names = getTypeNames(implantsResult.value);
-    implants = implantsResult.value.map((typeId) => ({
-      typeId,
-      typeName: names.get(typeId) ?? null,
-    }));
-  }
+  const implantIds = getActiveImplants(characterId);
+  const implantNames = getTypeNames(implantIds);
+  const implants: CharacterDetail['implants'] = implantIds.map((typeId) => ({
+    typeId,
+    typeName: implantNames.get(typeId) ?? null,
+  }));
 
   // Fatigue and clones come from the DB (populated by the sync cycle), not
   // live ESI — they change rarely and the sync already respects scope grants.
@@ -181,6 +176,8 @@ export async function buildCharacterDetail(characterId: number): Promise<Charact
     skillGroups,
     location,
     ship,
+    // SQLite's datetime('now') is UTC without a zone marker.
+    locationUpdatedAt: stored ? `${stored.updatedAt.replace(' ', 'T')}Z` : null,
     implants,
     implantsCritical:
       findCriticalMatch(

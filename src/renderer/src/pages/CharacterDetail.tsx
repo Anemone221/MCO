@@ -105,9 +105,9 @@ function WalletCard({ detail }: { detail: Detail }) {
             <p className="muted">{formatIskExact(wallet.balance)}</p>
           </>
         ) : detail.walletStatus === 'scope-missing' ? (
-          <p className="muted">Wallet scope not granted — re-add this character to enable it.</p>
+          <p className="muted">Wallet scope not granted — re-authorize this character in Settings to enable it.</p>
         ) : detail.walletStatus === 'login-expired' ? (
-          <p className="muted">Login expired — re-add this character.</p>
+          <p className="muted">Login expired — re-authorize this character in Settings.</p>
         ) : (
           <p className="muted">No wallet data synced yet.</p>
         )}
@@ -442,6 +442,11 @@ export default function CharacterDetail() {
   }
   const onSetCritical: SetCritical = (implants, critical, label) =>
     void setCritical(implants, critical, label);
+  // Location and ship are the stored values (live tracking keeps an online
+  // character's current), so say how old they are.
+  const locationAsOf = detail?.locationUpdatedAt
+    ? `As of ${formatDate(detail.locationUpdatedAt)}`
+    : undefined;
 
   return (
     <section className="page">
@@ -496,13 +501,13 @@ export default function CharacterDetail() {
                 <dt>Total SP</dt>
                 <dd>{formatSp(detail.totalSp)}</dd>
                 <dt>Location</dt>
-                <dd>
+                <dd title={locationAsOf} data-testid="detail-location">
                   {detail.location
                     ? (detail.location.solarSystemName ?? `System ${detail.location.solarSystemId}`)
                     : '—'}
                 </dd>
                 <dt>Active ship</dt>
-                <dd>
+                <dd title={locationAsOf}>
                   {detail.ship
                     ? `${detail.ship.typeName ?? `Type ${detail.ship.typeId}`} — ${detail.ship.name}`
                     : '—'}

@@ -3,16 +3,17 @@ import { statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AppInfo, CharacterSyncStatus, SyncStatusReport } from '@shared/types';
-import { APP_VERSION, ESI_BASE_URL, ESI_SCOPES, GITHUB_URL } from '../config';
-import { getCapturedLog } from '../log';
+import { APP_VERSION, ESI_SCOPES, GITHUB_URL } from '../config';
+import { getCapturedLog, getPersistedLog } from '../log';
 import { formatEsiDiagnostics } from '../esi/esiLog';
 import { missingScopes } from '../auth/scopeStatus';
-import { grantedScopes } from '../auth/token-store';
-import { getDb } from '../db';
+import { grantedScopesByCharacter } from '../auth/token-store';
+import { dbFilePath, getDb } from '../db';
 import { appliedSchemaVersion } from '../db/migrations';
 import { listAccounts } from '../db/repositories/accounts';
 import { listCharacters } from '../db/repositories/characters';
-import { getCached } from '../db/repositories/esiCache';
+import { getCachedMany } from '../db/repositories/esiCache';
+import { skillsCacheUrl } from '../esi/endpoints';
 import { getSdeStatus } from '../db/repositories/sde';
 import { countStructures } from '../db/repositories/structures';
 import { getInvalidTokenIds } from '../db/repositories/tokens';
@@ -23,9 +24,12 @@ import { getSchedulerStatus } from './scheduler';
 export function buildSyncStatus(): SyncStatusReport {
   const accounts = new Map(listAccounts().map((a) => [a.id, a.label]));
   const invalidTokens = getInvalidTokenIds();
+  const all = listCharacters();
+  const scopes = grantedScopesByCharacter();
+  const skillsCache = getCachedMany(all.map((c) => skillsCacheUrl(c.id)));
 
-  const characters: CharacterSyncStatus[] = listCharacters().map((character) => {
-    const cached = getCached(`${ESI_BASE_URL}/characters/${character.id}/skills`);
+  const characters: CharacterSyncStatus[] = all.map((character) => {
+    const cached = skillsCache.get(skillsCacheUrl(character.id));
     return {
       characterId: character.id,
       characterName: character.name,
@@ -38,7 +42,7 @@ export function buildSyncStatus(): SyncStatusReport {
         cacheExpiresAt: cached?.expiresAt ?? null,
         tokenInvalid: invalidTokens.has(character.id),
       }),
-      missingScopes: missingScopes(grantedScopes(character.id), ESI_SCOPES),
+      missingScopes: missingScopes(scopes.get(character.id) ?? [], ESI_SCOPES),
     };
   });
 
@@ -62,7 +66,7 @@ export function getAppInfo(): AppInfo {
     version: APP_VERSION,
     platform: `${process.platform} ${process.arch}`,
     electronVersion: process.versions.electron ?? 'unknown',
-    dbPath: join(app.getPath('userData'), 'mco.sqlite'),
+    dbPath: dbFilePath(),
     userDataPath: app.getPath('userData'),
     githubUrl: GITHUB_URL,
     // Read from the database rather than reported from LATEST_SCHEMA_VERSION:
@@ -99,7 +103,7 @@ function safely(read: () => string): string {
 }
 
 function dbPathWithSize(): string {
-  const path = join(app.getPath('userData'), 'mco.sqlite');
+  const path = dbFilePath();
   try {
     return `${path} (${statSync(path).size} bytes)`;
   } catch {
@@ -112,7 +116,7 @@ function sdeSummary(): string {
   return sde.installed ? `${sde.version} (imported ${sde.importedAt})` : 'not imported';
 }
 
-/** Environment header + ESI activity + this session's captured log. */
+/** Environment header + ESI activity + the log (the file's, when there is one). */
 export function buildDiagnosticsText(title: string): string {
   const header = [
     title,
@@ -130,16 +134,24 @@ export function buildDiagnosticsText(title: string): string {
     '',
     safely(formatEsiDiagnostics),
     '',
-    '--- session log (oldest first; only the current run is captured) ---',
-    '',
   ].join('\n');
 
-  return header + getCapturedLog() + '\n';
+  // The file reaches back past the last restart; the in-memory buffer is the
+  // fallback for a profile folder that could not be written to.
+  const persisted = getPersistedLog();
+  const log =
+    persisted !== null
+      ? '--- log (oldest first; earlier sessions, then this one) ---\n\n' + persisted
+      : '--- session log (oldest first; only the current run is captured) ---\n\n' +
+        getCapturedLog() +
+        '\n';
+
+  return header + log;
 }
 
 /**
- * Save a diagnostics file (environment header + this session's captured log)
- * to a user-chosen location. Resolves to the path, or null when cancelled.
+ * Save a diagnostics file (environment header + the log, reaching back past
+ * the last restart) to a user-chosen location. Resolves to the path, or null when cancelled.
  */
 export async function exportLogs(window: BrowserWindow | null): Promise<string | null> {
   const target = await pickSavePath(window, {

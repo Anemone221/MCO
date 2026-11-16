@@ -66,3 +66,16 @@ export function listCharacterLocations(): CharacterLocationRow[] {
     .all() as LocationDbRow[];
   return rows.map(toRow);
 }
+
+/** One character's last stored location and ship; null until sync or live tracking wrote one. */
+export function getCharacterLocationRow(characterId: number): CharacterLocationRow | null {
+  const row = getDb()
+    .prepare(
+      `SELECT character_id, solar_system_id, station_id, structure_id,
+              ship_type_id, ship_name, updated_at
+       FROM character_location
+       WHERE character_id = ?`,
+    )
+    .get(characterId) as LocationDbRow | undefined;
+  return row ? toRow(row) : null;
+}

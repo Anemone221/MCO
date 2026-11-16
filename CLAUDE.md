@@ -23,16 +23,21 @@ Deeper documentation lives in [`docs/`](docs/README.md):
 - **Electron** (main + preload + renderer) built with **electron-vite**; packaged with **electron-builder**.
 - **TypeScript** everywhere, strict. React 19 + react-router in the renderer.
 - **better-sqlite3** (synchronous SQLite, WAL) in the main process only.
-- **vitest** for unit tests, **Playwright** (`_electron`) for E2E. CI runs on Linux/Windows/macOS.
+- **vitest** for unit tests and the database-backed suite (`tests/db/`, run inside
+  Electron's Node — better-sqlite3 is built for Electron), **Playwright** (`_electron`)
+  for E2E. CI runs on Linux/Windows/macOS.
 - Data sources: EVE **ESI** API (authed via SSO PKCE) and the EVE **SDE** static data (YAML zip, imported into SQLite).
 
 ## Commands
 
 ```
-npm run dev              # run the app with hot reload
+npm run dev              # run the app with hot reload, on the dev database (--db=dev)
+npm run dev:copy         # same, after replacing the dev database with a copy of prod
+npm run dev:prod         # same, on the real profile database (asks before migrating it)
 npm run typecheck        # tsc for node (main/preload) + web (renderer)
 npm run lint             # eslint
-npm run test:unit        # vitest
+npm run test:unit        # vitest (pure logic)
+npm run test:db          # vitest inside Electron's Node: real SQLite, migrations, sync, login
 npm run test:e2e         # electron-vite build + playwright (real app, throwaway profile)
 npm run dist             # build + package installer (electron-builder)
 ```
@@ -48,6 +53,9 @@ lookups and DB reads into view models; repositories (`src/main/db/repositories/`
 only code that touches SQL. Pure logic (parsers, analysis math, roster filtering/sorting)
 is kept in dependency-free modules (`src/main/fits/`, `src/main/plans/`,
 `src/main/notifications/`, `src/renderer/src/lib/`) so unit tests need no Electron or DB.
+Repositories, services, migrations and the sync/login flows are covered by `tests/db/`
+against real SQLite with a fake ESI/SSO (`tests/db/support/`) — add a test there when
+you change SQL or a sync task.
 
 Key invariants:
 
@@ -58,7 +66,8 @@ Key invariants:
   state, `errorMessage()`, the optional `mco.characters.onChanged` subscription, and
   discarding superseded requests.
 - **All ESI calls go through `esiGet` in `src/main/esi/client.ts`** — it handles caching
-  (ETag/Expires), token refresh, the error-limit rate limiter, and retries. Never `fetch`
+  (ETag/Expires), token refresh, the rate limiter (error limit plus per-route-group
+  buckets from `X-Ratelimit-*`), and retries. Never `fetch`
   ESI directly. Paginated routes use its sibling `esiGetPaged`, which pages by ESI's
   `X-Pages` — never write a page loop that infers the end from a short page or a 404.
 - **One process per profile** (single-instance lock): EVE SSO rotates refresh tokens on

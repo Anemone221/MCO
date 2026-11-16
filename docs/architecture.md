@@ -13,11 +13,15 @@ MCO is an Electron app with the standard three-process split, built by
 │  sde/            SDE download + streaming YAML import            │
 │  fits/ plans/    pure parsers + analysis math (no I/O)           │
 │  notifications/  pure notification rules (queue drain, timers)   │
+│  skills/ clones/ pure queue trimming, clone cooldown, pod rules  │
+│  blueprints/ mercenary/ mining/ map/ structures/                 │
+│                  pure ownership, den, ledger, routing, refresh   │
 │  sync/           pure character sync-state classification        │
 │  update/         pure semver compare + release parsing/mapping   │
 │  wallet/         pure current-month income windowing             │
 │  db/             better-sqlite3 handle, migrations, repositories │
-│  log.ts          console capture for the Settings log export     │
+│  log.ts logFile.ts  console capture + the rotating log file      │
+│  fatal.ts webSecurity.ts  crash report, navigation/URL policy    │
 └───────────────▲──────────────────────────────────────────────────┘
                 │ ipcMain.handle / webContents.send
 ┌───────────────┴───────────┐
@@ -28,9 +32,11 @@ MCO is an Electron app with the standard three-process split, built by
 │  renderer (React 19 + react-router, sandboxed, no Node)          │
 │  App.tsx      sidebar nav + routes                               │
 │  pages/       Dashboard, Roster, CharacterDetail, Accounts,      │
-│               Groups, Tags, Location, Fits(+Detail),             │
-│               Plans(+Detail), Clones, Wallet, Settings           │
-│  components/  SdeBanner, UpdateBanner, NotificationBell, …       │
+│               Groups(+Detail), Tags, Location, Fits(+Detail),    │
+│               Plans(+Detail), PlanCreator, Clones, Blueprints,   │
+│               Wallet, Mining, MercenaryDens, Settings            │
+│  components/  SdeBanner, UpdateBanner, NotificationBell,         │
+│               ActivityIndicator, charts/, …                      │
 │  lib/         pure view logic (filter/sort/format) — unit-tested │
 │  theme.ts     applies/persists the theme (DOM side of lib/theme) │
 └──────────────────────────────────────────────────────────────────┘
@@ -47,7 +53,8 @@ The contract lives in `src/shared/ipc.ts`:
 - `IpcChannel` — a const map of every channel name (`'characters:roster'`, `'tags:create'`, …).
 - `McoApi` — the typed shape of `window.mco`, grouped by domain
   (`characters`, `accounts`, `groups`, `tags`, `sde`, `fits`, `plans`, `location`,
-  `clones`, `notifications`, `system`, `settings`).
+  `structures`, `systems`, `clones`, `blueprints`, `dashboard`, `wallet`, `mining`,
+  `mercenary`, `notifications`, `system`, `settings`).
 
 **Adding a new IPC capability touches exactly four files:**
 
@@ -66,9 +73,11 @@ letting one page fail later with "No handler registered". A packaged build logs 
 instead — one broken page beats refusing to start.
 
 Request/response uses `invoke`/`handle`. Main→renderer push uses `webContents.send` on
-two event channels, each with an `onChanged`-style subscription in the API:
-`characters:changed` (background sync finished a sweep) and `notifications:changed`
-(new notification recorded). `sde:progress` streams import progress the same way.
+the six event channels listed in `IPC_EVENT_CHANNELS`, each with an `onChanged`- or
+`onProgress`-style subscription in the API: `characters:changed` (stored character data
+changed — a sweep, a sync, the live tracker), `characters:syncProgress` (a fleet sync
+finished a wave), `notifications:changed` (the bell's list changed), `sde:progress`,
+`structures:importProgress` and `update:progress`.
 
 ### Loading data in a page
 
@@ -134,7 +143,7 @@ disappearance with nothing left to look at.
 
 `initFatalErrorHandler()` (installed in `index.ts` immediately after `initLogCapture()`,
 so there is a buffer to write) logs the error, writes
-`mco-crash-<stamp>.txt` **next to the profile database**, then shows a dialog naming that
+`mco-crash-<stamp>.txt` **in the profile folder** (`userData`), then shows a dialog naming that
 file and exits. Order matters: logging first puts the crash's own stack inside the report,
 and the write is synchronous because an async write queued behind a dying event loop may
 never reach the disk. A re-entrancy flag keeps a failure *while reporting* from looping.
@@ -154,8 +163,10 @@ With ~90 characters syncing, one rejected background promise must not close the 
 
 - **Repositories** (`src/main/db/repositories/*`) are the only modules that write SQL.
   One file per aggregate: `characters`, `accounts`, `groups`, `tags`, `tokens`, `skills`,
-  `esiCache`, `fits`, `plans`, `notifications`, `clones`, `characterLocation`,
-  `characterFatigue`, `sde`.
+  `esiCache`, `fits`, `plans`, `notifications`, `clones`, `criticalImplants`,
+  `characterLocation`, `characterFatigue`, `characterAttributes`, `characterOnline`,
+  `characterWallet`, `characterWalletJournal`, `characterMining`, `blueprints`,
+  `mercenaryDens`, `planets`, `structures`, `appSettings`, `sde`.
 - **Services** (`src/main/services/*`) compose repositories + ESI + SDE lookups into the
   view models the renderer consumes (`buildRoster`, `buildLocationBoard`,
   `buildCloneBoard`, `buildCharacterDetail`, `analyzeFitById`, `analyzePlanById`,
@@ -166,9 +177,14 @@ With ~90 characters syncing, one rejected background promise must not close the 
   `auth/scopeStatus.ts`, `sync/characterSyncState.ts`, `update/version.ts`,
   `update/github.ts`, `launchMode.ts`, and the
   view-model half of `renderer/src/lib/` (`rosterView`, `groupView`, `blueprintView`,
-  `costView`, `format`, `groups`, `tags`, `theme`, `motion`, `demo`). The bridge modules
-  there — `ipc.ts` and the `useMcoData` hook it backs — need `window.mco` and a React
-  renderer, so they are covered by E2E instead.
+  `costView`, `format`, `groups`, `tags`, `theme`, `motion`, `demo`, and the rest of the
+  `*View.ts` / `planDraft` / `autoRemap` family). The bridge modules there — `ipc.ts` and
+  the `useMcoData` hook it backs — need `window.mco` and a React renderer, so they are
+  covered by E2E instead; the one exception is `ipc.ts`'s demo wrapper, unit-tested in
+  `tests/unit/renderer/`.
+- **The database-backed layer** (repositories, services, migrations, sync, login, the
+  scheduler) is covered by `tests/db/` against real SQLite — see
+  [development.md](development.md#testing-strategy).
 
 Path aliases: `@main`, `@shared`, `@renderer` (see `electron.vite.config.ts`).
 
@@ -179,7 +195,7 @@ Two ways to launch, distinguished by the `--background` flag (`launchMode.ts`):
 - **Normal**: opens the main window (1400×900, dark `#0d1117`).
 - **Background** (`npm run start:background`, or the "MCO Background Sync" Start-menu
   shortcut created by `build/installer.nsh`): no window — just a tray icon (`tray.ts`)
-  with *Open MCO / Run sync now / Quit*, while the scheduler keeps syncing.
+  with *Open MCO / Run sync now / Quit MCO*, while the scheduler keeps syncing.
 
 The scheduler runs in **both** modes — the flag only decides whether a window and a tray
 icon exist at startup. Which is why tray residency is a *runtime* choice too, owned by
@@ -208,7 +224,10 @@ a no-op. Closing a promoted window in background mode drops back to tray-only sy
 
 Startup order: open DB (runs migrations) → `initBackgroundMode` (reads the preference, so
 it must follow the DB open) → `registerIpc` → `startScheduler` → `initUpdates` → window or
-tray. On quit: destroy tray, stop scheduler, close DB.
+tray. On quit: destroy tray, stop scheduler, close DB, flush the log file.
+
+Which database `getDb()` opens is a launch argument (`--db=dev|prod`, `db/dbMode.ts`)
+— see [development.md](development.md#dev-and-prod-databases-dbdbmodets-dbdevtokensts).
 
 `initUpdates` (`services/updateService.ts`) configures `electron-updater` and subscribes
 to it; it does not check. Detection stays renderer-driven — the banner mounting, Settings
@@ -228,9 +247,25 @@ under the NSIS build target (which, unlike Squirrel, does not auto-register the 
   fixed clock (see [esi.md](esi.md)).
 - Each character syncs independently (`Promise.allSettled`); one failure never aborts the
   sweep.
-- After the sweep, `checkQueueDrainWarnings` scans stored skill queues and raises
-  notifications (see [features.md](features.md#notifications)).
+- Before the sync, the sweep does its housekeeping: the weekly backup when one is due
+  and pruning of old dismissed notifications.
+- After the sync, four notification checks run over the stored data —
+  `checkQueueDrainWarnings`, `checkIdleOmegaAccounts`, `checkFatigueCleared`,
+  `checkCloneJumpReady` (see [features.md](features.md#notifications)).
 - The sweep ends by pushing `characters:changed` so an open window refreshes.
+- **No network, no sweep.** Before the sync step, the sweep asks the connectivity gate
+  (`esi/connectivity.ts`, see [esi.md](esi.md#connectivity-esiconnectivityts)); when the
+  OS reports no network, or a run of requests got no response, the sync is skipped and
+  the characters stay due. The housekeeping (weekly backup, notification pruning) and
+  the timer checks still run, since they need no network. A fleet sync — the hourly
+  sweep or "Sync all" — also stops between waves once the gate closes, reporting the
+  rest as `skipped: network …` rather than sending 80 more characters into the same hole.
+- **Sleep and wake.** `powerMonitor`'s `resume` event restarts the hourly cadence from
+  the wake (so the "next sweep" in Settings is right again) and schedules a catch-up
+  sweep 10 s later. While the network is still down it looks again every minute for up
+  to half an hour, then leaves it to the hourly tick. The catch-up polls presence first,
+  so characters that logged off during the sleep leave the live-tracking loop before it
+  polls them.
 
 ## Live tracking (`services/liveTracking.ts`)
 
@@ -249,6 +284,12 @@ but pointless.
 - Each loop is single-flight, skips characters with an invalid token, and pushes
   `characters:changed` **only when stored data actually changed** — every open page
   reloads on that event.
+- Both loops consult the connectivity gate first and run no tick while it is closed, so
+  an offline laptop in tray mode is quiet rather than failing every 20 s.
+- Each active tick reads the shared tables (implants, locations, critical sets, granted
+  scopes, names) **once**, before fanning out over the online characters — this loop
+  multiplies roster size by the highest event rate in the app, so its per-tick query
+  count is fixed rather than per character.
 - Both loops have their own timers, independent of the hourly sweep — a login is
   noticed within one presence interval, not at the next sweep.
 - **Off switch:** Settings → Background sync → "Live-track online characters"
@@ -268,6 +309,11 @@ but pointless.
 | Active implants | sync, if scope granted; every ~20 s while online (live tracker) | DB |
 | Jump clones | sync, only if scope granted (best-effort) | DB |
 | Jump fatigue | sync, only if scope granted (best-effort) | DB |
+| Neural attributes, wallet balance, wallet journal, mining ledger, blueprints | sync, only if scope granted (best-effort) | DB |
+| Mercenary dens + operations | sync, only if scope granted (best-effort; listing plus per-den detail) | DB |
+| Alt-corp blueprints | once per scheduler sweep, through the corp's reader character | DB |
+| Structure names | sync (ids the character references) and "Import structures" | `structures` |
+| Planet names | on demand when a den names a new planet (public ESI) | `planets` |
 | NPC station names | on demand (public ESI, cached) | esi_cache |
 
 "Best-effort" = wrapped in try/catch; a failure logs a warning and the sync still counts
@@ -277,4 +323,10 @@ as successful. Scope-gated calls are skipped entirely when the token lacks the s
 ## Storage locations (Electron `userData` dir)
 
 - `mco.sqlite` — everything (characters, tokens, skills, SDE, caches, notifications).
-- `sde-cache/sde.zip` — the downloaded SDE archive.
+- `backups/` — weekly, pre-migration and pre-restore snapshots, plus
+  `restore-pending.json` while a restore waits for the restart (see
+  [features.md](features.md#settings-settings-pagessettingstsx)).
+- `dev/` — the dev database and its own `backups/`, when launched with `--db=dev`.
+- `logs/mco.log` (+ `mco.log.1`) — the rotating session log; shared by dev and prod.
+- `mco-crash-<stamp>.txt` — written by `fatal.ts` when the main process crashes.
+- `sde-cache/sde.zip` — the downloaded SDE archive; shared by dev and prod.

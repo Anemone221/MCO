@@ -2,6 +2,7 @@ import { ESI_BASE_URL, ESI_COMPATIBILITY_DATE, USER_AGENT } from '../config';
 import { refreshAccessToken } from '../auth/esi-oauth';
 import { getValidCachedAccessToken } from '../auth/token-store';
 import { getCached, isFresh, putCached } from '../db/repositories/esiCache';
+import { connectivity } from './connectivity';
 import { rateLimiter } from './rate-limiter';
 import { recordCacheFresh, recordEvent, recordSlow, recordStatus } from './esiLog';
 import { collectPages, type PageResult, type PagingOptions } from './paging';
@@ -110,9 +111,19 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
   let refreshed = false;
   let retries = 0;
   let throttleWaits = 0;
+  /**
+   * A retry's linear backoff. Slept at the top of the next attempt, i.e. after
+   * the `finally` below has released the concurrency slot, so a retrying request
+   * does not hold a slot other requests could be using while it waits.
+   */
+  let retryDelayMs = 0;
 
   for (;;) {
-    await rateLimiter.acquire();
+    if (retryDelayMs > 0) {
+      await sleep(retryDelayMs);
+      retryDelayMs = 0;
+    }
+    await rateLimiter.acquire(path, characterId);
     try {
       const headers: Record<string, string> = {
         'User-Agent': USER_AGENT,
@@ -130,6 +141,7 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
         res = await fetchWithTimeout(url, headers);
       } catch (err) {
         // Network error or timeout — transient, retry within the transient budget.
+        connectivity.noteNetworkFailure();
         const timedOut = err instanceof Error && err.name === 'AbortError';
         const ms = Date.now() - startedAt;
         recordEvent({
@@ -145,15 +157,17 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
           throw new Error(`ESI GET ${path} failed after ${MAX_RETRIES} retries: ${String(err)}`);
         }
         retries += 1;
-        await sleep(500 * retries);
+        retryDelayMs = 500 * retries;
         continue;
       }
       const ms = Date.now() - startedAt;
+      connectivity.noteResponse();
 
       // observe() may open a proactive backoff when the error-limit budget runs
       // low; catch that transition so the export shows *why* requests paused.
       const backoffBefore = rateLimiter.backoffMs;
       rateLimiter.observe(res.headers);
+      const route = rateLimiter.observeRoute(path, characterId, res.headers);
       recordStatus(res.status);
       if (rateLimiter.backoffMs > backoffBefore + 1000) {
         recordEvent({
@@ -162,6 +176,14 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
           characterId,
           backoffSeconds: Math.ceil(rateLimiter.backoffMs / 1000),
           detail: 'error-limit budget low',
+        });
+      }
+      if (route?.becameLow) {
+        recordEvent({
+          kind: 'backoff',
+          path,
+          characterId,
+          detail: `rate-limit group ${route.group} low (${route.remaining}/${route.limit.tokens} tokens left); slowing that group`,
         });
       }
       recordSlow({ path, characterId, ms, status: res.status });
@@ -200,12 +222,20 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
         continue;
       }
 
-      // 429 (new floating-window bucket) and 420 (legacy error limit) are both
-      // throttling: open a shared backoff and retry on a separate budget so we
-      // don't burn the transient-error retries just waiting our turn.
+      // 429 (floating-window bucket) and 420 (legacy error limit) are both
+      // throttling, retried on a separate budget so we don't burn the
+      // transient-error retries just waiting our turn. A 429 blocks only its
+      // route group's bucket when the group is known; a 420 — or a 429 on a route
+      // with no known group — opens the app-wide backoff.
       if (res.status === 429 || res.status === 420) {
-        rateLimiter.backoffFromHeaders(res.headers, THROTTLE_FALLBACK_SECONDS);
-        const backoffSeconds = Math.ceil(rateLimiter.backoffMs / 1000);
+        const routeSeconds =
+          res.status === 429
+            ? rateLimiter.blockRoute(path, characterId, res.headers, THROTTLE_FALLBACK_SECONDS)
+            : null;
+        if (routeSeconds === null) {
+          rateLimiter.backoffFromHeaders(res.headers, THROTTLE_FALLBACK_SECONDS);
+        }
+        const backoffSeconds = Math.ceil(routeSeconds ?? rateLimiter.backoffMs / 1000);
         if (throttleWaits >= MAX_THROTTLE_WAITS) {
           recordEvent({
             kind: 'give-up',
@@ -224,7 +254,12 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
           status: res.status,
           attempt: throttleWaits,
           backoffSeconds,
-          detail: res.headers.get('retry-after') ? `retry-after ${res.headers.get('retry-after')}` : undefined,
+          detail: [
+            routeSeconds === null ? 'app-wide' : 'this route group only',
+            res.headers.get('retry-after') ? `retry-after ${res.headers.get('retry-after')}` : null,
+          ]
+            .filter(Boolean)
+            .join(', '),
         });
         console.warn(`[esi] ${res.status} throttled on ${path}; backing off ~${backoffSeconds}s`);
         continue;
@@ -237,7 +272,7 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
         }
         retries += 1;
         recordEvent({ kind: 'retry', path, characterId, status: res.status, attempt: retries });
-        await sleep(500 * retries);
+        retryDelayMs = 500 * retries;
         continue;
       }
 
@@ -251,6 +286,23 @@ async function esiGetResponse<T>(path: string, options: GetOptions): Promise<Esi
 /** Cached, rate-limit-aware GET against a single ESI route. See {@link esiGetResponse}. */
 export async function esiGet<T>(path: string, options: GetOptions = {}): Promise<T> {
   return (await esiGetResponse<T>(path, options)).data;
+}
+
+/**
+ * {@link esiGet} for data that does not change once it exists — an NPC
+ * station's name and system. Any stored response is returned whatever its age,
+ * so only an id never fetched before costs a request. ESI's short `Expires` on
+ * such routes would otherwise send a revalidation through the rate limiter on
+ * every page view, queued behind any sweep in progress, for a body that is
+ * always the same. Public routes only.
+ */
+export async function esiGetImmutable<T>(path: string): Promise<T> {
+  const cached = getCached(`${ESI_BASE_URL}${path}`);
+  if (cached) {
+    recordCacheFresh();
+    return JSON.parse(cached.body) as T;
+  }
+  return esiGet<T>(path);
 }
 
 interface PagedOptions<T> extends GetOptions, PagingOptions<T> {}

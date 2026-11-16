@@ -21,6 +21,7 @@ import {
 import CharacterAvatar from '../components/CharacterAvatar';
 import StatTile from '../components/StatTile';
 import { useCharacterContextMenu } from '../components/useCharacterContextMenu';
+import SortHeader from '../components/SortHeader';
 
 /** Calm, actionable copy for each non-ok ESI-data state — feature-agnostic. */
 function statusLabel(status: EsiDataStatus, missingScopes: string[]): string | null {
@@ -30,9 +31,9 @@ function statusLabel(status: EsiDataStatus, missingScopes: string[]): string | n
     case 'pending':
       return 'Not synced yet';
     case 'scope-missing':
-      return `ESI scope required (${missingScopes.join(', ')}) — re-add this character to grant it`;
+      return `ESI scope required (${missingScopes.join(', ')}) — re-authorize it in Settings to grant it`;
     case 'login-expired':
-      return 'Login expired — re-add this character';
+      return 'Login expired — re-authorize it in Settings';
   }
 }
 
@@ -264,7 +265,7 @@ export default function MercenaryDens() {
             <p className="muted" data-testid="mercenary-empty">
               No Mercenary Dens on record.{' '}
               {board.reportingCharacters === 0
-                ? 'No character has granted the scopes that report them yet — re-add a character to grant them.'
+                ? 'No character has granted the scopes that report them yet — re-authorize your characters in Settings to grant them.'
                 : `${board.reportingCharacters} character(s) can report dens; none of them holds one.`}
             </p>
           ) : (
@@ -274,16 +275,14 @@ export default function MercenaryDens() {
                   <tr>
                     <th aria-label="Expand" />
                     {COLUMNS.map((column) => (
-                      <th
+                      <SortHeader
                         key={column.key}
-                        className={`sortable${column.numeric === true ? ' num' : ''}`}
-                        onClick={() => setSort(nextMercenarySort(sort, column.key))}
-                      >
-                        {column.label}
-                        {sort.key === column.key && (
-                          <span className="sort-arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>
-                        )}
-                      </th>
+                        label={column.label}
+                        active={sort.key === column.key}
+                        dir={sort.dir}
+                        numeric={column.numeric === true}
+                        onSort={() => setSort(nextMercenarySort(sort, column.key))}
+                      />
                     ))}
                   </tr>
                 </thead>

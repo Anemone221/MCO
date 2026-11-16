@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import appIconPath from '../../resources/icon.png?asset';
 import { isAllowedNavigation, isSafeExternalUrl } from './webSecurity';
-import { closeDb, getDb } from './db';
+import { MigrationDeclinedError, closeDb, dbMode, getDb } from './db';
+import { type DbMode, parseDbMode } from './db/dbMode';
 import { SchemaVersionError } from './db/migrations';
 import { initFatalErrorHandler } from './fatal';
-import { initLogCapture } from './log';
+import { attachLogFile, flushLogFile, initLogCapture } from './log';
+import { APP_VERSION } from './config';
 import { registerIpc } from './ipc/register';
 import { isBackgroundLaunch, shouldQuitOnWindowClose } from './launchMode';
 import {
@@ -37,6 +39,15 @@ app.setAppUserModelId(app.isPackaged ? 'com.anemone221.mco' : 'com.anemone221.mc
 
 /** Tray-only background sync runner mode (no window unless promoted). */
 const backgroundMode = isBackgroundLaunch(process.argv);
+
+/** The `--db` a launch asked for, or null when its arguments name no valid one. */
+function requestedDbMode(argv: readonly string[]): DbMode | null {
+  try {
+    return parseDbMode(argv).mode;
+  } catch {
+    return null; // this instance reports the bad value itself, when it opens the database
+  }
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -111,15 +122,38 @@ function openMainWindow(): void {
 // One MCO process per profile, in either mode: EVE SSO rotates refresh tokens
 // on every refresh, so two processes racing a refresh can invalidate the token
 // family and deauth a character.
-if (!app.requestSingleInstanceLock({ background: backgroundMode })) {
+if (
+  !app.requestSingleInstanceLock({
+    background: backgroundMode,
+    db: requestedDbMode(process.argv),
+  })
+) {
   app.quit();
 } else {
+  // Only the instance that owns the profile writes its log file — a second
+  // launch that is about to quit has nothing worth interleaving into it.
+  attachLogFile(join(app.getPath('userData'), 'logs'), `MCO ${APP_VERSION}`);
+
   app.on('second-instance', (_event, argv, _workingDirectory, additionalData) => {
     const secondIsBackground =
       (additionalData as { background?: boolean } | null)?.background ?? isBackgroundLaunch(argv);
     // A normal launch promotes this instance to the full UI; a second
     // background launch is a no-op since the sync is already running.
     if (!secondIsBackground) openMainWindow();
+
+    // The database is chosen once, at startup. A launch that asked for the
+    // other one has just been folded into this instance, and would otherwise
+    // look like it worked.
+    const theirs = (additionalData as { db?: DbMode | null } | null)?.db ?? null;
+    const ours = requestedDbMode(process.argv);
+    if (theirs !== null && ours !== null && theirs !== ours) {
+      void dialog.showMessageBox({
+        type: 'warning',
+        title: 'MCO is already running',
+        message: `MCO is already running on the ${ours} database.`,
+        detail: `Quit it (including the tray icon) and launch again to switch to the ${theirs} database.`,
+      });
+    }
   });
 
   void app.whenReady().then(() => {
@@ -130,6 +164,12 @@ if (!app.requestSingleInstanceLock({ background: backgroundMode })) {
     try {
       getDb(); // open the database and run migrations before any IPC handler can fire
     } catch (err) {
+      if (err instanceof MigrationDeclinedError) {
+        // The user's own answer to "migrate production?" — nothing to report.
+        console.log('[db] production migration declined; quitting');
+        app.quit();
+        return;
+      }
       console.error('[db] cannot open the profile database:', err);
       dialog.showErrorBox(
         'MCO cannot start',
@@ -140,6 +180,7 @@ if (!app.requestSingleInstanceLock({ background: backgroundMode })) {
       app.quit();
       return;
     }
+    if (dbMode() === 'dev') console.log('[db] running on the DEV database (--db=dev)');
     // MCO's UI needs no web-platform permissions — no camera, microphone,
     // geolocation, or the web Notification API (toasts are raised from the main
     // process). Refusing them all is simpler than auditing which are reachable.
@@ -185,4 +226,5 @@ app.on('quit', () => {
   destroyTray();
   stopScheduler();
   closeDb();
+  flushLogFile();
 });

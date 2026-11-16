@@ -2,6 +2,9 @@
 
 MCO stores everything in a single SQLite file, `mco.sqlite`, in Electron's `userData`
 directory, accessed synchronously via **better-sqlite3** from the main process only.
+A source build can be pointed at a separate scratch copy instead
+(`<userData>/dev/mco.sqlite`, `--db=dev`) — see
+[development.md](development.md#dev-and-prod-databases-dbdbmodets-dbdevtokensts).
 
 ## Connection (`src/main/db/index.ts`)
 
@@ -27,6 +30,11 @@ its own transaction. Rules:
   and the downgrade guard below trusts that. Unit tests enforce it.
 - `LATEST_SCHEMA_VERSION` is derived from the array; nothing else to bump.
 - Repositories assume the latest schema; there is no down-migration.
+- **An existing profile is snapshotted before its pending migrations run**
+  (`backups/mco-pre-v<N>-<stamp>.sqlite`, `VACUUM INTO`, last 3 kept), and an
+  unpackaged build asks before migrating the prod database at all — see
+  [features.md](features.md#settings-settings-pagessettingstsx) (Backup) and
+  [development.md](development.md#dev-and-prod-databases-dbdbmodets-dbdevtokensts).
 
 **Opening a newer profile fails at startup, by design.** There is no down-migration, so a
 database whose highest applied version exceeds this build's is unreadable — it may hold
@@ -263,15 +271,18 @@ Sync writes use a replace-all-rows-in-a-transaction pattern (`replaceSkills`,
   Dismissal is a soft delete (`dismissed_at`), not a `DELETE`, *because* of that key:
   removing the row would leave the occurrence unreported, so the next hourly sweep would
   re-insert it and toast again. A dismissed row is filtered out of the bell's list and
-  the unread count but stays as the record that its occurrence was already raised. No
-  retention sweep prunes them — every kind is self-limiting (one row per queue-drain
-  finish date, per account per day, per fatigue episode, per clone jump) and pruning
-  could resurrect a dismissed warning.
+  the unread count but stays as the record that its occurrence was already raised.
+  Dismissed rows are deleted once they were *created* more than 30 days ago
+  (`pruneDismissedNotifications`, run with each scheduler sweep). The age is what
+  keeps that safe: no kind stays current for more than 3 days (a queue-drain warning's
+  window), so a row that old cannot be re-raised by removing it. Undismissed rows are
+  never pruned.
 - **`sde_version`** — single row (id=1): imported SDE build number + timestamp.
 - **`app_settings`** — key/value store for preferences the *main* process owns, i.e. ones
   it must read with no renderer around (`close_to_tray`, `tray_notice_shown` — see
-  [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts)) plus the
-  update and SDE check state (`update.lastCheck`, `update.dismissedVersion`,
+  [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts);
+  `live_tracking`, absent = on; one `notify:<kind>` per notification kind, absent =
+  on) plus the update and SDE check state (`update.lastCheck`, `update.dismissedVersion`,
   `update.autoCheck`, `sde.lastCheck`, `sde.dismissedBuild`). Booleans are
   `'1'`/`'0'`; a missing key reads as the caller's fallback, so nothing needs seeding.
   `update.autoCheck` leans on that: absent means "this profile has never been asked

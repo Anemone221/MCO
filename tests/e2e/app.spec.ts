@@ -1,8 +1,13 @@
-import { mkdtemp } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
+import electronModule from 'electron';
 import { appEnv } from '../support/electronEnv';
+
+/** Outside Electron, requiring `electron` yields the path of its executable. */
+const electronBinary = electronModule as unknown as string;
 
 /**
  * Launch the built app against an isolated, throwaway userData directory.
@@ -134,6 +139,51 @@ test('imports an EFT fit and shows it on the Fits page', async () => {
   await app.close();
 });
 
+test('Ctrl+K jumps to a fit, and "/" focuses the page search', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Fits' }).click();
+  await window.getByTestId('eft-input').fill('[Rifter, Palette Rifter]\n200mm AutoCannon II');
+  await window.getByTestId('import-fit').click();
+  await expect(window.getByTestId('fits-table')).toContainText('Palette Rifter');
+
+  await window.getByRole('link', { name: 'Dashboard' }).click();
+  await window.keyboard.press('Control+K');
+  await expect(window.getByTestId('command-palette')).toBeVisible();
+  await window.getByTestId('palette-input').fill('palette rif');
+  await expect(window.locator('[data-testid^="palette-item-fit:"]')).toHaveCount(1);
+  await window.keyboard.press('Enter');
+  await expect(window.getByTestId('command-palette')).toHaveCount(0);
+  await expect(window.locator('h2')).toContainText('Palette Rifter');
+
+  // Arrow keys move through pages; Escape closes without navigating.
+  await window.keyboard.press('Control+K');
+  await window.getByTestId('palette-input').fill('roster');
+  await window.keyboard.press('Escape');
+  await expect(window.getByTestId('command-palette')).toHaveCount(0);
+  await expect(window.locator('h2')).toContainText('Palette Rifter');
+
+  await window.keyboard.press('Control+K');
+  await window.getByTestId('palette-input').fill('roster');
+  await window.keyboard.press('Enter');
+  await expect(window.locator('h2')).toHaveText('Roster');
+
+  // A page's own search box: "/" from outside a text field, Ctrl+F from anywhere.
+  await window.getByRole('link', { name: 'Mercenary Dens' }).click();
+  const denFilter = window.getByRole('searchbox', { name: 'Filter dens' });
+  await window.locator('h2').click();
+  await window.keyboard.press('/');
+  await expect(denFilter).toBeFocused();
+  await expect(denFilter).toHaveValue('');
+  await window.locator('h2').click();
+  await window.keyboard.press('Control+F');
+  await expect(denFilter).toBeFocused();
+
+  await app.close();
+});
+
 test('shows a failed import as plain copy, not as a raw internal error', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
   const app = await launchApp(userDataDir);
@@ -188,6 +238,45 @@ test('imports a skill plan and shows it on the Plans page', async () => {
   await window.getByTestId('import-plan').click();
 
   await expect(window.getByTestId('plans-table')).toContainText('E2E Test Plan');
+
+  await app.close();
+});
+
+test('compares two skill plans', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+
+  await window.getByRole('link', { name: 'Skill Plans' }).click();
+  const importPlan = async (name: string, text: string): Promise<void> => {
+    await window.getByTestId('plan-name-input').fill(name);
+    await window.getByTestId('plan-text-input').fill(text);
+    await window.getByTestId('import-plan').click();
+    await expect(window.getByTestId('plans-table')).toContainText(name);
+  };
+  await importPlan('Plan One', 'Gunnery V\nNavigation III');
+  await window.getByTestId('toggle-import-plan').click();
+  await importPlan('Plan Two', 'Gunnery III\nNavigation III\nMechanics IV');
+
+  await window.getByTestId('compare-plans').click();
+  await window.getByTestId('compare-plan-a').selectOption({ label: 'Plan One' });
+  await window.getByTestId('compare-plan-b').selectOption({ label: 'Plan Two' });
+
+  // No static data on a fresh profile, so skills are matched by name.
+  const table = window.getByTestId('compare-table');
+  await expect(table).toContainText('Gunnery');
+  await expect(table).toContainText('A higher');
+  await expect(table).toContainText('Mechanics');
+  await expect(table).toContainText('Only in B');
+  await expect(table).not.toContainText('Navigation');
+
+  await window.getByTestId('compare-view-same').click();
+  await expect(table).toContainText('Navigation');
+
+  await window.getByTestId('compare-swap').click();
+  await window.getByTestId('compare-view-differences').click();
+  await expect(table).toContainText('Only in A');
+  await expect(table).toContainText('B higher');
 
   await app.close();
 });
@@ -525,7 +614,7 @@ test('opens Settings from the gear and persists a theme change', async () => {
   await expect(firstWindow.getByRole('link', { name: 'Report an issue' })).toBeVisible();
 
   // CCP's third-party notice has to be displayed, not just written down
-  // somewhere — see A5 in docs/improvement-plan.md.
+  // somewhere — the EVE Developer License Agreement requires it (README § Legal).
   await expect(firstWindow.locator('.legal-notice')).toContainText(
     'is not in any way affiliated with, MCO',
   );
@@ -649,4 +738,253 @@ test('asks once whether to check for updates, and remembers no', async () => {
   await expect(secondWindow.getByTestId('settings-gear')).toBeVisible();
   await expect(secondWindow.getByTestId('update-consent')).not.toBeVisible();
   await second.close();
+});
+
+test('a notification type switched off stays off across restarts', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+
+  // Stored in the database (app_settings), like close-to-tray: the main process
+  // decides whether to raise a notification with no renderer around to ask.
+  const first = await launchApp(userDataDir);
+  const firstWindow = await first.firstWindow();
+  await firstWindow.getByTestId('settings-gear').click();
+  const toggle = firstWindow.getByTestId('notify-toggle-fatigue-clear');
+  await expect(toggle).toBeChecked(); // every type defaults to on
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  // Only the one that was clicked.
+  await expect(firstWindow.getByTestId('notify-toggle-critical-undock')).toBeChecked();
+  await first.close();
+
+  const second = await launchApp(userDataDir);
+  const secondWindow = await second.firstWindow();
+  await secondWindow.getByTestId('settings-gear').click();
+  await expect(secondWindow.getByTestId('notify-toggle-fatigue-clear')).not.toBeChecked();
+  await expect(secondWindow.getByTestId('notify-toggle-queue-drain')).toBeChecked();
+  await second.close();
+});
+
+test('takes a weekly backup on its own and writes a log file', async () => {
+  test.setTimeout(90_000);
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+  await window.getByTestId('settings-gear').click();
+  await expect(window.getByTestId('backups-empty')).toBeVisible();
+
+  // The snapshot rides the first sweep, ~15 s after start. Nothing pushes it
+  // to the page, so re-read until it shows.
+  await expect(async () => {
+    await window.getByRole('button', { name: 'Refresh' }).click();
+    await expect(window.getByTestId('backups-table')).toContainText('Weekly', { timeout: 1000 });
+  }).toPass({ timeout: 60_000 });
+
+  await app.close();
+
+  // The log outlives the process: this is what the next session's export reads.
+  const log = await readFile(join(userDataDir, 'logs', 'mco.log'), 'utf8');
+  expect(log).toContain('session started');
+  expect(log).toContain('[backup] weekly snapshot saved');
+});
+
+test('restores a scheduled backup on the next start and keeps what it replaced', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const snapshotName = 'mco-auto-20260101-000000.sqlite';
+
+  // A profile with one tag, then a snapshot of it.
+  const first = await launchApp(userDataDir);
+  const firstWindow = await first.firstWindow();
+  await firstWindow.getByRole('link', { name: 'Tags' }).click();
+  await firstWindow.getByTestId('new-tag-input').fill('Cyno');
+  await firstWindow.getByTestId('add-tag').click();
+  await expect(firstWindow.getByTestId('tag-name-1')).toHaveValue('Cyno');
+  await first.close();
+  await mkdir(join(userDataDir, 'backups'), { recursive: true });
+  await copyFile(join(userDataDir, 'mco.sqlite'), join(userDataDir, 'backups', snapshotName));
+
+  // Something recorded after the snapshot, which the restore should take away.
+  const second = await launchApp(userDataDir);
+  const secondWindow = await second.firstWindow();
+  await secondWindow.getByRole('link', { name: 'Tags' }).click();
+  await secondWindow.getByTestId('new-tag-input').fill('Fax');
+  await secondWindow.getByTestId('add-tag').click();
+  await expect(secondWindow.getByTestId('tag-name-2')).toHaveValue('Fax');
+  await second.close();
+
+  // What Settings → Restore leaves behind before it restarts the app. Written
+  // by hand because the restart itself would take the app out from under
+  // Playwright.
+  await writeFile(
+    join(userDataDir, 'restore-pending.json'),
+    JSON.stringify({ fileName: snapshotName }),
+  );
+
+  const third = await launchApp(userDataDir);
+  const thirdWindow = await third.firstWindow();
+  await thirdWindow.getByRole('link', { name: 'Tags' }).click();
+  await expect(thirdWindow.getByTestId('tag-name-1')).toHaveValue('Cyno');
+  await expect(thirdWindow.getByTestId('tag-name-2')).toHaveCount(0);
+  // The database that was replaced is offered back, so a restore can be undone.
+  await thirdWindow.getByTestId('settings-gear').click();
+  await expect(thirdWindow.getByTestId('backups-table')).toContainText('Before the last restore');
+  await third.close();
+});
+
+/**
+ * Keep a sign-in test off the network and out of the user's browser: the SSO
+ * page is never opened, and anything the main process tries to fetch fails as
+ * if offline. The loopback listener, the pending-login state and the IPC
+ * around them are the real thing.
+ */
+async function isolateSignIn(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ shell }) => {
+    shell.openExternal = async () => {};
+    globalThis.fetch = () => Promise.reject(new Error('offline in tests'));
+  });
+}
+
+/**
+ * Run SQL against a closed profile's database, inside Electron's Node — the
+ * only runtime the native SQLite module is built for.
+ */
+function seedDatabase(userDataDir: string, sql: string): void {
+  const script =
+    `const db = require('better-sqlite3')(${JSON.stringify(join(userDataDir, 'mco.sqlite'))});` +
+    `db.exec(${JSON.stringify(sql)}); db.close();`;
+  execFileSync(electronBinary, ['-e', script], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  });
+}
+
+test('a waiting sign-in can be cancelled, and "Add several" runs until Done', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+  const app = await launchApp(userDataDir);
+  await isolateSignIn(app);
+  const window = await app.firstWindow();
+  await window.getByRole('link', { name: 'Roster' }).click();
+
+  // One character: the wait can be called off instead of sat through.
+  await window.getByTestId('add-character').click();
+  await expect(window.getByTestId('add-status')).toContainText('Waiting for EVE SSO');
+  await window.getByTestId('add-cancel').click();
+  await expect(window.getByTestId('add-character')).toBeEnabled();
+  // Cancelling is an outcome, not a failure.
+  await expect(window.getByTestId('roster-error')).toHaveCount(0);
+
+  // The port was freed by the cancel, so the next sign-in starts straight away.
+  await window.getByTestId('add-several').click();
+  await expect(window.getByTestId('add-status')).toContainText('0 added');
+  await expect(window.getByTestId('add-cancel')).toHaveText('Done');
+  await window.getByTestId('add-cancel').click();
+  await expect(window.getByTestId('add-several')).toBeEnabled();
+  await expect(window.getByTestId('roster-error')).toHaveCount(0);
+
+  await app.close();
+});
+
+test('the re-authorize queue steps through characters that need a new sign-in', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+
+  // First launch creates the schema; the characters go in while it is closed.
+  const first = await launchApp(userDataDir);
+  await first.firstWindow();
+  await first.close();
+  seedDatabase(
+    userDataDir,
+    // Tokens from before most of today's scopes existed.
+    `INSERT INTO characters (id, name) VALUES (90000001, 'Reauth Alice'), (90000002, 'Reauth Bob');
+     INSERT INTO tokens (character_id, refresh_token_encrypted, scopes) VALUES
+       (90000001, X'00', 'esi-skills.read_skills.v1'),
+       (90000002, X'00', 'esi-skills.read_skills.v1');`,
+  );
+
+  const app = await launchApp(userDataDir);
+  await isolateSignIn(app);
+  const window = await app.firstWindow();
+  await window.getByRole('link', { name: 'Settings' }).click();
+
+  const panel = window.getByTestId('reauth-panel');
+  await expect(panel).toContainText('2 characters need a new EVE sign-in');
+
+  await window.getByTestId('reauth-start').click();
+  await expect(panel).toContainText('Sign in as Reauth Alice');
+  await expect(panel).toContainText('1 of 2');
+
+  // Skip moves on to the next character without ending the run…
+  await window.getByTestId('reauth-skip').click();
+  await expect(panel).toContainText('Sign in as Reauth Bob');
+  await expect(panel).toContainText('2 of 2');
+
+  // …and Stop ends it, leaving the rest in the queue.
+  await window.getByTestId('reauth-stop').click();
+  await expect(panel).toContainText('Stopped with 1 of 2 still to do');
+  await expect(window.getByTestId('reauth-start')).toBeVisible();
+
+  await app.close();
+});
+
+test('roster rows can be selected and changed in bulk', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
+
+  const first = await launchApp(userDataDir);
+  await first.firstWindow();
+  await first.close();
+  seedDatabase(
+    userDataDir,
+    `INSERT INTO characters (id, name) VALUES
+       (90000001, 'Sel Alice'), (90000002, 'Sel Bob'), (90000003, 'Sel Carol'), (90000004, 'Sel Dave');
+     INSERT INTO accounts (id, label) VALUES (1, 'Main');
+     INSERT INTO tags (id, name) VALUES (1, 'Cyno');
+     INSERT INTO character_groups (id, name) VALUES (1, 'WH defense');`,
+  );
+
+  const app = await launchApp(userDataDir);
+  const window = await app.firstWindow();
+  await window.getByRole('link', { name: 'Roster' }).click();
+  await expect(window.getByTestId('bulk-bar')).toHaveCount(0);
+
+  // A click, then a shift-click two rows down: the range between is selected.
+  await window.getByTestId('select-90000001').click();
+  await window.getByTestId('select-90000003').click({ modifiers: ['Shift'] });
+  await expect(window.getByTestId('bulk-count')).toContainText('3 selected');
+  await expect(window.getByTestId('select-90000002')).toBeChecked();
+  await expect(window.getByTestId('select-90000004')).not.toBeChecked();
+
+  // One account for all three; the fourth is untouched.
+  await window.getByTestId('bulk-account').selectOption({ label: 'Main' });
+  for (const id of [90000001, 90000002, 90000003]) {
+    await expect(window.getByTestId(`account-select-${id}`)).toHaveValue('1');
+  }
+  await expect(window.getByTestId('account-select-90000004')).toHaveValue('');
+  // The selection survives the action, ready for the next one.
+  await expect(window.getByTestId('bulk-count')).toContainText('3 selected');
+
+  // A tag for all three, then taken off again.
+  await window.getByTestId('bulk-tags').click();
+  await expect(window.getByTestId('bulk-tags-remove-1')).toBeDisabled();
+  await window.getByTestId('bulk-tags-add-1').click();
+  await expect(window.getByTestId('bulk-tags-add-1')).toBeDisabled();
+  await expect(window.getByTestId('roster-row-90000002')).toContainText('Cyno');
+  await expect(window.getByTestId('roster-row-90000004')).not.toContainText('Cyno');
+  await window.getByTestId('bulk-tags-remove-1').click();
+  await expect(window.getByTestId('roster-row-90000002')).not.toContainText('Cyno');
+  await window.keyboard.press('Escape');
+
+  // And a group.
+  await window.getByTestId('bulk-groups').click();
+  await window.getByTestId('bulk-groups-add-1').click();
+  await expect(window.getByTestId('bulk-groups-add-1')).toBeDisabled();
+  await window.keyboard.press('Escape');
+
+  // Filtering keeps the selection and says how much of it is out of sight;
+  // the header box adds what is on screen.
+  await window.getByTestId('roster-search').fill('Dave');
+  await expect(window.getByTestId('bulk-count')).toContainText('3 hidden by filters');
+  await window.getByTestId('select-all').click();
+  await expect(window.getByTestId('bulk-count')).toContainText('4 selected');
+
+  await window.getByTestId('bulk-clear').click();
+  await expect(window.getByTestId('bulk-bar')).toHaveCount(0);
+
+  await app.close();
 });

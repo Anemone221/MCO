@@ -338,6 +338,71 @@ code {
   scrollbar-gutter: stable;
 }
 
+/* ---------- Activity indicator (bottom of the window, only while a long job runs) ---------- */
+
+/* About a twentieth of the window: enough to read a percentage at a glance,
+   small enough to sit over a full-height table without covering a column. */
+.activity-indicator {
+  position: fixed;
+  right: 1.4rem;
+  bottom: 0.6rem;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 5vw;
+  min-width: 84px;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.activity-indicator__track {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent-dim);
+  overflow: hidden;
+}
+
+.activity-indicator__fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width var(--anim-med) var(--anim-ease);
+}
+
+/* No total to measure against yet (the download has not answered). */
+.activity-indicator__fill--unknown {
+  width: 35%;
+  animation: activity-indicator-slide 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes activity-indicator-slide {
+  from {
+    transform: translateX(-40%);
+  }
+  to {
+    transform: translateX(230%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-indicator__fill {
+    transition: none;
+  }
+  .activity-indicator__fill--unknown {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
+  }
+}
+
 /* ---------- Notification bell (opens rightward from sidebar footer) ---------- */
 
 .notification-bell {
@@ -2082,6 +2147,14 @@ details.clone-block > p {
 
 /* ---------- Skill plan creator ---------- */
 
+/* "Magic 14" level menu: the column-picker dropdown, anchored left since the
+   button opens the creator's source row. */
+.magic14-picker .column-picker__panel {
+  left: 0;
+  right: auto;
+  min-width: 8rem;
+}
+
 /* Two panes, each scrolling its own list: the training queue being built on the
    left, every skill in the game on the right. Both cap at the viewport so the
    toolbar and totals stay put while only the rows move. */
@@ -2293,6 +2366,57 @@ details.clone-block > p {
   font-size: 0.82rem;
 }
 
+/* Plan comparison (pages/PlanCompare.tsx). */
+.plan-diff__pickers label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
+.plan-diff__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.4rem 1.5rem;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.plan-diff__summary dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.plan-diff__summary dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.plan-diff__copy {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.plan-diff th,
+.plan-diff td {
+  padding: 0.28rem 0.5rem;
+}
+
+.data-table td.plan-diff__higher {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.plan-diff__legend {
+  font-size: 0.75rem;
+}
+
 /* Tighter than the roster's tables: this one lives in half a screen and a plan
    runs to a few hundred rows, so every column gives its padding to the names. */
 .plan-draft th,
@@ -2366,6 +2490,29 @@ body.is-row-dragging * {
 .plan-draft__row--dragging td {
   opacity: 0.4;
   background: var(--accent-dim);
+}
+
+/* Rows picked for a group move (Ctrl/Shift-click). */
+.plan-draft__row--selected td {
+  background: var(--accent-dim);
+}
+
+.plan-draft__row--selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* The bar above the queue while rows are selected: block-move actions. */
+.plan-select-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.4rem;
+  margin-bottom: 0.35rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-dim);
+  font-size: 0.83rem;
 }
 
 /* The drop line: where the dragged row will land, between two rows. */
@@ -2553,6 +2700,58 @@ body.is-row-dragging * {
   min-width: 0;
 }
 
+/* The Roster's bulk bar: opens leftward-anchored, since it sits at the left. */
+.bulk-tag__panel--left {
+  left: 0;
+  right: auto;
+  min-width: 19rem;
+  max-width: 24rem;
+}
+
+.bulk-member__row {
+  cursor: default;
+}
+
+/* Roster bulk actions: only present while rows are selected. */
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-dim);
+  font-size: 0.82rem;
+}
+
+.bulk-bar__count {
+  margin-right: 0.3rem;
+}
+
+.bulk-bar select {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.3rem;
+}
+
+/* Row-selection checkbox column. */
+.data-table th.select-cell,
+.data-table td.select-cell {
+  width: 1.6rem;
+  padding-right: 0;
+}
+
+.data-table .select-cell input {
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.data-table tbody tr.is-selected,
+.data-table tbody tr.is-selected:hover {
+  background: var(--accent-dim);
+}
+
 /* ---------- Settings ---------- */
 
 .settings-section {
@@ -2640,11 +2839,37 @@ body.is-row-dragging * {
   font-size: 0.85rem;
 }
 
+/* One switch per line, e.g. the notification types. */
+.settings-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* A preference sitting between two action rows (About's update switch): both
    rows are marginless, so without this the checkbox touches the links below. */
 .settings-actions + label {
   display: block;
   margin: 0.45rem 0 0.55rem;
+}
+
+/* The re-authorize run, above the sync table: one compact line, plus a note. */
+.reauth-panel {
+  margin: 0 0 0.8rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.reauth-panel p.muted {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+}
+
+/* "Waiting for EVE SSO…" beside the Roster's add buttons. */
+.login-status {
+  align-self: center;
+  font-size: 0.85rem;
 }
 
 .settings-scope-note {
@@ -2938,4 +3163,135 @@ body.is-row-dragging * {
 
 .data-table tr.subrow > td:first-child {
   border-left: 2px solid var(--border);
+}
+
+/* Sortable column headers: the label is a real button so Tab reaches it and
+   Enter/Space sorts. It looks like the plain header text it replaced. */
+.data-table th.sortable .sort-button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.data-table th.sortable .sort-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.data-table th.num .sort-button {
+  justify-content: flex-end;
+}
+
+/* Quick search (Ctrl+K). The sidebar button is the discoverable way in. */
+.sidebar__search {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.sidebar__search:hover {
+  color: var(--text);
+  background: var(--row-hover);
+}
+
+.sidebar__search span {
+  flex: 1;
+  text-align: left;
+}
+
+kbd {
+  font: inherit;
+  font-size: 0.68rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  background: var(--panel-raised);
+}
+
+.palette-backdrop {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.palette {
+  width: min(36rem, 100%);
+  max-height: 70vh;
+  padding: 0.6rem;
+}
+
+.palette__input {
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+.palette__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.palette__item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.palette__item--active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.palette__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.palette__kind {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.palette__empty {
+  padding: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.palette .palette__hint,
+.palette .palette__note {
+  margin: 0;
+  font-size: 0.72rem;
 }

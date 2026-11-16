@@ -5,8 +5,8 @@ Sidebar navigation and Settings section headers use inline SVG icons
 Lucide (ISC), and the Simple Icons GitHub mark (CC0) — inlined so the strict CSP
 needs no external hosts and no icon dependency is added.
 
-One section per page (sidebar order), then the shared skill-analysis engine and
-notifications. Renderer pages live in `src/renderer/src/pages/`; the services that feed
+One section per page (sidebar order), then the activity indicator, notifications,
+Settings and the shared skill-analysis engine. Renderer pages live in `src/renderer/src/pages/`; the services that feed
 them in `src/main/services/`.
 
 ## Dashboard (`/`, `pages/Dashboard.tsx`)
@@ -41,176 +41,12 @@ every character sized by SP, assembled by `buildDashboardSummary()`
   `CharacterAvatar`). Empty roster shows the standard empty state instead.
 - **Motion**: all dashboard animation draws from the shared `--anim-*` tokens in
   `styles.css`; the OS reduced-motion preference disables CSS animation globally
-  and JS-driven motion (count-ups, chart entrance, ForceDirected settling) via
+  and JS-driven motion (count-ups, chart entrance) via
   `prefersReducedMotion()` in `renderer/lib/motion.ts`.
 - **Characters online** requires the `esi-location.read_online.v1` scope added
   alongside every other Dashboard-driving scope; characters added before this scope
-  existed count toward `missingScopeCount` until re-added (same one-time re-login
+  existed count toward `missingScopeCount` until re-authorized (same one-time re-login
   pattern used for every prior scope addition — see [esi.md](esi.md#changing-scopes)).
-
-## Wallet (`/wallet`, `pages/Wallet.tsx`)
-
-Where every character's ISK went this month, from `buildWalletSummary()`
-(`services/walletService.ts`). One SQL pass over the stored journal slice
-(`sumWalletTotalsBetween`) fills the card row; the same aggregate grouped by month
-(`sumWalletTotalsByMonth`) fills the history view.
-
-- **Cards** (`components/StatTile.tsx`, shared with the Dashboard): Income, then the
-  three categories that make it up — Bounties (NPC bounties + ESS payouts), Missions
-  (agent mission rewards) and Corporate reward payout — followed by Tax paid,
-  Expenses and Player donations.
-  - **`corporate_reward_payout` is not a corp project.** The payer is CONCORD
-    (`first_party_id` 1000125, *"CONCORD rewarded &lt;name&gt; for services
-    performed"*) settling a completed site, which makes it PvE income like a bounty.
-    The name is CCP's, and the card keeps it so it matches the in-game journal.
-  - **Income is everything earned**, those reward payouts included: leaving them out
-    of a tile labelled "Income" makes it read as wrong to anyone who knows what they
-    were paid. `IncomeSummary` carries `corpRewardIsk` alongside bounty/mission, and
-    the history chart plots bounties+missions and reward payouts as two stacked
-    series rather than one total over its own part.
-  - **Tax paid** is every `*_tax` ref_type that took ISK **plus** the `tax` ESI
-    reports on the entry itself: a corp-taxed bounty pays out net, with the cut in
-    that field rather than in a journal row of its own, so ignoring it would hide
-    the largest tax line a null-sec ratter has.
-    *It is tax ESI told us about, not all tax paid* — and the card says so. The
-    in-game journal pairs every CONCORD reward with a `Corporate Reward Tax` row
-    (45M gross / −4.5M tax), but ESI's character journal returns neither that row
-    nor a `tax` field for it, only the net 40.5M. Measured over one 73-character
-    roster's full 30-day journal (2,689 entries), ESI returned exactly **one**
-    `*_tax` row in total — so treat the total as a floor.
-  - **Expenses** are the costs of running the roster: every `*_fee` ref_type (a
-    suffix rule for the same reason tax uses one) plus `skill_purchase`,
-    `structure_gate_jump` (Ansiblex tolls), `planetary_construction` and
-    `repair_bill`. Only negative amounts count, so a refunded fee cannot read as
-    spending. **Not** included: `market_escrow` (ISK parked against a buy order),
-    `player_trading` and `corporation_account_withdrawal` (your own ISK moving),
-    and the contract ref_types — a contract can be a purchase or a sale, and
-    guessing which would make the figure fiction.
-  - **Player donations** separate in from out, and both from ISK shuffled *between*
-    tracked characters — with 90+ characters, moving ISK to a trading alt is
-    constant, and counting it as income would drown the real number. A donation is
-    internal when the counterparty id is one of the roster's characters; only the
-    receiving side is counted, so a transfer between two synced characters lands
-    once.
-- **Income by day** (`components/charts/IncomeByDayChart.tsx`) — amCharts 5 stacked
-  columns for the current UTC month, zero-filled through today
-  (`sumWalletTotalsByDay` + `fillMonthDays` in `main/wallet/monthIncome.ts`).
-  Carries all three income categories — missions, bounties, reward payouts — so a
-  column sums to exactly what the Income tile counts, and each segment's tooltip
-  repeats the day total. Outgoings stay off this chart on purpose: seven classes
-  over 31 columns pushes past the ~7 where adjacent classes blur, so tax,
-  expenses and donations are the monthly chart's job. Stacking order is set by
-  the palette, not preference — `--ok` and `--warn` are only ΔE 5.1 apart under
-  protanopia, so bounties (`--accent`) sit between them. Bounties and reward
-  payouts keep the hues they have on the monthly chart: color follows the
-  category, not its position.
-  Months with no income show a quiet placeholder instead of an empty chart.
-- **Previous months** — collapsible (collapsed by default, remembered in
-  localStorage under `mco-wallet-history-collapsed`; this month is the page, history
-  is the aside). Inside: `components/charts/WalletHistoryChart.tsx`, one stacked
-  column per completed month with earnings above the zero line and tax / donations
-  sent below it, over a compact table of the exact figures. Up to 12 completed
-  months (`previousMonthsBoundsUtc`), which never includes the month in progress.
-  Six series over five hues: donations reuse one hue in both directions (the side
-  of the zero line says which way the ISK went), with the outgoing side dimmed.
-  **History starts at the first sync**: ESI's journal reaches ~30 days back, so
-  the table is the archive — see [esi.md](esi.md#dashboard-specific-sync-notes).
-
-Both charts are built on the `useAmChart` wrapper (Animated theme, palette recolors
-on theme switch, ISK-style number abbreviations). Free amCharts tier: the small logo
-on the chart is the license condition. Both separate stacked segments with a 2px
-stroke in `--panel` — a gap in the surface color, not a border around each fill.
-
-Series hues come from the theme's semantic tokens, so the themes have to keep those
-tokens distinguishable from each other, not just from the background: `amber` needed
-its own `--warn` (its accent *was* the default `--warn`, the same hex) and `holo`'s
-`--ok` was within ΔE 15 of its aqua accent. Both are fixed in `styles.css`. The
-remaining known deviation is lightness band — the tokens are the app's status
-colors first and chart series second, so they are not re-stepped for charting.
-
-## Mining (`/mining`, `pages/Mining.tsx`)
-
-Who has been mining, what, and where — the ledger for a roster where "is anyone
-actually using the Rorqual" is a question about ninety characters, not one.
-Assembled by `buildMiningSummary(days)` (`services/miningService.ts`) from four
-GROUP BYs over `character_mining_ledger` (`db/repositories/characterMining.ts`).
-
-- **Period** — Today / 7 days / 30 days / All, as an inline tab bar, remembered
-  in localStorage under `mco-mining-period`. Day-grained because the ledger is:
-  ESI reports mining aggregated per UTC day, so anything finer would be
-  invented. **All** reaches past ESI's own ~30-day horizon into what past sweeps
-  banked — same arrangement as the Wallet page's previous months.
-- **m³, not units.** ESI counts units, and a unit of Veldspar (0.1 m³) against a
-  unit of ice (1,000 m³) makes a unit total meaningless, so every figure is
-  `units × sde_types.volume`. Both are shown: volume leads, units sit beside it.
-  When the imported SDE predates the volume column (v34) the page falls back to
-  reading in units rather than showing a column of zeros (`miningMetric` in
-  `lib/miningView.ts`), and says which types are missing and that a re-import
-  fixes it.
-- **Tiles**: volume mined, ore types, characters mining, systems — the window's
-  shape in one sweep, via the shared `StatTile`.
-- **Mined by day** (`components/charts/MiningByDayChart.tsx`): one column per
-  UTC day, zero-filled through today (`fillMiningDays` in `main/mining/window.ts`).
-  One series, not a stack: splitting by ore type would put a dozen classes on a
-  30-column chart, well past where adjacent colours blur, and the ore split is
-  one click away in the table under it. Hidden for a single-day window and for
-  an empty ledger, so amCharts never initializes on a profile with nothing to
-  draw.
-- **One table, three breakdowns** — Character / Ore type / System, switched by a
-  tab bar. They are the same aggregate cut three ways, so they share one row
-  shape and one sortable table (`miningRows`, `miningColumns` in
-  `lib/miningView.ts`) rather than three near-identical tables; volume and units
-  stay in the same columns across all three, so switching doesn't move the
-  numbers the eye is tracking. Character rows link to the sheet and take the
-  right-click tag/group menu like every other character list; ore rows carry the
-  type icon, system rows the security tier colour.
-- **The bar is in the cell.** A 90-character roster would need 90 chart bars to
-  rank at a glance, which no chart carries — so each row's share of the largest
-  row is drawn *behind* its volume figure (`.mining-bar`, aria-hidden). The
-  number stays exact and sortable; the bar is what the eye reads first.
-- **Coverage notices** say why a total is a floor: characters missing
-  `esi-industry.read_character_mining.v1` (a scope added after they were, so
-  each needs one re-add), characters whose login expired, and ore types the SDE
-  has no volume for. `pending` is deliberately *not* treated as a gap — with 90+
-  characters most have simply never mined, and a synced character that stored no
-  rows looks exactly like one that spent the window ratting.
-
-## Mercenary Dens (`/mercenary-dens`, `pages/MercenaryDens.tsx`)
-
-Which characters have Mercenary Dens, what each one is doing, and what tactical
-operations are standing at them. Assembled by `buildMercenaryBoard()`
-(`services/mercenaryService.ts`) from `mercenary_dens` + `mercenary_operations`,
-joined to `planets` for the address, `sde_systems` for security/region and
-`sde_types` for the den hull and dungeon names.
-
-- **The den is the row, not the character.** One character holds up to five (one
-  per level of Mercenary Den Management), and every question the page answers is
-  asked of a den. Characters holding none never appear, which is what keeps the
-  page short on a roster where most have never anchored one.
-- **Default sort is what needs doing.** `denAttention` (`main/mercenary/den.ts`)
-  scores each den 0-4 — reinforced, disabled, anarchy at or past level 2, an
-  offer waiting, otherwise nothing — so the handful that need the user rise
-  above the ones quietly working. A den doing its job scores zero by design.
-- **`reinforced` is derived, not reported.** ESI calls a reinforced den `Paused`,
-  the same word it uses for an idle one; only a reinforcement timer separates
-  them, and only while that timer is still ahead — a passed timer served from
-  cache would otherwise leave a den flagged long after it came back out.
-- **Expiry beats stored state for operations.** An offer that lapsed between
-  sweeps still reads `Available` in the table, so `operationStatus` checks the
-  clock; showing dead work as actionable is worse than showing none.
-- **Meters read `L2 · 45%`.** Level and cumulative amount together, because
-  either alone misleads — the level is what has effect in game, the amount is
-  how close the next one is. `Level0` is a real reading and renders as `L0`;
-  ESI's `Unspecified` and a den whose detail never landed both render "—".
-- **Operations nest under their den** as sub-rows, expanded per den, rather than
-  in a second table the reader would have to join by eye.
-- **Coverage notices** name characters missing either scope (both were added
-  after existing tokens were issued, so each needs one re-add) or with an expired
-  login. Unlike the Mining page, `pending` *is* a gap here: a character that has
-  never been swept may hold five dens, and that looks identical to holding none
-  until the first listing lands — which is what `mercenary_den_sync` records.
-- **Read-only.** MCO reports what a den is doing; ESI offers no route to start an
-  operation, and the game is where you run one.
 
 ## Roster (`/roster`, `pages/Roster.tsx`)
 
@@ -235,10 +71,31 @@ Built by `buildRoster()` (`services/characterSync.ts`).
   hover. Sortable like any column, opening most-complete-first. Loaded by
   `plans.rosterProgress` (`listRosterPlanProgress`), one roster-wide analysis per flagged
   plan; the column picker doesn't list them — the plan's own box is the switch.
-- **Context menu** (`RosterContextMenu`): right-click a character to assign/remove
+- **Context menu** (`components/CharacterContextMenu.tsx`, via
+  `useCharacterContextMenu`): right-click a character to assign/remove
   capability tags and add/remove group memberships in place.
-- **Add character** launches the SSO login flow (see [esi.md](esi.md#login-flow));
-  per-row Sync / Sync all / Remove.
+- **Selection and bulk actions.** Every row has a checkbox; shift-click selects (or
+  clears) the range from the last row clicked, and the header box selects everything
+  on screen — so "filter, select all shown, apply" is the usual route. While anything
+  is selected a bulk bar sits above the table: assign an account, add/remove a tag or
+  a group (`components/BulkMembershipMenu.tsx`, which shows how many of the selection
+  already hold each one), **Sync selected**, Clear. The selection outlives filter
+  changes so it can be built across several searches; the bar counts what the filters
+  hide, and actions apply to all of it. Each action is one batch channel —
+  `characters.assignAccounts`, `tags.addMembers`/`removeMembers`,
+  `groups.addMembers`/`removeMembers`, `characters.syncMany` — so one transaction and
+  one reload, however many rows. The click rules are pure (`lib/rosterSelection.ts`,
+  unit-tested). Removing characters is deliberately not a bulk action.
+- **Add character** launches the SSO login flow (see [esi.md](esi.md#login-flow--oauth2-authorization-code--pkce-authesi-oauthts)).
+  While it waits on the browser the toolbar shows a **Cancel** button, which frees the
+  callback port at once instead of at the five-minute timeout.
+- **Add several…** is the same flow in a loop, for onboarding a roster: each finished
+  sign-in opens the next SSO page straight away, with that character's first sync left
+  to finish in the background (`characters.add(deferSync)`; the roster refreshes when
+  it lands). The toolbar counts the characters added and offers **Done**, which cancels
+  the sign-in then waiting. EVE SSO still asks for one consent per character — this
+  removes the trip back to MCO between them, not the consent.
+- Per-row Sync / Sync all / Remove.
 - Summary chips: total characters, training, idle, combined SP.
 - Training status is *derived*, not stored: the head of the *pending* queue
   (`skills/queue.ts` — see [esi.md](esi.md#finished-skill-queue-entries)) with a future
@@ -257,15 +114,27 @@ The single-character sheet, assembled by `services/characterDetail.ts`:
   availability), jump clones, group memberships, capability tags, per-plan progress
   (complete / SP gap / % bar). The wallet scope postdates early tokens, so the wallet
   card classifies why a balance is absent (`EsiDataStatus`) instead of a bare empty
-  state — re-add the character to grant the scope.
+  state — re-authorize the character in Settings to grant the scope.
+- **Skill radar** (`components/charts/SkillGroupRadarChart.tsx`): one spoke per SDE
+  skill group, plotting *completion* — trained SP over what the group holds with
+  every published skill at V (`SkillGroupSp`) — rather than raw SP, so the shape is
+  comparable between a 5M SP alt and a 200M SP main. The tooltip carries the SP
+  behind the percentage.
 - Toolbar **status squares** (Fatigue / Jump Clone / Training): traffic-light
   red/green pills answering "can this character act right now" — a deliberate
   exception to the in-game color convention used elsewhere. Training is green when
   this character trains, grey Idle when an account sibling holds the training slot,
   and red when an Omega account (the `is_omega` checkbox on Accounts) is training
   nobody.
-- Live from ESI (each independently fault-tolerant — one failure never blanks the
-  page): current location, current ship, active implants.
+- Location, ship and active implants also come **from the DB**, not live ESI: the
+  `character_location` and `character_implants` rows that sync writes and live
+  tracking refreshes every 20 s for online characters. Hovering Location or Active
+  ship shows when they were stored (`locationUpdatedAt`). The page used to fetch
+  these on open, which put authed requests — and often a token refresh — behind
+  whatever a sweep or the presence check had queued in the rate limiter, so a first
+  open could take tens of seconds. Opening a character now makes no ESI request
+  at all, apart from the name of a station never looked up before (see
+  `esiGetImmutable` in [esi.md](esi.md)).
 
 ## Accounts (`/accounts`, `pages/Accounts.tsx`)
 
@@ -517,6 +386,39 @@ Same engine, aimed at goals instead of ships.
 - Result buckets support the same right-click tag/group assignment as fits, and the
   "Plan complete" section carries the same **+ Assign tag** bulk control (`BulkTagBar`).
 
+### Compare plans (`/plans/compare?a=&b=`, `pages/PlanCompare.tsx`)
+
+A diff of two stored plans, reached from **Compare plans…** on the Plans page (shown
+once there are two), **Compare…** on a plan's page (which fills in A), or the quick
+search palette. The two plans are picked from dropdowns and held in the URL, and ⇄
+swaps them.
+
+- **Compared per skill, not per row.** Each plan is reduced to the highest level it
+  needs of each skill (`requiredLevels` in `lib/planDiff.ts`), so writing order and how
+  many rows a plan spends on a skill are not differences. Each skill is then *Only in
+  A*, *Only in B*, *A higher*, *B higher* or *Same*.
+- **Count prerequisites** (on by default, remembered in localStorage under
+  `mco-plan-compare-prereqs`) raises every prerequisite to the level the plan's skills
+  imply. That is the comparison of what training each plan really takes: a plan that
+  writes Cruiser I and one that writes Frigate III differ on Frigate even though only
+  one names it. A level that comes only from a prerequisite is dimmed and starred.
+  Turn the toggle off to compare only what the two plans write.
+- **SP**: each plan's total from zero, plus *B needs beyond A* and *A needs beyond B*,
+  the SP a character who has finished one plan still needs for the other. The table's
+  *SP B − A* column gives the same figure per skill. A skill the static data does not
+  know is compared by name and left out of the SP figures, and the page says how many.
+  With no skill data imported, the totals read "—".
+- **Copy A → B / Copy B → A** puts on the clipboard the training queue that takes a
+  character from one plan to the other: every level the target needs beyond the
+  source, prerequisites included and in valid order (`planDelta`, built on the
+  creator's `addRequirements`). It is plain plan text, so it pastes into EVE or into
+  **Import plan**.
+- Views: Differences (default) / Only in A / Only in B / Level differs / Shared / All,
+  each with its count, plus a filter on skill or group name. Columns are sortable.
+- Read-only and renderer-only: it loads `plans.list`, `plans.skillCatalog` and
+  `plans.draft` for each side, so it needs no IPC of its own. The diff logic is pure
+  and unit-tested (`tests/unit/planDiff.test.ts`).
+
 ## Plan creator (`/plans/new`, `/plans/:id/edit`, `pages/PlanCreator.tsx`)
 
 Where a plan is written, rather than pasted in from somewhere else. Reached from
@@ -542,6 +444,10 @@ the game** on the right, each pane scrolling its own list.
 - **Prerequisites come with the level that needs them**, transitively, ahead of it —
   so a draft is in trainable order as it is built, and levels already queued are
   never restated.
+- **Magic 14** (button left of Ship Browser): a dropdown of levels I–V that adds every
+  Magic 14 core skill (`MAGIC_14` in `lib/planDraft.ts`, matched by name against the
+  catalogue) to that level, prerequisites first. Names the catalogue lacks are listed
+  in the notice rather than dropped silently.
 - **Ship Browser** (`components/ShipBrowser.tsx`): a dialog over every published hull
   (SDE category 6 — 415 ships in 47 groups), searchable by name or browsable by ship
   group, each hull shown with its icon (`components/TypeIcon.tsx`, from the EVE image
@@ -635,6 +541,14 @@ the game** on the right, each pane scrolling its own list.
   covers (`dropEntry`) — unless it brings a remap of its own. **Fix training order**
   topologically sorts the queue (prerequisites first, lower levels before higher) and
   is stable, so a hand-arranged order survives it.
+- **Group moves**: Ctrl/⌘-click toggles a row into a selection, Shift-click selects
+  the range from the last clicked row; a plain click clears it and reveals the skill
+  as before. Selection is held by entry key, so it survives reordering. While rows are
+  selected a bar above the queue offers Top / ↑ / ↓ / Bottom / Clear; dragging any
+  selected row, or its own ↑/↓, moves the whole selection as one block in its existing
+  order (`dropEntries`, `shiftEntries`). A scattered selection is gathered together.
+  Each row keeps its own remap point; dropping the block under a remap hands it to the
+  block's first row, as with a single row.
 - **Per-row notes** (`draftIssues`): `order` (queued before something it needs — the
   only one styled as a warning), `covered` (an earlier row already reaches this
   level), `prereq` (needs something this plan never trains — routine, since the
@@ -675,6 +589,17 @@ otherwise.
 The **medical (home) clone location** — ESI's `home_location` from the same clones
 endpoint — appears on the character sheet's Overview card and in each expanded
 board row. Station and structure names resolve the same way as clone locations.
+
+### Find clones at a location
+
+The **"Find clones at location…"** box swaps the board for a flat table of every
+clone — jump clones and medical clones — whose location name contains the query
+(case-insensitive), so a system name ("Jita") finds every station and structure in it.
+Suggestions list each known clone location with its clone count. Columns: character,
+clone (name / "Medical clone", critical chip), location, implant count (names on
+hover), JC readiness, account. Pure logic lives in `lib/cloneLocationView.ts`; only
+characters with cleanly synced clone data (`status === 'ok'`) contribute, matching the
+board.
 
 ### Critical clones
 
@@ -752,6 +677,201 @@ characters whose token cannot report blueprints (`scope-missing` — tokens pred
 scope — or `login-expired`). The header chip turns warn-coloured whenever the fleet is
 not fully reporting, because a checklist quietly missing a third of the roster is worse
 than no checklist.
+
+## Wallet (`/wallet`, `pages/Wallet.tsx`)
+
+Where every character's ISK went this month, from `buildWalletSummary()`
+(`services/walletService.ts`). One SQL pass over the stored journal slice
+(`sumWalletTotalsBetween`) fills the card row; the same aggregate grouped by month
+(`sumWalletTotalsByMonth`) fills the history view.
+
+- **Cards** (`components/StatTile.tsx`, shared with the Dashboard): Income, then the
+  three categories that make it up — Bounties (NPC bounties + ESS payouts), Missions
+  (agent mission rewards) and Corporate reward payout — followed by Tax paid,
+  Expenses and Player donations.
+  - **`corporate_reward_payout` is not a corp project.** The payer is CONCORD
+    (`first_party_id` 1000125, *"CONCORD rewarded &lt;name&gt; for services
+    performed"*) settling a completed site, which makes it PvE income like a bounty.
+    The name is CCP's, and the card keeps it so it matches the in-game journal.
+  - **Income is everything earned**, those reward payouts included: leaving them out
+    of a tile labelled "Income" makes it read as wrong to anyone who knows what they
+    were paid. `IncomeSummary` carries `corpRewardIsk` alongside bounty/mission, and
+    the history chart plots bounties+missions and reward payouts as two stacked
+    series rather than one total over its own part.
+  - **Tax paid** is every `*_tax` ref_type that took ISK **plus** the `tax` ESI
+    reports on the entry itself: a corp-taxed bounty pays out net, with the cut in
+    that field rather than in a journal row of its own, so ignoring it would hide
+    the largest tax line a null-sec ratter has.
+    *It is tax ESI told us about, not all tax paid* — and the card says so. The
+    in-game journal pairs every CONCORD reward with a `Corporate Reward Tax` row
+    (45M gross / −4.5M tax), but ESI's character journal returns neither that row
+    nor a `tax` field for it, only the net 40.5M. Measured over one 73-character
+    roster's full 30-day journal (2,689 entries), ESI returned exactly **one**
+    `*_tax` row in total — so treat the total as a floor.
+  - **Expenses** are the costs of running the roster: every `*_fee` ref_type (a
+    suffix rule for the same reason tax uses one) plus `skill_purchase`,
+    `structure_gate_jump` (Ansiblex tolls), `planetary_construction` and
+    `repair_bill`. Only negative amounts count, so a refunded fee cannot read as
+    spending. **Not** included: `market_escrow` (ISK parked against a buy order),
+    `player_trading` and `corporation_account_withdrawal` (your own ISK moving),
+    and the contract ref_types — a contract can be a purchase or a sale, and
+    guessing which would make the figure fiction.
+  - **Player donations** separate in from out, and both from ISK shuffled *between*
+    tracked characters — with 90+ characters, moving ISK to a trading alt is
+    constant, and counting it as income would drown the real number. A donation is
+    internal when the counterparty id is one of the roster's characters; only the
+    receiving side is counted, so a transfer between two synced characters lands
+    once.
+- **Income by day** (`components/charts/IncomeByDayChart.tsx`) — amCharts 5 stacked
+  columns for the current UTC month, zero-filled through today
+  (`sumWalletTotalsByDay` + `fillMonthDays` in `main/wallet/monthIncome.ts`).
+  Carries all three income categories — missions, bounties, reward payouts — so a
+  column sums to exactly what the Income tile counts, and each segment's tooltip
+  repeats the day total. Outgoings stay off this chart on purpose: seven classes
+  over 31 columns pushes past the ~7 where adjacent classes blur, so tax,
+  expenses and donations are the monthly chart's job. Stacking order is set by
+  the palette, not preference — `--ok` and `--warn` are only ΔE 5.1 apart under
+  protanopia, so bounties (`--accent`) sit between them. Bounties and reward
+  payouts keep the hues they have on the monthly chart: color follows the
+  category, not its position.
+  Months with no income show a quiet placeholder instead of an empty chart.
+- **Previous months** — collapsible (collapsed by default, remembered in
+  localStorage under `mco-wallet-history-collapsed`; this month is the page, history
+  is the aside). Inside: `components/charts/WalletHistoryChart.tsx`, one stacked
+  column per completed month with earnings above the zero line and tax / donations
+  sent below it, over a compact table of the exact figures. Up to 12 completed
+  months (`previousMonthsBoundsUtc`), which never includes the month in progress.
+  Six series over five hues: donations reuse one hue in both directions (the side
+  of the zero line says which way the ISK went), with the outgoing side dimmed.
+  **History starts at the first sync**: ESI's journal reaches ~30 days back, so
+  the table is the archive — see [esi.md](esi.md#dashboard-specific-sync-notes).
+
+Both charts are built on the `useAmChart` wrapper (Animated theme, palette recolors
+on theme switch, ISK-style number abbreviations). Free amCharts tier: the small logo
+on the chart is the license condition. Both separate stacked segments with a 2px
+stroke in `--panel` — a gap in the surface color, not a border around each fill.
+
+Series hues come from the theme's semantic tokens, so the themes have to keep those
+tokens distinguishable from each other, not just from the background: `amber` needed
+its own `--warn` (its accent *was* the default `--warn`, the same hex) and `holo`'s
+`--ok` was within ΔE 15 of its aqua accent. Both are fixed in `styles.css`. The
+remaining known deviation is lightness band — the tokens are the app's status
+colors first and chart series second, so they are not re-stepped for charting.
+
+## Mining (`/mining`, `pages/Mining.tsx`)
+
+Who has been mining, what, and where — the ledger for a roster where "is anyone
+actually using the Rorqual" is a question about ninety characters, not one.
+Assembled by `buildMiningSummary(days)` (`services/miningService.ts`) from four
+GROUP BYs over `character_mining_ledger` (`db/repositories/characterMining.ts`).
+
+- **Period** — Today / 7 days / 30 days / All, as an inline tab bar, remembered
+  in localStorage under `mco-mining-period`. Day-grained because the ledger is:
+  ESI reports mining aggregated per UTC day, so anything finer would be
+  invented. **All** reaches past ESI's own ~30-day horizon into what past sweeps
+  banked — same arrangement as the Wallet page's previous months.
+- **m³, not units.** ESI counts units, and a unit of Veldspar (0.1 m³) against a
+  unit of ice (1,000 m³) makes a unit total meaningless, so every figure is
+  `units × sde_types.volume`. Both are shown: volume leads, units sit beside it.
+  When the imported SDE predates the volume column (v34) the page falls back to
+  reading in units rather than showing a column of zeros (`miningMetric` in
+  `lib/miningView.ts`), and says which types are missing and that a re-import
+  fixes it.
+- **Tiles**: volume mined, ore types, characters mining, systems — the window's
+  shape in one sweep, via the shared `StatTile`.
+- **Mined by day** (`components/charts/MiningByDayChart.tsx`): one column per
+  UTC day, zero-filled through today (`fillMiningDays` in `main/mining/window.ts`).
+  One series, not a stack: splitting by ore type would put a dozen classes on a
+  30-column chart, well past where adjacent colours blur, and the ore split is
+  one click away in the table under it. Hidden for a single-day window and for
+  an empty ledger, so amCharts never initializes on a profile with nothing to
+  draw.
+- **One table, three breakdowns** — Character / Ore type / System, switched by a
+  tab bar. They are the same aggregate cut three ways, so they share one row
+  shape and one sortable table (`miningRows`, `miningColumns` in
+  `lib/miningView.ts`) rather than three near-identical tables; volume and units
+  stay in the same columns across all three, so switching doesn't move the
+  numbers the eye is tracking. Character rows link to the sheet and take the
+  right-click tag/group menu like every other character list; ore rows carry the
+  type icon, system rows the security tier colour.
+- **The bar is in the cell.** A 90-character roster would need 90 chart bars to
+  rank at a glance, which no chart carries — so each row's share of the largest
+  row is drawn *behind* its volume figure (`.mining-bar`, aria-hidden). The
+  number stays exact and sortable; the bar is what the eye reads first.
+- **Coverage notices** say why a total is a floor: characters missing
+  `esi-industry.read_character_mining.v1` (a scope added after they were, so
+  each needs one re-authorize), characters whose login expired, and ore types the SDE
+  has no volume for. `pending` is deliberately *not* treated as a gap — with 90+
+  characters most have simply never mined, and a synced character that stored no
+  rows looks exactly like one that spent the window ratting.
+
+## Mercenary Dens (`/mercenary-dens`, `pages/MercenaryDens.tsx`)
+
+Which characters have Mercenary Dens, what each one is doing, and what tactical
+operations are standing at them. Assembled by `buildMercenaryBoard()`
+(`services/mercenaryService.ts`) from `mercenary_dens` + `mercenary_operations`,
+joined to `planets` for the address, `sde_systems` for security/region and
+`sde_types` for the den hull and dungeon names.
+
+- **The den is the row, not the character.** One character holds up to five (one
+  per level of Mercenary Den Management), and every question the page answers is
+  asked of a den. Characters holding none never appear, which is what keeps the
+  page short on a roster where most have never anchored one.
+- **Default sort is what needs doing.** `denAttention` (`main/mercenary/den.ts`)
+  scores each den 0-4 — reinforced, disabled, anarchy at or past level 2, an
+  offer waiting, otherwise nothing — so the handful that need the user rise
+  above the ones quietly working. A den doing its job scores zero by design.
+- **`reinforced` is derived, not reported.** ESI calls a reinforced den `Paused`,
+  the same word it uses for an idle one; only a reinforcement timer separates
+  them, and only while that timer is still ahead — a passed timer served from
+  cache would otherwise leave a den flagged long after it came back out.
+- **Expiry beats stored state for operations.** An offer that lapsed between
+  sweeps still reads `Available` in the table, so `operationStatus` checks the
+  clock; showing dead work as actionable is worse than showing none.
+- **Meters read `L2 · 45%`.** Level and cumulative amount together, because
+  either alone misleads — the level is what has effect in game, the amount is
+  how close the next one is. `Level0` is a real reading and renders as `L0`;
+  ESI's `Unspecified` and a den whose detail never landed both render "—".
+- **Operations nest under their den** as sub-rows, expanded per den, rather than
+  in a second table the reader would have to join by eye.
+- **Coverage notices** name characters missing either scope (both were added
+  after existing tokens were issued, so each needs one re-authorize) or with an expired
+  login. Unlike the Mining page, `pending` *is* a gap here: a character that has
+  never been swept may hold five dens, and that looks identical to holding none
+  until the first listing lands — which is what `mercenary_den_sync` records.
+- **Read-only.** MCO reports what a den is doing; ESI offers no route to start an
+  operation, and the game is where you run one.
+
+## Activity indicator (`components/ActivityIndicator.tsx`)
+
+A small progress readout (about a twentieth of the window's width) pinned to the
+bottom-right corner while a long job runs, on whatever page is open: a static-data
+import (`sde:progress`) or a multi-character sync — "Sync all", the hourly sweep, the
+tray's "Run sync now" — which reports `{ done, total }` on `characters:syncProgress`
+after each wave. It shows a bar and a percentage, with the full sentence as its
+tooltip, and renders nothing while idle. The mapping from events to a percentage is
+`lib/activityProgress.ts` (pure, unit-tested); the import's phases are laid out in the
+order the zip actually delivers them and sized by measured running time, with
+`typeDogma.yaml` taking most of the bar because it is most of the import.
+
+## Quick search and keyboard access (`components/CommandPalette.tsx`)
+
+**Ctrl+K** (⌘K on macOS), or the Search button at the top of the sidebar, opens a
+palette that jumps straight to any page, character, group, fit or skill plan, and
+offers "Sync all characters" as a command. Type to filter, ↑/↓ to move, Enter to open,
+Esc to close. An empty query lists only pages and the command, since 90+ characters
+would bury them. Ranking is in `lib/commandPalette.ts` (pure, unit-tested): a name
+prefix beats a word-start match beats a substring beats an in-order subsequence
+("vnt" still finds Venture), shorter names win close calls, and the dimmed detail line
+— a character's account, a fit's hull, a group's size — matches at half weight, so an
+account label lists its characters. The palette is mounted only while open, so its
+lists (roster, fits, plans, groups) load fresh each time and cost nothing otherwise.
+
+Other shortcuts, set in `App.tsx`:
+
+- **/** (outside a text field) or **Ctrl+F** focuses the current page's search box.
+- Sortable column headers (`components/SortHeader.tsx`) hold a real `<button>`, so Tab
+  reaches them and Enter or Space sorts; `aria-sort` stays on the `<th>`.
 
 ## Notifications
 
@@ -839,7 +959,7 @@ A further kind (extraction ready, plan complete) is a pure rule module beside
 ## Settings (`/settings`, `pages/Settings.tsx`)
 
 Opened via the gear button at the bottom of the sidebar (next to the notification
-bell). Seven sections:
+bell). Eight sections, plus the ESI activity panel:
 
 - **Sync status** (`services/settingsService.ts` → `buildSyncStatus()`): a
   collapsible section (state persisted in `localStorage`) whose header shows
@@ -852,6 +972,19 @@ bell). Seven sections:
   still fresh), `due` (cache lapsed — routine, the next sweep picks it up),
   `never-synced`, or `login-expired` (alarming, chip in red). Rows also flag tokens
   missing scopes from the current `ESI_SCOPES` set.
+  - **Re-authorize queue.** Above the table, when any character has an expired login or
+    a missing scope: a count and a "Re-authorize all N" button (each such row also has
+    its own). The run steps through them — expired logins first, then by name
+    (`lib/reauthQueue.ts`, pure, unit-tested) — opening one SSO page after another and
+    naming the character it is waiting for. **Skip** moves to the next; **Stop** ends
+    the run. The user picks the character on CCP's page, so a sign-in can come back for
+    someone else: that sign-in is kept (and that character leaves the queue if it was
+    in it), a note says who it was, and the character asked for stays up for another
+    go. Each step is `characters.reauthorize(id)` → `services/loginService.ts`, which
+    asks again for any opt-in scope the character holds, so repairing an alt corp's
+    blueprint reader does not strip its corporation scope. This is what the
+    "re-authorize it in Settings" wording on the Clones, Mining, Mercenary Dens,
+    Blueprints and character pages points at.
 - **Background sync** (`services/backgroundMode.ts`): keeps the hourly sweep running
   with the window closed, without relaunching as `MCO.exe --background`. A checkbox
   ("Keep syncing in the tray when I close the window", persisted in `app_settings`, so
@@ -859,6 +992,13 @@ bell). Seven sections:
   which raises the tray and closes the window immediately. Disabled when the process
   was launched with `--background` — that one always lives in the tray. See
   [architecture.md](architecture.md#launch-modes--lifecycle-srcmainindexts).
+- **Notifications**: one switch per notification kind (`shared/notifications.ts` lists
+  them with their labels). Stored in `app_settings` as `notify:<kind>`, default on, and
+  applied in `deliverNotifications` before the insert — a kind that is off raises
+  neither a toast nor a bell row. Its occurrences go unrecorded while it is off, so
+  one that is still current when it is switched back on is raised then. A kind raised
+  in code but missing from the list still delivers and simply has no switch;
+  `tests/unit/notificationKinds.test.ts` fails when that happens.
 - **Appearance**: theme picker. Themes are CSS custom-property override blocks in
   `styles.css` keyed off `data-theme` on `<html>` (`dark` default, `holo` — a sci-fi
   cyan HUD look with theme-scoped glow rules, `light`, `void`, `amber`). Definitions
@@ -881,16 +1021,40 @@ bell). Seven sections:
   `CharacterContextMenu` names, group/tag/fit/plan names stay real (user-defined,
   the thing being demoed). Portraits render as deterministic colored blocks
   (`components/CharacterAvatar.tsx`).
+- **ESI activity** (`components/EsiActivityPanel.tsx`, between Demo mode and Logs):
+  the live request counters and recent noteworthy events — see
+  [esi.md](esi.md#esi-diagnostics-log-esiesilogts).
 - **Logs**: `main/log.ts` patches `console.log/warn/error` in the main process at
-  startup into a 5000-line ring buffer; "Export logs…" saves a diagnostics file
-  (version/runtime/platform/DB header + the session log) via a save dialog. If the
+  startup into a 5000-line ring buffer, and also appends every line to
+  `logs/mco.log` in the profile folder (`main/logFile.ts`: rotated to `mco.log.1` at
+  2 MB, so about 4 MB at most; written in one-second batches and flushed on quit and
+  on a crash). "Export logs…" saves a diagnostics file (version/runtime/platform/DB
+  header + the log file's contents, so earlier sessions are included; the in-memory
+  buffer is the fallback if the file cannot be written) via a save dialog. If the
   main process crashes there is no Settings page left to click, so `main/fatal.ts`
   writes that same diagnostics file itself — `mco-crash-<stamp>.txt` in the profile
   folder — and the dialog before exit names the path (see
   [architecture.md](architecture.md#crash-handling-srcmainfatalts)).
-- **Backup**: "Back up database…" writes a consistent snapshot via better-sqlite3's
-  online backup API (WAL-safe, app keeps running) to a user-chosen path; restore =
-  quit MCO and copy the file back over `mco.sqlite`. Refresh tokens are
+- **Backup**: MCO keeps its own snapshots in `backups/` in the profile folder
+  (`db/backupFiles.ts` for the file rules, `services/backupService.ts`):
+  - **weekly** (`mco-auto-<stamp>.sqlite`) — taken by the scheduler sweep when the
+    newest is a week old, via better-sqlite3's online backup; the last 5 are kept;
+  - **before a migration** (`mco-pre-v<N>-<stamp>.sqlite`) — taken in `db/index.ts`
+    with `VACUUM INTO` when an existing profile has migrations pending, before the
+    first one runs; the last 3 are kept. Best-effort: a snapshot that cannot be
+    written is logged and the migration proceeds;
+  - **before a restore** (`mco-before-restore.sqlite`) — the database a restore
+    replaced, so a restore can be undone.
+
+  Settings lists them with a **Restore…** button. A restore is never done in place:
+  it validates the snapshot (readable, schema not newer than this build), writes
+  `restore-pending.json`, and restarts MCO; `applyPendingRestore` swaps the file in
+  at startup before the database is opened. A restore that fails leaves the current
+  database untouched and says so in a dialog. Each snapshot is a full copy of the
+  database, SDE tables included, so the folder can reach a few hundred MB.
+
+  "Back up database…" still writes a snapshot via the online backup API to a
+  user-chosen path; using one of those = quit MCO and copy the file over `mco.sqlite`. Refresh tokens are
   `safeStorage`-encrypted per OS user, so a backup restored on a different
   machine/user keeps all data but characters must be re-added. "Open data folder"
   opens the profile directory.

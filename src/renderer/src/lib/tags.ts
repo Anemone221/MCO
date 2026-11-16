@@ -34,7 +34,10 @@ export function tagsForCharacter(tags: Tag[], characterId: number): Tag[] {
  * For each tag, how many of the given characters already hold it — powers the
  * "n/total" / "all" hints on the bulk section-tag control. Keyed by tag id.
  */
-export function sectionTagCoverage(tags: Tag[], characterIds: number[]): Map<number, number> {
+export function sectionTagCoverage(
+  tags: ReadonlyArray<{ id: number; characterIds: number[] }>,
+  characterIds: number[],
+): Map<number, number> {
   const inSection = new Set(characterIds);
   const coverage = new Map<number, number>();
   for (const tag of tags) {

@@ -70,6 +70,14 @@ function touchCloneMeta(characterId: number): void {
     .run(characterId);
 }
 
+/** Active-clone implant type ids for one character, as last synced (empty when none or never synced). */
+export function getActiveImplants(characterId: number): number[] {
+  const rows = getDb()
+    .prepare('SELECT implant_type_id FROM character_implants WHERE character_id = ?')
+    .all(characterId) as Array<{ implant_type_id: number }>;
+  return rows.map((r) => r.implant_type_id);
+}
+
 /** Active-clone implant type ids for every character. */
 export function getAllActiveImplants(): Map<number, number[]> {
   const rows = getDb()

@@ -17,8 +17,11 @@ import {
   resolveTypeIdsByName,
 } from '../db/repositories/sde';
 import { listCharacters } from '../db/repositories/characters';
-import { getCharacterSkillMap } from '../db/repositories/skills';
-import { getNeuralAttributes, getSkillTrainingAttributes } from './trainingData';
+import {
+  getEffectiveSkillMap,
+  getNeuralAttributes,
+  getSkillTrainingAttributes,
+} from './trainingData';
 
 /** Parse an EFT fit, resolve its hull, and persist it. */
 export function importFit(eftText: string): Fit {
@@ -124,7 +127,7 @@ export function analyzeFitById(fitId: number): FitAnalysis {
   const characters: AnalysisCharacter[] = listCharacters().map((c) => ({
     characterId: c.id,
     characterName: c.name,
-    skills: getCharacterSkillMap(c.id),
+    skills: getEffectiveSkillMap(c.id),
     attributes: getNeuralAttributes(c.id),
   }));
 
@@ -172,7 +175,7 @@ export function fitObjectiveStatus(
     ...characterIds.map((id) => ({
       characterId: id,
       characterName: '',
-      skills: getCharacterSkillMap(id),
+      skills: getEffectiveSkillMap(id),
       attributes: getNeuralAttributes(id),
     })),
   ];

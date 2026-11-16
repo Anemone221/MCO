@@ -1,6 +1,6 @@
 {
   "name": "mco",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Massive Character Organization tool for EVE Online",
   "main": "out/main/index.js",
   "author": "Anemone221 <anemone221@gmail.com>",
@@ -9,7 +9,9 @@
     "node": ">=20.19"
   },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev -- --db=dev",
+    "dev:copy": "electron-vite dev -- --db=dev --copy-prod",
+    "dev:prod": "electron-vite dev -- --db=prod",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
@@ -21,6 +23,7 @@
     "format": "prettier --write .",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
+    "test:db": "node scripts/test-db.mjs",
     "test:e2e": "electron-vite build && playwright test",
     "test:packaged": "npm run dist:dir && playwright test --config=playwright.packaged.config.ts",
     "dist": "electron-vite build && electron-builder",

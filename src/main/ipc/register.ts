@@ -29,7 +29,7 @@ import { registerUniverseChannels } from './channels/universe';
  * native dialog, so the signature says which domains reach the window at all.
  */
 export function registerIpc(getWindow: () => BrowserWindow | null): void {
-  registerCharacterChannels();
+  registerCharacterChannels(getWindow);
   registerAccountChannels();
   registerGroupChannels();
   registerTagChannels();

@@ -1,6 +1,6 @@
 import type { CharacterSummary, MiningCoverageEntry, MiningSummary } from '@shared/types';
 import { SCOPE_READ_MINING } from '../config';
-import { grantedScopes } from '../auth/token-store';
+import { grantedScopesByCharacter } from '../auth/token-store';
 import { classifyEsiDataStatus, missingScopes } from '../auth/scopeStatus';
 import { listAccounts } from '../db/repositories/accounts';
 import { listCharacters } from '../db/repositories/characters';
@@ -70,9 +70,10 @@ export function buildMiningSummary(days: number | null): MiningSummary {
  */
 function miningCoverage(characters: CharacterSummary[]): MiningCoverageEntry[] {
   const invalidTokens = getInvalidTokenIds();
+  const scopes = grantedScopesByCharacter();
   const gaps: MiningCoverageEntry[] = [];
   for (const character of characters) {
-    const missing = missingScopes(grantedScopes(character.id), [SCOPE_READ_MINING]);
+    const missing = missingScopes(scopes.get(character.id) ?? [], [SCOPE_READ_MINING]);
     const status = classifyEsiDataStatus({
       tokenInvalid: invalidTokens.has(character.id),
       missingScopes: missing,

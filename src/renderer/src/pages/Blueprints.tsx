@@ -23,6 +23,7 @@ import {
   type BlueprintSortKey,
   type OwnershipFilter,
 } from '../lib/blueprintView';
+import SortHeader from '../components/SortHeader';
 
 const EMPTY_BOARD: BlueprintBoard = {
   needsBlueprintData: false,
@@ -320,8 +321,8 @@ export default function Blueprints() {
                           <Link to={`/character/${c.characterId}`}>{c.characterName}</Link>
                           <span className="muted">
                             {c.status === 'login-expired'
-                              ? 'login expired — re-add'
-                              : 'blueprint scope missing — re-add'}
+                              ? 'login expired — re-authorize in Settings'
+                              : 'blueprint scope missing — re-authorize in Settings'}
                           </span>
                         </span>
                       </li>
@@ -394,23 +395,14 @@ export default function Blueprints() {
               <thead>
                 <tr>
                   {COLUMNS.map((col) => (
-                    <th
+                    <SortHeader
                       key={col.key}
-                      className={col.numeric ? 'sortable num' : 'sortable'}
-                      aria-sort={
-                        sort.key === col.key
-                          ? sort.dir === 'asc'
-                            ? 'ascending'
-                            : 'descending'
-                          : undefined
-                      }
-                      onClick={() => toggleSort(col.key)}
-                    >
-                      {col.label}
-                      {sort.key === col.key && (
-                        <span className="sort-arrow">{sort.dir === 'asc' ? '▲' : '▼'}</span>
-                      )}
-                    </th>
+                      label={col.label}
+                      active={sort.key === col.key}
+                      dir={sort.dir}
+                      numeric={col.numeric}
+                      onSort={() => toggleSort(col.key)}
+                    />
                   ))}
                 </tr>
               </thead>

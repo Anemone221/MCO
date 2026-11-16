@@ -88,6 +88,18 @@ export function assignAccount(characterId: number, accountId: number | null): vo
     .run(accountId, characterId);
 }
 
+/**
+ * Move many characters into one account (or out of any, with null) in a single
+ * transaction — the Roster's bulk assignment. Either every row moves or none.
+ */
+export function assignAccountToCharacters(characterIds: number[], accountId: number | null): void {
+  const db = getDb();
+  const stmt = db.prepare('UPDATE characters SET account_id = ? WHERE id = ?');
+  db.transaction((ids: number[]) => {
+    for (const characterId of ids) stmt.run(accountId, characterId);
+  })(characterIds);
+}
+
 export function touchRefreshed(characterId: number): void {
   getDb()
     .prepare("UPDATE characters SET refreshed_at = datetime('now') WHERE id = ?")

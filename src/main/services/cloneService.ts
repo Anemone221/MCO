@@ -1,6 +1,6 @@
 import type { CloneBoardEntry, ImplantInfo, JumpCloneEntry } from '@shared/types';
 import { SCOPE_READ_CLONES, SCOPE_READ_IMPLANTS } from '../config';
-import { grantedScopes } from '../auth/token-store';
+import { grantedScopesByCharacter } from '../auth/token-store';
 import { classifyEsiDataStatus, missingScopes } from '../auth/scopeStatus';
 import { listCharacters } from '../db/repositories/characters';
 import { listAccounts } from '../db/repositories/accounts';
@@ -125,10 +125,11 @@ export async function buildCloneBoard(): Promise<CloneBoardEntry[]> {
   const CLONE_SCOPES = [SCOPE_READ_IMPLANTS, SCOPE_READ_CLONES];
   const syncLevels = getActiveSkillLevels(INFOMORPH_SYNCHRONIZING_TYPE_ID);
   const criticalSets = getAllCriticalImplantSets();
+  const scopes = grantedScopesByCharacter();
 
   return characters.map((character) => {
     const m = meta.get(character.id);
-    const missing = missingScopes(grantedScopes(character.id), CLONE_SCOPES);
+    const missing = missingScopes(scopes.get(character.id) ?? [], CLONE_SCOPES);
     const status = classifyEsiDataStatus({
       tokenInvalid: invalidTokens.has(character.id),
       missingScopes: missing,

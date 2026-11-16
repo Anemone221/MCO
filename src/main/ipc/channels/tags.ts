@@ -6,6 +6,7 @@ import {
   listTags,
   removeTag,
   removeTagFromCharacter,
+  removeTagFromCharacters,
   renameTag,
   setTagColor,
 } from '../../db/repositories/tags';
@@ -26,6 +27,9 @@ export function registerTagChannels(): void {
   );
   handle(IpcChannel.tagsAddMembers, (_event, tagId: number, characterIds: number[]) =>
     addTagToCharacters(tagId, characterIds),
+  );
+  handle(IpcChannel.tagsRemoveMembers, (_event, tagId: number, characterIds: number[]) =>
+    removeTagFromCharacters(tagId, characterIds),
   );
   handle(IpcChannel.tagsRemoveMember, (_event, tagId: number, characterId: number) =>
     removeTagFromCharacter(tagId, characterId),

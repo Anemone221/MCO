@@ -62,8 +62,18 @@ Notes:
   they are the map as a graph: gate jumps by breadth-first search, light years by
   straight-line distance (`main/map/routing.ts`). Positions are nullable — a profile
   imported before they existed reads as "unknown", not as the centre of New Eden.
-- Each table is fully replaced inside a transaction (`replace*` in
-  `db/repositories/sde.ts`) — re-importing is idempotent and how you upgrade.
+- **The import is all-or-nothing.** The zip is parsed first with nothing written; each
+  file's handler only queues its `replace*` call. Every queued write, plus the version
+  stamp, then runs inside one transaction (`inSdeTransaction` in
+  `db/repositories/sde.ts`; the individual `replace*` transactions become savepoints
+  inside it). A failure anywhere — corrupt zip, a file CCP reshaped, a full disk, the
+  app closed halfway — leaves the previous build exactly as it was. Re-importing is
+  idempotent and how you upgrade.
+- **The download cannot hang or leave a short file** (`sde/downloadFile.ts`): it gives
+  up after 60 s without a byte, compares the bytes received with `Content-Length`, and
+  writes to `sde.zip.part`, renaming only when complete.
+- On a fast link an import is about 25 s, nearly all of it parsing `typeDogma.yaml`
+  (~17 s); the final write is about 1 s. The importer logs both timings.
 - Progress stages surfaced to the renderer (`SdeProgress` in `shared/types.ts`):
   `downloading` (with byte counts) → `categories` → `groups` → `types` → `dogma` →
   `blueprints` → `maps` → `finalizing` → `done` | `error`.

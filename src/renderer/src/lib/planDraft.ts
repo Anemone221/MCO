@@ -110,6 +110,50 @@ export function addRequirements(
   return next;
 }
 
+/**
+ * The "Magic 14": the core skills that improve every ship a character flies —
+ * fitting, capacitor, tank, navigation and targeting. Held by name and matched
+ * against the catalogue, so a skill CCP renames shows up as missing rather than
+ * silently pointing at the wrong type id.
+ */
+export const MAGIC_14: readonly string[] = [
+  'CPU Management',
+  'Power Grid Management',
+  'Capacitor Management',
+  'Capacitor Systems Operation',
+  'Mechanics',
+  'Hull Upgrades',
+  'Shield Management',
+  'Shield Operation',
+  'Navigation',
+  'Evasive Maneuvering',
+  'Warp Drive Operation',
+  'Long Range Targeting',
+  'Signature Analysis',
+  'Spaceship Command',
+];
+
+/**
+ * Every Magic 14 skill to `level`, resolved against the catalogue. Names the
+ * catalogue doesn't know (no skill data, or a renamed skill) come back in
+ * `missing` instead of being dropped without a word.
+ */
+export function magic14Requirements(
+  skills: SkillMap,
+  level: number,
+): { requirements: DraftRequirement[]; missing: string[] } {
+  const byName = new Map<string, number>();
+  for (const skill of skills.values()) byName.set(skill.name.toLowerCase(), skill.skillTypeId);
+  const requirements: DraftRequirement[] = [];
+  const missing: string[] = [];
+  for (const name of MAGIC_14) {
+    const skillTypeId = byName.get(name.toLowerCase());
+    if (skillTypeId === undefined) missing.push(name);
+    else requirements.push({ skillTypeId, level });
+  }
+  return { requirements, missing };
+}
+
 /** Raise a skill one level (the browser's + button). */
 export function raiseSkill(
   entries: readonly PlanDraftEntry[],
@@ -232,6 +276,80 @@ export function dropEntry(
     if (entry === anchor) return withRemap(entry, undefined);
     return entry;
   });
+}
+
+/**
+ * Drop several rows at once — a multi-row selection — on a target. The rows
+ * move as one block, in the order they had, landing in front of the row now at
+ * `target.index`; a scattered selection is gathered together. Each row keeps
+ * its own remap point, as a single dragged row does, and a drop under a remap
+ * hands that remap to the block's first row unless it brings one of its own.
+ */
+export function dropEntries(
+  entries: readonly PlanDraftEntry[],
+  from: readonly number[],
+  target: DropTarget,
+): PlanDraftEntry[] {
+  const picked = new Set(from.filter((i) => i >= 0 && i < entries.length));
+  if (picked.size === 0) return [...entries];
+  if (picked.size === 1) return dropEntry(entries, [...picked][0]!, target);
+
+  const moving: PlanDraftEntry[] = [];
+  const rest: PlanDraftEntry[] = [];
+  let at = 0;
+  entries.forEach((entry, i) => {
+    if (picked.has(i)) {
+      moving.push(entry);
+    } else {
+      if (i < target.index) at += 1;
+      rest.push(entry);
+    }
+  });
+
+  const anchor = entries[target.index];
+  const takeRemap =
+    target.underRemap &&
+    anchor !== undefined &&
+    !picked.has(target.index) &&
+    anchor.remapBefore !== undefined &&
+    !moving[0]!.remapBefore;
+
+  const block = takeRemap
+    ? [{ ...moving[0]!, remapBefore: anchor.remapBefore }, ...moving.slice(1)]
+    : moving;
+  const placed = takeRemap
+    ? rest.map((entry) => (entry === anchor ? withRemap(entry, undefined) : entry))
+    : rest;
+  const next = [...placed.slice(0, at), ...block, ...placed.slice(at)];
+  // Nothing actually moved: hand back the same row objects so callers can tell.
+  return next.every((entry, i) => entry === entries[i]) ? [...entries] : next;
+}
+
+/**
+ * Shift a selection one step up (`-1`) or down (`1`) as a block: past the
+ * nearest unselected row on that side. A scattered selection is gathered
+ * together on the way. At the edge of the queue nothing changes.
+ */
+export function shiftEntries(
+  entries: readonly PlanDraftEntry[],
+  from: readonly number[],
+  direction: -1 | 1,
+): PlanDraftEntry[] {
+  const picked = new Set(from.filter((i) => i >= 0 && i < entries.length));
+  if (picked.size === 0) return [...entries];
+  const sorted = [...picked].sort((a, b) => a - b);
+  if (direction < 0) {
+    let above = sorted[0]! - 1;
+    while (above >= 0 && picked.has(above)) above -= 1;
+    if (above < 0) return dropEntries(entries, sorted, { index: 0, underRemap: false });
+    return dropEntries(entries, sorted, { index: above, underRemap: false });
+  }
+  let below = sorted[sorted.length - 1]! + 1;
+  while (below < entries.length && picked.has(below)) below += 1;
+  if (below >= entries.length) {
+    return dropEntries(entries, sorted, { index: entries.length, underRemap: false });
+  }
+  return dropEntries(entries, sorted, { index: below + 1, underRemap: false });
 }
 
 /**
