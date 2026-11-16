@@ -422,6 +422,12 @@ test('reorders the creator queue by dragging whole rows', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'mco-e2e-'));
   const app = await launchApp(userDataDir);
   const window = await app.firstWindow();
+  // Pin the layout size. The OS clamps the 1400×900 window to the screen, and
+  // on the CI runners' ~1024×768 screens the creator stacks its panels, which
+  // leaves the queue about three rows tall. The rows then sit inside the
+  // auto-scroll edge zone, the list scrolls under a pointer that isn't moving,
+  // and every drop lands one row off.
+  await window.setViewportSize({ width: 1400, height: 900 });
 
   await window.getByRole('link', { name: 'Skill Plans' }).click();
   await window.getByTestId('plan-name-input').fill('Drag Me');
